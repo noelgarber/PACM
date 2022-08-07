@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import math
 import os
+import pickle
 from PACM_General_Functions import FilenameSubdir, Log2fc, BaitPermuter, ListInputter
 
 print("----------------")
@@ -24,8 +25,9 @@ dens_df = pd.read_csv(dens_source_filename)
 
 #Write the bait list here; it will be permuted for various calculations
 
-more_baits = True
 list_of_baits = ListInputter("Please input the baits you want to analyze one at a time and hit enter when done.")
+with open("list_of_baits.ob", "wb") as lob:
+    pickle.dump(list_of_baits, lob)
 
 #Standardization
 
