@@ -103,3 +103,10 @@ def NumInput(message_string):
 		except: 
 			print("Error! Please try again.")
 	return value
+
+def NumberedList(length)
+	numbered_list = []
+	for i in range(1, length + 1): 
+		numbered_list.append("#" + str(i))
+	return numbered_list
+	#Makes a list of strings from "#1" to "#(length)"
