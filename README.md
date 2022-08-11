@@ -18,8 +18,15 @@ For example, if a SLiM has the sequence Leu1-Asp2-Ala3-Met4-Lys5, and we are loo
 will look up Ala3 in a SLiM matrix for when Position 2 is acidic (Asp2) and in another SLiM matrix for when Position 4 is hydrophobic (Met), 
 take the mean of those values, and assign that as the matrix value for Ala3. 
 
-The workflow is divided into six (6) parts as follows. 
+# How To Use
 
-Step1_Array_Analyzer.py - Accepts SPOT peptide array densitometric input values and assumes 2 replicates. 
-Step2_Pairwise_SLiM_Matrices_Generator.py - Generates a dictionary of neighbour-conditional weighted matrices from Step1 output. 
-[To be continued.]
+Ensure that Python 3 is installed (version 3.6 or higher). 
+
+Python scripts are run from Command Prompt (Windows) or Terminal (Mac and Linux) by typing "python3" or "python" and then the script name (.py file), followed by hitting enter. 
+
+1. [Required] Run Step1_Array_Analyzer.py and ensure your data is in the same folder, then follow the prompts to input your data file and apply standardization etc. 
+2. [Required] Run Step2_Pairwise_SLiM_Matrices_Generator.py to generate conditional position-weighted matrices for SLiM identification. 
+3. [Optional] Run Step3_Bait_Specificity_Matrix_Generator.py to generate a matrix predicting which bait will preferentially bind a particular motif. 
+4. [Optional] Run Step4_Pairwise_FFAT_Predictor.py to apply the SLiM prediction algorithm made in Step 2 to a list of protein sequences. 
+5. [Optional] Run Step5_Bait_Specificity_Predictor.py to apply the bait specificity prediction algorithm made in Step 3 to the list of protein sequences from Step 4. 
+6. [Optional] Run Step6_Topo_SLiM_Predictor.py to use UniProt for predicting the topological orientation/localization of motifs found in Steps 4 and 5. 
