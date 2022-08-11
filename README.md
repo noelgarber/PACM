@@ -1,4 +1,8 @@
 # PACM
+By Noel Garber
+PhD Candidate, University of Toronto
+noel.garber@sickkids.ca
+
 Peptide Array-based Conditional position-weighted Matrices
 
 This is a pipeline for analyzing SPOT peptide array in vitro binding data for defining short linear motifs (SLiMs). 
