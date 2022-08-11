@@ -17,4 +17,5 @@ take the mean of those values, and assign that as the matrix value for Ala3.
 The workflow is divided into six (6) parts as follows. 
 
 Step1_Array_Analyzer.py - Accepts SPOT peptide array densitometric input values and assumes 2 replicates. 
+Step2_Pairwise_SLiM_Matrices_Generator.py - Generates a dictionary of neighbour-conditional weighted matrices from Step1 output. 
 [To be continued.]
