@@ -41,8 +41,8 @@ def MoveCol(df, cols_to_move=[], ref_col='', place="After"):
 
 	return(df[seg1 + seg2 + seg3])
 
-def CharacAA(amino_acid): 
-	for charac, mem_list in aa_charac_dict.items(): 
+def CharacAA(amino_acid, dict_of_aa_characs = aa_charac_dict): 
+	for charac, mem_list in dict_of_aa_characs.items(): 
 		if amino_acid in mem_list: 
 			charac_result = charac
 	return charac_result
@@ -93,15 +93,25 @@ def ListInputter(prompt):
 			lst.append(next_entry)
 	return lst
 
-def NumInput(message_string):
-	float_inputted = False
-	while not float_inputted: 
-		try: 
-			value = input(message_string + "  ")
-			value = float(value)
-			float_inputted = True
-		except: 
-			print("Error! Please try again.")
+def NumInput(message_string, use_int = False):
+	if use_int: 
+		int_inputted = False
+		while not int_inputted: 
+			try: 
+				value = input(message_string + "  ")
+				value = int(value)
+				int_inputted = True
+			except: 
+				print("Not an integer! Please try again.")
+	else: 
+		float_inputted = False
+		while not float_inputted: 
+			try: 
+				value = input(message_string + "  ")
+				value = float(value)
+				float_inputted = True
+			except: 
+				print("Not a number! Please try again.")
 	return value
 
 def NumberedList(length)
@@ -110,3 +120,43 @@ def NumberedList(length)
 		numbered_list.append("#" + str(i))
 	return numbered_list
 	#Makes a list of strings from "#1" to "#(length)"
+
+#Define functions to compute sensitivity, specificity, PPV, NPV
+
+def XDivYZ(X, Y, Z, inf_value = 999): 
+	try: 
+		value = X / (Y + Z)
+	except: 
+		value = inf_value
+	return value
+
+def PredVal(score_threshold, dataframe): 
+	pred_val_dict = {
+		"TP": 0,
+		"FP": 0,
+		"TN": 0,
+		"FN": 0,
+	}
+	for i in np.arange(len(dataframe)): 
+		sig_truth = dataframe.at[i, "Significant"]
+		score = dataframe.at[i, "FFAT_Score"]
+		if score >= score_threshold: 
+			score_over_n = "Yes"
+		else: 
+			score_over_n = "No"
+
+		if score_over_n == "Yes" and sig_truth == "Yes": 
+			pred_val_dict["TP"] = pred_val_dict["TP"] + 1
+		elif score_over_n == "Yes" and sig_truth == "No": 
+			pred_val_dict["FP"] = pred_val_dict["FP"] + 1
+		elif score_over_n != "Yes" and sig_truth == "Yes": 
+			pred_val_dict["FN"] = pred_val_dict["FN"] + 1
+		elif score_over_n != "Yes" and sig_truth == "No": 
+			pred_val_dict["TN"] = pred_val_dict["TN"] + 1
+
+	pred_val_dict["Sensitivity"] = round(XDivYZ(pred_val_dict.get("TP"), pred_val_dict.get("TP"), pred_val_dict.get("FN")), 3)
+	pred_val_dict["Specificity"] = round(XDivYZ(pred_val_dict.get("TN"), pred_val_dict.get("TN"), pred_val_dict.get("FP")), 3)
+	pred_val_dict["PPV"] = round(XDivYZ(pred_val_dict.get("TP"), pred_val_dict.get("TP"), pred_val_dict.get("FP")), 3)
+	pred_val_dict["NPV"] = round(XDivYZ(pred_val_dict.get("TN"), pred_val_dict.get("TN"), pred_val_dict.get("FN")), 3)
+
+	return pred_val_dict
