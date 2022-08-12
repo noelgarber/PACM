@@ -10,7 +10,7 @@ import pandas as pd
 import math
 import os
 import pickle
-from PACM_General_Functions import FilenameSubdir, Log2fc, BaitPermuter, ListInputter
+from PACM_General_Functions import FilenameSubdir, Log2fc, BaitPermuter, ListInputter, NumInput
 
 print("----------------")
 print("Script 1:")
@@ -189,7 +189,7 @@ dens_analyzed_df = pd.concat([dens_log2fc_logical_df, max_df], axis = 1)
 
 significance_df = pd.DataFrame(index = np.arange(len(dens_analyzed_df)), columns = ["Significant"])
 
-if call_method = "Y":
+if call_method == "Y":
 	for i, row in dens_analyzed_df.iterrows(): 
 		significant = "NaN"
 		list_passes = [dens_analyzed_df.at[i, "One_Passes_Manual"], dens_analyzed_df.at[i, "One_Passes_Auto"]]
