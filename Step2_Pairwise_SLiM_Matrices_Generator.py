@@ -20,7 +20,7 @@ print("----------------")
 dens_final_df = pd.read_csv(FilenameSubdir("Output", "Densitometry_Analyzed_Results.csv"), index_col = 0)
 
 with open("list_of_baits.ob", "rb") as lob:
-    list_of_baits = pickle.load(lob)
+	list_of_baits = pickle.load(lob)
 
 print("The list of baits to use for matrix generation was unpickled from Step1_Array_Analyzer results as:  list_of_baits =", list_of_baits)
 
