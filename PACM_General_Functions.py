@@ -114,7 +114,7 @@ def NumInput(message_string, use_int = False):
 				print("Not a number! Please try again.")
 	return value
 
-def NumberedList(length)
+def NumberedList(length):
 	numbered_list = []
 	for i in range(1, length + 1): 
 		numbered_list.append("#" + str(i))
