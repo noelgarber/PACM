@@ -1,5 +1,6 @@
 #This script contains general functions and methods used in other scripts in this tool. 
 
+import numpy as np
 import os
 import math
 import requests
@@ -116,7 +117,7 @@ def NumInput(message_string, use_int = False):
 
 def NumberedList(length):
 	numbered_list = []
-	for i in range(1, length + 1): 
+	for i in range(1, int(length) + 1): 
 		numbered_list.append("#" + str(i))
 	return numbered_list
 	#Makes a list of strings from "#1" to "#(length)"
@@ -130,7 +131,7 @@ def XDivYZ(X, Y, Z, inf_value = 999):
 		value = inf_value
 	return value
 
-def PredVal(score_threshold, dataframe): 
+def PredVal(score_threshold, dataframe, significance_col = "Significant", score_col = "SLiM_Score"): 
 	pred_val_dict = {
 		"TP": 0,
 		"FP": 0,
@@ -138,8 +139,8 @@ def PredVal(score_threshold, dataframe):
 		"FN": 0,
 	}
 	for i in np.arange(len(dataframe)): 
-		sig_truth = dataframe.at[i, "Significant"]
-		score = dataframe.at[i, "FFAT_Score"]
+		sig_truth = dataframe.at[i, significance_col]
+		score = dataframe.at[i, score_col]
 		if score >= score_threshold: 
 			score_over_n = "Yes"
 		else: 

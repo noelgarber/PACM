@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import math
 import os
+import pickle
 from PACM_General_Functions import FilenameSubdir, ListInputter, NumberedList, NumInput, CharacAA, XDivYZ, PredVal
 from PACM_General_Vars import list_aa, list_aa_no_phos, aa_charac_dict 
 	#list_aa: list of amino acids including B=pS, J=pT, and O=pY
@@ -44,7 +45,8 @@ print("----------------")
 
 #DEFINE GENERALIZED MATRIX FUNCTION
 
-def WeightedMatrix(bait, motif_length, source_dataframe, amino_acid_list, extreme_thres, high_thres, mid_thres, points_for_extreme, points_for_high, points_for_mid, points_for_low, position_for_filtering = None, residues_included_at_filter_position = ["D", "E", "R", "H", "K", "S", "T", "N", "Q", "C", "G", "P", "A", "V", "I", "L", "M", "F", "Y", "W", "B", "J", "O"]): 
+def WeightedMatrix(bait, motif_length, source_dataframe, min_members, amino_acid_list, extreme_thres, high_thres, mid_thres, 
+	points_for_extreme, points_for_high, points_for_mid, points_for_low, position_for_filtering = None, residues_included_at_filter_position = ["D", "E", "R", "H", "K", "S", "T", "N", "Q", "C", "G", "P", "A", "V", "I", "L", "M", "F", "Y", "W", "B", "J", "O"]): 
 
 	list_pos = NumberedList(motif_length)
 
@@ -63,7 +65,7 @@ def WeightedMatrix(bait, motif_length, source_dataframe, amino_acid_list, extrem
 		seq = list(seq) #converts to aa list
 		if seq[position_for_filtering - 1] in residues_included_at_filter_position: 
 			num_qualifying_entries += 1
-	if num_qualifying_entries < minimum_members: 
+	if num_qualifying_entries < min_members: 
 		residues_included_at_filter_position = amino_acid_list
 
 	#Calculate the points and assign to the matrix.
@@ -116,7 +118,7 @@ def WeightedMatrix(bait, motif_length, source_dataframe, amino_acid_list, extrem
 
 #Begin position-aware analysis
 
-slim_length = NumInput("Enter the length of your SLiM of interest (e.g. 15):") #This is the length of the motif being analyzed
+slim_length = NumInput("Enter the length of your SLiM of interest (e.g. 15):", use_int = True) #This is the length of the motif being analyzed
 print("----------------")
 
 #Set the thresholds for the point assignment system
@@ -127,16 +129,16 @@ print("    --> Use more points for HIGH signal hits to produce a model that corr
 print("    --> Use more points for LOW signal hits to produce a model that is better at finding weak positives.")
 print("We suggest the 90th, 80th, and 70th percentiles as thresholds, but this may vary depending on the number of hits expected.")
 
-thres_extreme_str = NumInput("Please enter the upper threshold (1 of 3):")
-points_extreme_str = NumInput("How many points for values greater than " + thres_extreme_str + "? Input:")
+thres_extreme = NumInput("Please enter the upper threshold (1 of 3):")
+points_extreme = NumInput("How many points for values greater than " + str(thres_extreme) + "? Input:")
 
-thres_high_str = NumInput("Please enter the upper-middle threshold (2 of 3):")
-points_high_str = NumInput("How many points for values greater than " + thres_high_str + "? Input:")
+thres_high = NumInput("Please enter the upper-middle threshold (2 of 3):")
+points_high = NumInput("How many points for values greater than " + str(thres_high) + "? Input:")
 
-thres_mid_str = NumInput("Please enter the lower-middle threshold (3 of 3):")
-points_mid_str = NumInput("How many points for values greater than " + thres_mid_str + "? Input:")
+thres_mid = NumInput("Please enter the lower-middle threshold (3 of 3):")
+points_mid = NumInput("How many points for values greater than " + str(thres_mid) + "? Input:")
 
-points_low_str = NumInput("Some hits are marked significant but fall below the threshold. How many points for these lower hits? Input:")
+points_low = NumInput("Some hits are marked significant but fall below the threshold. How many points for these lower hits? Input:")
 
 print("----------------")
 
@@ -156,10 +158,10 @@ print("----------------")
 
 dictionary_of_matrices = {}
 
-for col_num in np.arange(1, slim_length + 1): 
+for col_num in range(1, slim_length + 1): 
 	for charac, mem_list in aa_charac_dict.items(): 
 
-		weighted_matrix_containing_charac = WeightedMatrix("Significant", slim_length, dens_final_df, list_aa, thres_extreme, thres_high, thres_mid, points_extreme, points_high, points_mid, points_low, position_for_filtering = col_num, residues_included_at_filter_position = mem_list)
+		weighted_matrix_containing_charac = WeightedMatrix("Significant", slim_length, dens_final_df, minimum_members, list_aa, thres_extreme, thres_high, thres_mid, points_extreme, points_high, points_mid, points_low, position_for_filtering = col_num, residues_included_at_filter_position = mem_list)
 		
 		for n in np.arange(1, slim_length + 1): 
 			col_name = "#" + str(n)
@@ -217,11 +219,13 @@ print("Creating a dictionary of position weights.")
 print("Enter numerical weights for each position based on their expected structural importance. If unknown, use 1.")
 pos_weights = {}
 for position in positions: 
-	pos_weights[1] = NumInput("Enter weight for position", str(position) + ":")
+	pos_weights[position] = NumInput("Enter weight for position " + str(position) + ":")
+print("Inputted dict:")
+print(pos_weights)
 
 print("-------------------")
 
-print("Construct dictionary of weighted matrices and save the dataframes by key name:")
+print("Constructing dictionary of weighted matrices and save the dataframes by key name.")
 
 dictionary_of_weighted_matrices = {}
 
@@ -232,14 +236,10 @@ for key, df in dictionary_of_matrices.items():
 		for aa in list_aa_no_phos:
 			df.at[aa, position] = df.at[aa, position] * position_weight
 	dictionary_of_weighted_matrices[key] = df
-	print(key)
-	print(df)
 	df.to_csv(FilenameSubdir("dictionary_of_weighted_matrices", key + ".csv"))
-	print("Saved!")
-	print("-------")
 
 
-print("Done!")
+print("Done! Saved", str(len(dictionary_of_weighted_matrices)), "to /dictionary_of_weighted_matrices")
 
 #--------------------------------------------------------------------------
 
