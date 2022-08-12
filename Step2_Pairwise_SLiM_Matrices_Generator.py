@@ -10,7 +10,7 @@ import pickle
 from PACM_General_Functions import FilenameSubdir, ListInputter, NumberedList, NumInput, CharacAA, XDivYZ, PredVal
 from PACM_General_Vars import list_aa, list_aa_no_phos, aa_charac_dict 
 	#list_aa: list of amino acids including B=pS, J=pT, and O=pY
-	#list_aa: list of only unmodified amino acids (20)
+	#list_aa_no_phos: list of only unmodified amino acids (20)
 	#aa_charac_dict: dictionary of chemical characteristics of 20 amino acids
 
 print("----------------")
