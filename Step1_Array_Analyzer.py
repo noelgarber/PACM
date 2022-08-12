@@ -27,7 +27,7 @@ dens_df = pd.read_csv(dens_source_filename)
 
 list_of_baits = ListInputter("Please input the baits you want to analyze one at a time and hit enter when done.")
 with open("list_of_baits.ob", "wb") as lob:
-    pickle.dump(list_of_baits, lob)
+	pickle.dump(list_of_baits, lob)
 
 #Standardization
 
@@ -159,13 +159,12 @@ else:
 
 #Calculation of max bait
 
-max_df = pd.DataFrame(index = np.arange(len(dens_log2fc_logical_df)), columns = ["Max_Bait_Mean", "Max_Bait_div_Control"])
+max_df = pd.DataFrame(index = np.arange(len(dens_log2fc_logical_df)), columns = ["Max_Bait_Mean", "Max_Bait_Controlled", "Max_Bait_div_Control"])
 
 for i, row in dens_log2fc_logical_df.iterrows(): 
 	mean_controls = (dens_log2fc_logical_df.loc[i, "Control_1"] + dens_log2fc_logical_df.loc[i, "Control_2"]) / 2
 
 	max_bait_uncontrolled = 0
-	max_bait = 0
 
 	for bait in list_of_baits: 
 		current_bait_uncontrolled = (dens_log2fc_logical_df.loc[i, bait + "_1"] + dens_log2fc_logical_df.loc[i, bait + "_2"]) / 2
@@ -176,7 +175,10 @@ for i, row in dens_log2fc_logical_df.iterrows():
 			elif mean_controls == 0 and max_bait_uncontrolled > 0: 
 				max_bait_fold = "Inf"
 
+	max_bait_controlled = max_bait_uncontrolled - (control_multiplier * mean_controls)
+
 	max_df.at[i, "Max_Bait_Mean"] = max_bait_uncontrolled
+	max_df.at[i, "Max_Bait_Controlled"] = max_bait_controlled
 	max_df.at[i, "Max_Bait_div_Control"] = max_bait_fold
 
 dens_analyzed_df = pd.concat([dens_log2fc_logical_df, max_df], axis = 1)
