@@ -123,21 +123,36 @@ print("----------------")
 
 #Set the thresholds for the point assignment system
 
+with open("percentiles_dict.ob", "rb") as f:
+	percentiles_dict = pickle.load(f)
+
 print("Setting thresholds for scoring.")
 print("Guidance:")
 print("    --> Use more points for HIGH signal hits to produce a model that correlates strongly with signal intensity.")
 print("    --> Use more points for LOW signal hits to produce a model that is better at finding weak positives.")
 print("We suggest the 90th, 80th, and 70th percentiles as thresholds, but this may vary depending on the number of hits expected.")
 
-thres_extreme = NumInput("Please enter the upper threshold (1 of 3):")
+print("---")
+
+use_percentiles = input("Would you like to use percentiles? If not, manually inputted numbers will be used. (Y/N)  ")
+
+if use_percentiles == "Y": 
+	thres_extreme = NumInput("Enter the upper percentile threshold (1 of 3):")
+	thres_extreme = percentiles_dict.get(thres_extreme)
+	thres_high = NumInput("Enter the upper-middle percentile threshold (2 of 3):")
+	thres_high = percentiles_dict.get(thres_high)
+	thres_mid = NumInput("Enter the lower-middle percentile threshold (3 of 3):")
+	thres_mid = percentiles_dict.get(thres_mid)
+else: 
+	thres_extreme = NumInput("Enter the upper threshold as a value (1 of 3):")
+	thres_high = NumInput("Enter the upper-middle threshold as a value (2 of 3):")
+	thres_mid = NumInput("Enter the lower-middle threshold as a value (3 of 3):")
+
+#Set number of points
+
 points_extreme = NumInput("How many points for values greater than " + str(thres_extreme) + "? Input:")
-
-thres_high = NumInput("Please enter the upper-middle threshold (2 of 3):")
 points_high = NumInput("How many points for values greater than " + str(thres_high) + "? Input:")
-
-thres_mid = NumInput("Please enter the lower-middle threshold (3 of 3):")
 points_mid = NumInput("How many points for values greater than " + str(thres_mid) + "? Input:")
-
 points_low = NumInput("Some hits are marked significant but fall below the threshold. How many points for these lower hits? Input:")
 
 print("----------------")
@@ -341,6 +356,9 @@ print("Applied hit calls based on threshold.")
 
 dest_filename = "Position_Aware_SLiM_Scored_Dens_DF" + "_Thres" + str(selected_threshold) + ".csv"
 dens_final_scored_df.to_csv(FilenameSubdir("Output", dest_filename))
+
+with open("Step2_Results_Filename.ob", "wb") as f:
+	pickle.dump(dest_filename, f)
 
 print("Saved! Filename:", dest_filename)
 print("-------------------")

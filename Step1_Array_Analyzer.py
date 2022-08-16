@@ -203,6 +203,32 @@ if call_method == "Y":
 
 dens_final_df = pd.concat([dens_analyzed_df, significance_df], axis = 1)
 
+
+#--------------------------------------------------------------------------
+
+#Calculate the 70th, 80th, and 90th percentiles
+
+controlled_values_list = []
+for i in np.arange(len(dens_final_df)): 
+	for bait in list_of_baits: 
+		val1 = dens_final_df.at[i, bait + "_1"] - (control_multiplier * dens_final_df.at[i, "Control_1"])
+		val2 = dens_final_df.at[i, bait + "_2"] - (control_multiplier * dens_final_df.at[i, "Control_2"])
+		if val1 < 0: 
+			val1 = 0
+		if val2 < 0: 
+			val2 = 0
+		controlled_values_list.append(val1)
+		controlled_values_list.append(val2)
+
+percentiles_dict = {}
+for i in np.arange(1, 100):
+	percentiles_dict[i] = np.percentile(controlled_values_list, i)
+
+with open("percentiles_dict.ob", "wb") as f:
+	pickle.dump(percentiles_dict, f)
+
+#--------------------------------------------------------------------------
+
 #Save to output folder
 
 dens_final_df.to_csv(FilenameSubdir("Output", "Densitometry_Analyzed_Results.csv"))
