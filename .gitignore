@@ -11,3 +11,6 @@ Step2_Results_Filename.ob
 
 #Ignore example data used for testing
 SLiM_Densitometry.csv
+
+#Ignore private files
+/Private
