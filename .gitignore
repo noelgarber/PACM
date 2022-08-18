@@ -4,6 +4,9 @@
 #Ignore output folder, which varies by user-selected options when running the scripts
 /Output
 
+#Ignore pycache
+__pycache__
+
 #Ignore pickled objects generated while running the scripts, as these vary by user input as well
 *.ob
 
