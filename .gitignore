@@ -10,6 +10,9 @@ __pycache__
 #Ignore pickled objects generated while running the scripts, as these vary by user input as well
 *.ob
 
+#Ignore Uniprot databases
+Uniprot_All_Human_Protein_Isoforms.csv
+
 #Ignore example data used for testing
 SLiM_Densitometry.csv
 
