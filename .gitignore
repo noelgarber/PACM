@@ -5,9 +5,7 @@
 /Output
 
 #Ignore pickled objects generated while running the scripts, as these vary by user input as well
-list_of_baits.ob
-percentiles_dict.ob
-Step2_Results_Filename.ob
+*.ob
 
 #Ignore example data used for testing
 SLiM_Densitometry.csv
