@@ -7,6 +7,7 @@ import pandas as pd
 import time
 import glob
 import os
+import pickle
 from PACM_General_Functions import CharacAA, FilenameSubdir, ListInputter
 from PACM_General_Vars import list_aa_no_phos
 
@@ -24,6 +25,9 @@ if input_private == "Y":
 		from Private.Method import ImportedScorer
 	except: 
 		raise Exception("Import failed!")
+
+with open("input_private.ob", "wb") as f: 
+	pickle.dump(input_private, f)
 
 #Declare motif characteristics
 
@@ -231,6 +235,10 @@ for i in np.arange(number_of_proteins):
 print("----------------")
 
 output_filename = FilenameSubdir("Output", proteins_to_process_filename[:-4] + "_Scored_SLiMs.csv")
+
+with open("Step4_Output_Filename.ob", "wb") as f:
+	pickle.dump(output_filename, f)
+
 protein_seqs_df.to_csv(output_filename)
 print("Output saved! Filename:", output_filename)
 print("----------------")
