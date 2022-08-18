@@ -13,7 +13,7 @@ print("This script assigns bait-bait specificity scores based on an auto-generat
 print("Specificity scores may only be interpreted if the SLiM also passes with an acceptable SLiM score.")
 print("----------------")
 
-with open("Step4_output_filename.ob", "rb") as f: 
+with open("Step4_Output_Filename.ob", "rb") as f: 
 	file_to_import = pickle.load(f)
 
 use_loaded_file = input("The last output file from Step4_Pairwise_SLiM_Predictor.py was " + file_to_import + ". Would you like to use this file? (Y/N)  ")
