@@ -61,36 +61,6 @@ for i in np.arange(len(data_df)):
 
 #Retrieve topological information from UniProt about whether a SLiM faces the cytosol
 
-#Define a function that assigns topology information for where a motif occurs in a membrane protein
-def motif_topo_assigner(motif_seq, uni_seq, feat_type, feat_dict, dest_dataframe, df_column): 
-	location_dict = feat_dict.get("location")
-	description = feat_dict.get("description")
-
-	start_position = location_dict.get("start").get("value")
-	end_position = location_dict.get("end").get("value")
-
-	feature_sequence_plusone = uni_seq[int(start_position) - 2 : int(end_position) + 1]
-
-	if motif_seq in feature_sequence_plusone:
-		if feat_type == "Topological domain": 
-			dest_dataframe.at[i, df_column] = description
-		elif feat_type == "Transmembrane": 
-			dest_dataframe.at[i, df_column] = "TM - " + description
-		elif feat_type == "Intramembrane": 
-			dest_dataframe.at[i, df_column] = "IM - " + description
-
-#Define a function that returns combined protein type; must be passed in a loop when multiple TMDs could be present, see below
-def protein_type_assigner(feat_type, prot_type_var):
-	if prot_type_var == "": 
-		val = feat_type
-	elif prot_type_var == "Transmembrane" and feat_type == "Intramembrane": 
-		val = "Transmembrane/Intramembrane"
-	elif prot_type_var == "Intramembrane" and feat_type == "Transmembrane": 
-		val = "Transmembrane/Intramembrane"
-	else: 
-		val = prot_type_var
-	return val
-
 #Define a function for returning localizations as a piped string
 def list_localizations(comments_dict): 
 	locs = ""
@@ -104,48 +74,102 @@ def list_localizations(comments_dict):
 				locs = locs + location + " | "
 	return locs
 
+#Define a function that returns combined protein type; must be passed in a loop when multiple TMDs could be present, see below
+
+def protein_type_assigner(dict_of_features): 
+	var = ""
+	if dict_of_features is not None: 
+		for feature_dict in dict_of_features: 
+			feature_type = feature_dict.get("type")
+			if feature_type in ["Transmembrane", "Intramembrane"]: 
+				if var == "": 
+					var = feature_type #Sets protein type to either Transmembrane or Intramembrane
+				elif var == "Transmembrane" and feature_type == "Intramembrane": 
+					var = "Transmembrane/Intramembrane"
+				elif var == "Intramembrane" and feature_type == "Transmembrane": 
+					var = "Transmembrane/Intramembrane"
+	return var
+
+#Define a function that assigns topology information for where a motif occurs in a membrane protein
+def motif_topo_assigner(slim_start_num, slim_end_num, features_dict, output_index, output_column, output_df): 
+	if features_dict is not None: 
+		for feature_dict in features_dict: 
+			feature_type = feature_dict.get("type")
+
+			if feature_type in ["Transmembrane", "Intramembrane", "Topological domain"]: 
+				#print("Feature being processed:", feature_type)
+				feature_start = feature_dict.get("location").get("start").get("value")
+				feature_end = feature_dict.get("location").get("end").get("value")
+
+				if feature_start is not None and feature_end is not None: 
+					#print("feature_start and feature_end both exist")
+					feature_positions = np.arange((feature_start - 1), (feature_end + 1) + 1)
+					#print("positions within feature:")
+					#print(feature_positions)
+					#print("Current SLiM start/end:", slim_start_num, "to", slim_end_num)
+					feature_description = feature_dict.get("description")
+					#print("feature description:", feature_description)
+
+					if slim_start_num in feature_positions and slim_end_num in feature_positions: 
+						print("SLiM is in feature of type", feature_type)
+						if feature_type == "Topological domain": 
+							output_df.at[output_index, output_column] = feature_description
+							print(output_column, "set to", feature_description)
+						elif feature_type == "Transmembrane": 
+							output_df.at[output_index, output_column] = "TMD"
+							print(output_column, "set to TMD")
+						elif feature_type == "Intramembrane": 
+							output_df.at[output_index, output_column] = "IMD"
+							print(output_column, "set to IMD")			
+
 #Define a function that requests UniProt REST data and uses it to assign topological information to the motif of interest
-def response_to_df(resp, slim, dataframe): 
+def response_to_df(index, resp, slim, dataframe): 
 	if resp.ok: 
 		response_json = response.json() #Creates a dict of dicts
 
 		comments_list_dicts = response_json.get("comments")
 		if comments_list_dicts is not None:
 			localizations = list_localizations(comments_list_dicts)
-			dataframe.at[i, "UniProt_Localization"] = localizations
+			dataframe.at[index, "UniProt_Localization"] = localizations
 
 		uniprot_sequence = response_json.get("sequence").get("value")
+		slim_length = len(slim)
 
+		#Assign the type of protein (Transmembrane, Intramembrane, both, or neither)
 		features_list_dicts = response_json.get("features")
-		if features_list_dicts is not None:
-			protein_type = ""
-			for feature_dict in features_list_dicts: 
-				feature_type = feature_dict.get("type")
+		protein_type = protein_type_assigner(features_list_dicts)
+		dataframe.at[index, "Type"] = protein_type
 
-				if feature_type in ["Transmembrane", "Intramembrane", "Topological domain"]:
-					motif_topo_assigner(slim, uniprot_sequence, feature_type, feature_dict, dataframe, "Best_SLiM_Topology")
+		#Check if the SLiM exists in the uniprot sequence for testing topology
+		slim_found = False
+		for i in np.arange(len(uniprot_sequence)):
+			if slim == uniprot_sequence[i : i + slim_length]: 
+				slim_start = i + 1
+				slim_end = slim_start + slim_length
+				slim_found = True
 
-				if feature_type in ["Transmembrane", "Intramembrane"]: 
-					protein_type = protein_type_assigner(feature_type, protein_type)
-
-			dataframe.at[i, "Type"] = protein_type
+		#Assign where the SLiM occurs in the protein
+		if slim_found: 
+			motif_topo_assigner(slim_start_num = slim_start, slim_end_num = slim_end, features_dict = features_list_dicts, output_index = index, output_column = "Best_SLiM_Topology", output_df = dataframe)
+		else: 
+			print("SLiM", slim, "not found in provided sequence! Can be caused by Ensembl/UniProt discrepancy.")
+			dataframe.at[index, "Best_SLiM_Topology"] = "SLiM not found (likely due to UniProt sequence discrepancy)"
 
 #Loop through the dataframe to apply the function
 for i in np.arange(len(data_df)): 
 	uniprot_id = data_df.at[i, "UniProt_ID"]
 	best_SLiM = data_df.at[i, "Best_SLiM"]
 	best_core_SLiM = best_SLiM[6:13]
-	print("Inspecting", uniprot_id, "(", best_core_SLiM, ") -", i + 1, "of", len(data_df))
+	print("Requesting and checking", uniprot_id, "(", best_core_SLiM, ") -", i + 1, "of", len(data_df))
 
 	if uniprot_id != "None": 
 		query_url = "https://rest.uniprot.org/uniprotkb/" + uniprot_id
 		response = requests.get(query_url)
-		response_to_df(response, best_core_SLiM, data_df)
-		print("Checked", i, "of", len(data_df))
+		response_to_df(index = i, resp = response, slim = best_core_SLiM, dataframe = data_df)
 	else: 
 		data_df.at[i, "Type"] = "Unknown - No ID"
 		data_df.at[i, "Best_SLiM_Topology"] = "Unknown - No ID"
-		print("Checked", i, "of", len(data_df), "- No UniProt ID")
+		print("^ No UniProt ID")
 
 #----------------------------------------------------------------------
 
