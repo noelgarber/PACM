@@ -6,7 +6,6 @@ noel.garber@sickkids.ca
 Peptide Array-based Conditional position-weighted Matrices
 
 This is a pipeline for analyzing peptide array in vitro binding data (e.g. using the SPOT method) for dynamically defining short linear motifs (SLiMs). 
-As no other tools (to my knowledge) exist for analyzing this kind of data, this one is now public and free to use (with attribution)! 
 
 SLiMs are often defined by a position-weighted matrix that assigns values to different positions in the peptide sequence. 
 Historically, this approach is unable to account for intra-peptide residue-residue interactions. For example, a particular residue existing 
