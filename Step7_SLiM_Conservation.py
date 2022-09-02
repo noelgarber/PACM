@@ -31,8 +31,6 @@ homologs_df = pd.read_csv(homologs_filename, low_memory = False)
 #Assemble homolog info as dict (faster than scanning through dataframe every time)
 print("Assembling a dictionary of human-mouse homologs. This may take a minute.")
 
-#time_start = time.time()
-
 homologs_dict = {}
 for i in np.arange(len(homologs_df)): 
 	key = homologs_df.at[i, "Human_protein_transcript_ID"]
@@ -51,9 +49,6 @@ for i in np.arange(len(homologs_df)):
 	else:
 		homologs_dict[key] = value
 
-#time0 = time.time()
-#print("Time assembling homolog lookup dictionary:", time0 - time_start)
-
 #Find matching SLiM sequences in homologs
 
 slim_align_ratios = []
@@ -62,16 +57,11 @@ protein_align_ratios = []
 protein_identity_ratios = []
 
 for i in np.arange(len(data_df)): 
-	#time1 = time.time()
-
 	human_protein_name = data_df.at[i, "Protein"]
 	slim_seq = data_df.at[i, col_with_seq]
 
 	human_protein = data_df.at[i, "Sequence"]
 	human_protein_id = data_df.at[i, "Ensembl_ID"]
-
-	#time2 = time.time()
-	#print("Time retrieving SLiM + protein sequence:", time2 - time1)
 	
 	#Get mouse protein ID
 	
@@ -87,11 +77,6 @@ for i in np.arange(len(data_df)):
 		has_homolog = True
 	else: 
 		has_homolog = False
-	
-	#time3 = time.time()
-	#print("Time finding mouse homolog sequence:", time3 - time2)
-
-	#print("mouse_homolog_seq =", mouse_homolog_seq)
 
 	#Perform pairwise BLAST alignment
 	if has_homolog: 
@@ -107,16 +92,10 @@ for i in np.arange(len(data_df)):
 		seqA = slim_alignments_xs[0][0]
 		seqB = slim_alignments_xs[0][1]
 
-		#time4 = time.time()
-		#print("Time finding SLiM alignment with pairwise2.align.globalxs:", time4 - time3)
-
 		for k, char in enumerate(seqA): 
 			if char != "-": 
 				alignment_start = k
 				break
-
-		#time5 = time.time()
-		#print("Time finding mouse homolog SLiM start index:", time5 - time4)
 
 		homolog_slim_xs = seqB[alignment_start : alignment_start + len(slim_seq)]
 		if homolog_slim_xs == "": 
@@ -128,18 +107,12 @@ for i in np.arange(len(data_df)):
 		slim_align_identical = FindIdenticalResidues(seqA, seqB)
 		slim_align_identity_ratio = slim_align_identical / len(slim_seq)
 
-		#time6 = time.time()
-		#print("Time finding number of identical residues in SLiMs:", time6 - time5)
-
 		#For human protein to homologous protein
 		protein_alignments_xx = pairwise2.align.globalxx(human_protein, mouse_homolog_seq)
 		protein_align_score = protein_alignments_xx[0][2]
 		protein_align_score_ratio = protein_align_score / len(human_protein)
 		protein_align_identical = FindIdenticalResidues(protein_alignments_xx[0][0], protein_alignments_xx[0][1])
 		protein_align_identity_ratio = protein_align_identical / len(human_protein)
-
-		#time7 = time.time()
-		#print("Time finding protein-protein alignment and identical residues with pairwise2.align.globalxx: ", time7 - time6)
 
 		slim_align_ratios.append(slim_align_score_ratio)
 		slim_identity_ratios.append(slim_align_identity_ratio)
@@ -148,8 +121,6 @@ for i in np.arange(len(data_df)):
 
 		print("homolog_slim_xs =", homolog_slim_xs)
 
-		#time8 = time.time()
-		#print("Time appending values to lists for statistical analysis:", time8 - time7)
 	else: 
 		homolog_slim_xs = "No known homolog"
 		slim_align_score = None
@@ -160,11 +131,6 @@ for i in np.arange(len(data_df)):
 		protein_align_score_ratio = None
 		protein_align_identical = None
 		protein_align_identity_ratio = None
-
-		#time9 = time.time()
-		#print("Time assigning empty values:", time9 - time3)
-
-	#time10 = time.time()
 
 	data_df.at[i, "Mouse_Homolog_ID"] = mouse_homolog_id
 	data_df.at[i, "Mouse_Best_SLiM"] = homolog_slim_xs
@@ -178,9 +144,6 @@ for i in np.arange(len(data_df)):
 	data_df.at[i, "Protein_Align_Score_Ratio_globalxx"] = protein_align_score_ratio
 	data_df.at[i, "Protein_Align_Identical_Residues"] = protein_align_identical
 	data_df.at[i, "Protein_Align_Identity"] = protein_align_identity_ratio
-
-	#time11 = time.time()
-	#print("Time assigning values to data_df:", time11 - time10)
 
 #Test whether motif alignment scores exceed global scores on a relative basis that is statistically significant
 
