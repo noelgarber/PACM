@@ -161,3 +161,15 @@ def PredVal(score_threshold, dataframe, significance_col = "Significant", score_
 	pred_val_dict["NPV"] = round(XDivYZ(pred_val_dict.get("TN"), pred_val_dict.get("TN"), pred_val_dict.get("FN")), 3)
 
 	return pred_val_dict
+
+def FindIdenticalResidues(aligned_seq1, aligned_seq2): 
+	if len(aligned_seq1) != len(aligned_seq2): 
+		raise Exception("Aligned sequences must be strings of equal length (e.g. outputs from pairwise2.align)")
+
+	identical_residues = 0
+
+	for i in np.arange(len(aligned_seq1)): 
+		if aligned_seq1[i] == aligned_seq2[i] and aligned_seq1 != "-": 
+			identical_residues += 1
+
+	return identical_residues
