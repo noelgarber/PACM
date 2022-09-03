@@ -173,3 +173,10 @@ def FindIdenticalResidues(aligned_seq1, aligned_seq2):
 			identical_residues += 1
 
 	return identical_residues
+
+def use_default(default_string, data_description):
+	if input("Default " + data_description + " is " default_string + "; use default? (Y/N)  ") == "Y": 
+		user_inputted_value = input("Enter alternative value:  ")
+	else: 
+		user_inputted_value = default_string
+	return user_inputted_value
