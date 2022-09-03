@@ -31,23 +31,98 @@ homologs_df = pd.read_csv(homologs_filename, low_memory = False)
 #Assemble homolog info as dict (faster than scanning through dataframe every time)
 print("Assembling a dictionary of human-mouse homologs. This may take a minute.")
 
-homologs_dict = {}
-for i in np.arange(len(homologs_df)): 
-	key = homologs_df.at[i, "Human_protein_transcript_ID"]
-	mouse_id = homologs_df.at[i, "Mouse_protein_ID"]
-	mouse_seq = homologs_df.at[i, "Mouse_protein_sequence"]
-	value = (mouse_id, mouse_seq)
+def homologs_df2dict(reference_df, source_id_col, target_id_col, target_seq_col): 
+	output_dict = {}
+	for i in np.arange(len(reference_df)): 
+		key = reference_df.at[i, source_id_col]
+		target_id = reference_df.at[i, target_id_col]
+		target_seq = reference_df.at[i, target_seq_col]
+		value = (target_id, target_seq)
 
-	current_keys = list(homologs_dict.keys())
+		#For occurrences where a human protein ID is homologous to more than one mouse ID, take the one with the longest sequence
+		current_keys = list(output_dict.keys())
+		if key in current_keys: 
+			existing_key = key
+			existing_value = output_dict.get(existing_key)
+			existing_seq = existing_value[1]
+			if len(str(target_seq)) > len(str(existing_seq)): 
+				output_dict[key] = value
+		else:
+			output_dict[key] = value
+	return output_dict
 
-	if key in current_keys: 
-		existing_key = key
-		existing_value = homologs_dict.get(existing_key)
-		existing_seq = existing_value[1]
-		if len(str(mouse_seq)) > len(str(existing_seq)): 
-			homologs_dict[key] = value
-	else:
-		homologs_dict[key] = value
+homologs_dict = homologs_df2dict(homologs_df, source_id_col = "Human_protein_transcript_ID", target_id_col = "Mouse_protein_ID", target_seq_col = "Mouse_protein_sequence")
+print("Success!")
+
+#Define functions for pairwise SLiM homology analysis
+
+def retrieve_homolog(source_species_id, homologs_dictionary): 
+	homolog_tuple = homologs_dictionary.get(source_species_id)
+	if homolog_tuple is not None: 
+		homolog_id = homolog_tuple[0]
+		homolog_seq = homolog_tuple[1]
+		homolog_length = len(homolog_seq)
+	else: 
+		homolog_id = None
+		homolog_seq = None
+		homolog_length = 0
+
+	if homolog_length > 3: 
+		homolog_exists = True
+	else: 
+		homolog_exists = False
+
+	return homolog_id, homolog_seq, homolog_length, homolog_exists
+
+def slim_pairwise_homology(slim_sequence, target_sequence, open_gap_penalty = "Default", extend_gap_penalty = "Default"): 
+	print("Starting slim_pairwise_homology()")
+	#Find the contiguous homologous SLiM
+
+	if open_gap_penalty == "Default":
+		open_gap_penalty = -1 * len(slim_sequence)
+	if extend_gap_penalty == "Default":
+		extend_gap_penalty = -1 * len(slim_sequence)
+
+	slim_alignments_xs = pairwise2.align.globalxs(slim_sequence, target_sequence, open_gap_penalty, extend_gap_penalty, penalize_end_gaps = False)
+
+	seqA = slim_alignments_xs[0][0]
+	seqB = slim_alignments_xs[0][1]
+
+	print("seqB =", seqB)
+
+	#Find index for start of homologous aligned SLiM
+	for k, char in enumerate(seqA): 
+		if char != "-": 
+			alignment_start = k
+			break
+
+	homolog_slim_xs = seqB[alignment_start : alignment_start + len(slim_sequence)]
+	if homolog_slim_xs == "": 
+		homolog_slim_xs = "None found in homolog"
+
+	print("homolog_slim_xs =", homolog_slim_xs)
+
+	#For assessing the quality of the SLiM alignment
+	align_score = slim_alignments_xs[0][2]
+	print("align_score =", align_score)
+	align_score_ratio = align_score / len(slim_sequence)
+	print("align_score / len =", align_score_ratio)
+	align_identical = FindIdenticalResidues(seqA, seqB)
+	print("align_identical =", align_identical)
+	align_identity_ratio = align_identical / len(slim_sequence)
+	print("align_identity_ratio =", align_identity_ratio)
+
+	return homolog_slim_xs, align_score, align_score_ratio, align_identical, align_identity_ratio
+
+def parent_pairwise_homology(sequence_A, sequence_B):
+	#For human protein to homologous protein
+	protein_alignments_xx = pairwise2.align.globalxx(human_protein, mouse_homolog_seq)
+	protein_align_score = protein_alignments_xx[0][2]
+	protein_align_score_ratio = protein_align_score / len(human_protein)
+	protein_align_identical = FindIdenticalResidues(protein_alignments_xx[0][0], protein_alignments_xx[0][1])
+	protein_align_identity_ratio = protein_align_identical / len(human_protein)
+
+	return protein_align_score, protein_align_score_ratio, protein_align_identical, protein_align_identity_ratio
 
 #Find matching SLiM sequences in homologs
 
@@ -65,85 +140,40 @@ for i in np.arange(len(data_df)):
 	
 	#Get mouse protein ID
 	
-	mouse_homolog_tuple = homologs_dict.get(human_protein_id)
-	if mouse_homolog_tuple is not None:
-		mouse_homolog_id = mouse_homolog_tuple[0]
-		mouse_homolog_seq = mouse_homolog_tuple[1]
-		mouse_homolog_length = len(mouse_homolog_seq)
-	else: 
-		mouse_homolog_length = 0
-
-	if mouse_homolog_length > 3: 
-		has_homolog = True
-	else: 
-		has_homolog = False
+	mouse_homolog_id, mouse_homolog_seq, mouse_homolog_length, has_homolog = retrieve_homolog(human_protein_id, homologs_dict)
 
 	#Perform pairwise BLAST alignment
 	if has_homolog: 
 		print("Current SLiM/protein with a mouse homolog:", human_protein_name, "(" + str(i + 1), "of", str(len(data_df)) + ")")
-		print("slim_seq =", slim_seq)
+		print("Source SLiM:", slim_seq)
 
-		#For finding the contiguous homologous SLiM
-		open_gap_penalty = -1 * len(slim_seq)
-		extend_gap_penalty = -1 * len(slim_seq)
-		slim_alignments_xs = pairwise2.align.globalxs(slim_seq, mouse_homolog_seq, open_gap_penalty, extend_gap_penalty, penalize_end_gaps = False)
-		#print(slim_alignments_xs)
+		homolog_slim, slim_align_score, slim_align_score_ratio, slim_align_identical, slim_align_identity_ratio = slim_pairwise_homology(slim_sequence = slim_seq, target_sequence = mouse_homolog_seq)
 
-		seqA = slim_alignments_xs[0][0]
-		seqB = slim_alignments_xs[0][1]
-
-		for k, char in enumerate(seqA): 
-			if char != "-": 
-				alignment_start = k
-				break
-
-		homolog_slim_xs = seqB[alignment_start : alignment_start + len(slim_seq)]
-		if homolog_slim_xs == "": 
-			homolog_slim_xs = "None found in homolog"
-
-		#For assessing the quality of the SLiM alignment
-		slim_align_score = slim_alignments_xs[0][2]
-		slim_align_score_ratio = slim_align_score / len(slim_seq)
-		slim_align_identical = FindIdenticalResidues(seqA, seqB)
-		slim_align_identity_ratio = slim_align_identical / len(slim_seq)
-
-		#For human protein to homologous protein
-		protein_alignments_xx = pairwise2.align.globalxx(human_protein, mouse_homolog_seq)
-		protein_align_score = protein_alignments_xx[0][2]
-		protein_align_score_ratio = protein_align_score / len(human_protein)
-		protein_align_identical = FindIdenticalResidues(protein_alignments_xx[0][0], protein_alignments_xx[0][1])
-		protein_align_identity_ratio = protein_align_identical / len(human_protein)
+		whole_align_score, whole_align_score_ratio, whole_align_identical, whole_align_identity_ratio = parent_pairwise_homology(human_protein, mouse_homolog_seq)
 
 		slim_align_ratios.append(slim_align_score_ratio)
 		slim_identity_ratios.append(slim_align_identity_ratio)
-		protein_align_ratios.append(protein_align_score_ratio)
-		protein_identity_ratios.append(protein_align_identity_ratio)
+		protein_align_ratios.append(whole_align_score_ratio)
+		protein_identity_ratios.append(whole_align_identity_ratio)
 
-		print("homolog_slim_xs =", homolog_slim_xs)
-
+		print("Done! SLiM homolog:", homolog_slim)
 	else: 
-		homolog_slim_xs = "No known homolog"
-		slim_align_score = None
-		slim_align_score_ratio = None
-		slim_align_identical = None
-		slim_align_identity_ratio = None
-		protein_align_score = None
-		protein_align_score_ratio = None
-		protein_align_identical = None
-		protein_align_identity_ratio = None
+		homolog_slim = "No known homolog"
+		slim_align_score, slim_align_score_ratio, slim_align_identical, slim_align_identity_ratio = None, None, None, None
+		whole_align_score, whole_align_score_ratio, whole_align_identical, whole_align_identity_ratio = None, None, None, None
 
 	data_df.at[i, "Mouse_Homolog_ID"] = mouse_homolog_id
-	data_df.at[i, "Mouse_Best_SLiM"] = homolog_slim_xs
+	data_df.at[i, "Mouse_Best_SLiM"] = homolog_slim
 
 	data_df.at[i, "SLiM_Align_Score_globalxs"] = slim_align_score
 	data_df.at[i, "SLiM_Align_Score_Ratio_globalxs"] = slim_align_score_ratio
 	data_df.at[i, "SLiM_Align_Identical_Residues"] = slim_align_identical
 	data_df.at[i, "SLiM_Align_Identity"] = slim_align_identity_ratio
 
-	data_df.at[i, "Protein_Align_Score_globalxx"] = protein_align_score
-	data_df.at[i, "Protein_Align_Score_Ratio_globalxx"] = protein_align_score_ratio
-	data_df.at[i, "Protein_Align_Identical_Residues"] = protein_align_identical
-	data_df.at[i, "Protein_Align_Identity"] = protein_align_identity_ratio
+	data_df.at[i, "Protein_Align_Score_globalxx"] = whole_align_score
+	data_df.at[i, "Protein_Align_Score_Ratio_globalxx"] = whole_align_score_ratio
+	data_df.at[i, "Protein_Align_Identical_Residues"] = whole_align_identical
+	data_df.at[i, "Protein_Align_Identity"] = whole_align_identity_ratio
 
 #Test whether motif alignment scores exceed global scores on a relative basis that is statistically significant
 
