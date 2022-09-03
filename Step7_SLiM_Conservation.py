@@ -8,7 +8,7 @@ import glob
 import time
 import scipy.stats as stats
 from Bio import pairwise2
-from PACM_General_Functions import CharacAA, FindIdenticalResidues, NumInput, FilenameSubdir
+from PACM_General_Functions import CharacAA, FindIdenticalResidues, NumInput, FilenameSubdir, use_default
 
 #Import the data
 
@@ -28,8 +28,11 @@ homologs_df = pd.read_csv(homologs_filename, low_memory = False)
 
 #-------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+source_species_name = use_default("Human", "source_species_name")
+target_species_name = use_default("Mouse", "target_species_name")
+
 #Assemble homolog info as dict (faster than scanning through dataframe every time)
-print("Assembling a dictionary of human-mouse homologs. This may take a minute.")
+print("Assembling a dictionary of source-target homologs. This may take a minute.")
 
 def homologs_df2dict(reference_df, source_id_col, target_id_col, target_seq_col): 
 	output_dict = {}
@@ -39,7 +42,7 @@ def homologs_df2dict(reference_df, source_id_col, target_id_col, target_seq_col)
 		target_seq = reference_df.at[i, target_seq_col]
 		value = (target_id, target_seq)
 
-		#For occurrences where a human protein ID is homologous to more than one mouse ID, take the one with the longest sequence
+		#For occurrences where a source protein ID is homologous to more than one target ID, take the one with the longest sequence
 		current_keys = list(output_dict.keys())
 		if key in current_keys: 
 			existing_key = key
@@ -51,7 +54,7 @@ def homologs_df2dict(reference_df, source_id_col, target_id_col, target_seq_col)
 			output_dict[key] = value
 	return output_dict
 
-homologs_dict = homologs_df2dict(homologs_df, source_id_col = "Human_protein_transcript_ID", target_id_col = "Mouse_protein_ID", target_seq_col = "Mouse_protein_sequence")
+homologs_dict = homologs_df2dict(homologs_df, source_id_col = source_species_name + "_protein_transcript_ID", target_id_col = target_species_name + "_protein_ID", target_seq_col = target_species_name + "_protein_sequence")
 print("Success!")
 
 #Define functions for pairwise SLiM homology analysis
@@ -115,12 +118,12 @@ def slim_pairwise_homology(slim_sequence, target_sequence, open_gap_penalty = "D
 	return homolog_slim_xs, align_score, align_score_ratio, align_identical, align_identity_ratio
 
 def parent_pairwise_homology(sequence_A, sequence_B):
-	#For human protein to homologous protein
-	protein_alignments_xx = pairwise2.align.globalxx(human_protein, mouse_homolog_seq)
+	#For source protein to homologous target protein
+	protein_alignments_xx = pairwise2.align.globalxx(sequence_A, sequence_B)
 	protein_align_score = protein_alignments_xx[0][2]
-	protein_align_score_ratio = protein_align_score / len(human_protein)
+	protein_align_score_ratio = protein_align_score / len(sequence_A)
 	protein_align_identical = FindIdenticalResidues(protein_alignments_xx[0][0], protein_alignments_xx[0][1])
-	protein_align_identity_ratio = protein_align_identical / len(human_protein)
+	protein_align_identity_ratio = protein_align_identical / len(sequence_A)
 
 	return protein_align_score, protein_align_score_ratio, protein_align_identical, protein_align_identity_ratio
 
@@ -132,24 +135,24 @@ protein_align_ratios = []
 protein_identity_ratios = []
 
 for i in np.arange(len(data_df)): 
-	human_protein_name = data_df.at[i, "Protein"]
+	source_protein_name = data_df.at[i, "Protein"]
 	slim_seq = data_df.at[i, col_with_seq]
 
-	human_protein = data_df.at[i, "Sequence"]
-	human_protein_id = data_df.at[i, "Ensembl_ID"]
+	source_protein_seq = data_df.at[i, "Sequence"]
+	source_protein_id = data_df.at[i, "Ensembl_ID"]
 	
-	#Get mouse protein ID
+	#Get target protein ID
 	
-	mouse_homolog_id, mouse_homolog_seq, mouse_homolog_length, has_homolog = retrieve_homolog(human_protein_id, homologs_dict)
+	target_homolog_id, target_homolog_seq, target_homolog_length, has_homolog = retrieve_homolog(source_protein_id, homologs_dict)
 
 	#Perform pairwise BLAST alignment
 	if has_homolog: 
-		print("Current SLiM/protein with a mouse homolog:", human_protein_name, "(" + str(i + 1), "of", str(len(data_df)) + ")")
+		print("Current SLiM/protein with a target homolog:", source_protein_name, "(" + str(i + 1), "of", str(len(data_df)) + ")")
 		print("Source SLiM:", slim_seq)
 
-		homolog_slim, slim_align_score, slim_align_score_ratio, slim_align_identical, slim_align_identity_ratio = slim_pairwise_homology(slim_sequence = slim_seq, target_sequence = mouse_homolog_seq)
+		homolog_slim, slim_align_score, slim_align_score_ratio, slim_align_identical, slim_align_identity_ratio = slim_pairwise_homology(slim_sequence = slim_seq, target_sequence = target_homolog_seq)
 
-		whole_align_score, whole_align_score_ratio, whole_align_identical, whole_align_identity_ratio = parent_pairwise_homology(human_protein, mouse_homolog_seq)
+		whole_align_score, whole_align_score_ratio, whole_align_identical, whole_align_identity_ratio = parent_pairwise_homology(source_protein_seq, target_homolog_seq)
 
 		slim_align_ratios.append(slim_align_score_ratio)
 		slim_identity_ratios.append(slim_align_identity_ratio)
@@ -162,8 +165,8 @@ for i in np.arange(len(data_df)):
 		slim_align_score, slim_align_score_ratio, slim_align_identical, slim_align_identity_ratio = None, None, None, None
 		whole_align_score, whole_align_score_ratio, whole_align_identical, whole_align_identity_ratio = None, None, None, None
 
-	data_df.at[i, "Mouse_Homolog_ID"] = mouse_homolog_id
-	data_df.at[i, "Mouse_Best_SLiM"] = homolog_slim
+	data_df.at[i, target_species_name + "_Homolog_ID"] = target_homolog_id
+	data_df.at[i, target_species_name + "_Best_SLiM"] = homolog_slim
 
 	data_df.at[i, "SLiM_Align_Score_globalxs"] = slim_align_score
 	data_df.at[i, "SLiM_Align_Score_Ratio_globalxs"] = slim_align_score_ratio
@@ -180,7 +183,7 @@ for i in np.arange(len(data_df)):
 results_output = []
 
 results_output.append("Mean SliM alignment score / SLiM length = " + str(sum(slim_align_ratios) / len(slim_align_ratios)) + "\n")
-results_output.append("Mean protein alignment score / human protein length = " + str(sum(protein_align_ratios) / len(protein_align_ratios)) + "\n")
+results_output.append("Mean protein alignment score / source protein length = " + str(sum(protein_align_ratios) / len(protein_align_ratios)) + "\n")
 
 tstatistic, pvalue = stats.ttest_rel(slim_align_ratios, protein_align_ratios)
 results_output.append("t-statistic for paired t-test = " + str(tstatistic) + "\n")
@@ -353,12 +356,12 @@ def MotifFinder(motif_seq, target_motif_length, gap_interpretation = "G"):
 #Define motif score assigning function
 
 def MotifScoreAssigner(index, destination_dataframe):
-	human_sequence = destination_dataframe.at[index, "Best_SLiM"]
-	motif_length = len(human_sequence)
-	mouse_sequence = destination_dataframe.at[index, "Mouse_Best_SLiM"]
+	source_sequence = destination_dataframe.at[index, "Best_SLiM"]
+	motif_length = len(source_sequence)
+	matching_target_sequence = destination_dataframe.at[index, target_species_name + "_Best_SLiM"]
 
-	mouse_slim_score = MotifFinder(mouse_sequence, motif_length)
-	destination_dataframe.at[index, "Mouse_Best_SLiM_Score"] = mouse_slim_score
+	target_slim_score = MotifFinder(matching_target_sequence, motif_length)
+	destination_dataframe.at[index, target_species_name + "_Best_SLiM_Score"] = target_slim_score
 
 #Iterate through all the protein sequences
 
