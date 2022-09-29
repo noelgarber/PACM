@@ -175,8 +175,20 @@ def FindIdenticalResidues(aligned_seq1, aligned_seq2):
 	return identical_residues
 
 def use_default(default_string, data_description):
-	if input("Default " + data_description + " is " default_string + "; use default? (Y/N)  ") == "Y": 
-		user_inputted_value = input("Enter alternative value:  ")
-	else: 
+	if input("Default " + data_description + " is " + default_string + "; use default? (Y/N)  ") == "Y": 
 		user_inputted_value = default_string
+	else: 
+		user_inputted_value = input("Enter alternative value:  ")
 	return user_inputted_value
+
+def dict_inputter(key_prompt = "Enter key:  ", value_prompt = "Enter value:  "): 
+	var = {}
+	end_reached = False
+	while not end_reached: 
+		key = input(key_prompt)
+		if key != "": 
+			value = input(value_prompt)
+			var[key] = value
+		else: 
+			end_reached = True
+	return var
