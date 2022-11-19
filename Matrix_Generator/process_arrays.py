@@ -228,7 +228,7 @@ dens_final_df = pd.concat([dens_analyzed_df, significance_df], axis = 1)
 
 #--------------------------------------------------------------------------
 
-#Calculate the 70th, 80th, and 90th percentiles
+#Calculate percentiles from 1st to 99th
 
 controlled_values_list = []
 for i in np.arange(len(dens_final_df)): 
