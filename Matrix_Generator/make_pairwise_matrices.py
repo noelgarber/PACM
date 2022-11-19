@@ -7,27 +7,45 @@ import pandas as pd
 import math
 import os
 import pickle
-from PACM_General_Functions import FilenameSubdir, ListInputter, NumberedList, NumInput, CharacAA, XDivYZ, PredVal
-from PACM_General_Vars import list_aa, list_aa_no_phos, aa_charac_dict 
-	#list_aa: list of amino acids including B=pS, J=pT, and O=pY
-	#list_aa_no_phos: list of only unmodified amino acids (20)
-	#aa_charac_dict: dictionary of chemical characteristics of 20 amino acids
 
 print("----------------")
 print("Script 2: ")
 print("This script conducts residue-residue pairwise analysis to generate position-aware SLiM matrices and back-calculated scores.")
 print("----------------")
 
-dens_final_df = pd.read_csv(FilenameSubdir("Output", "Densitometry_Analyzed_Results.csv"), index_col = 0)
+#Declare general variables
 
-with open("list_of_baits.ob", "rb") as lob:
+list_aa_no_phos = ["D", "E", "R", "H", "K", "S", "T", "N", "Q", "C", "G", "P", "A", "V", "I", "L", "M", "F", "Y", "W"]
+list_aa = ["D", "E", "R", "H", "K", "S", "T", "N", "Q", "C", "G", "P", "A", "V", "I", "L", "M", "F", "Y", "W", "B", "J", "O"] # B=pSer, J=pThr, Y=pTyr
+
+aa_charac_dict = {
+	"Acidic": ["D", "E"],
+	"Basic": ["K", "R", "H"],
+	"ST": ["S", "T"],
+	"Aromatic": ["F", "Y"],
+	"Aliphatic": ["A", "V", "I", "L"],
+	"Other_Hydrophobic": ["W", "M"],
+	"Polar_Uncharged": ["N", "Q", "C"],
+	"Special_Cases": ["P", "G"]
+}
+
+#Load data
+
+dens_df = pd.read_csv(os.path.join("Array_Output", "processed_array_data.csv"), index_col = 0)
+
+temp_directory = os.path.join(os.getcwd(), "temp")
+with open(os.path.join(temp_directory, "list_of_baits.ob"), "rb") as lob:
 	list_of_baits = pickle.load(lob)
 
 print("The list of baits to use for matrix generation was unpickled from Step1_Array_Analyzer results as:  list_of_baits =", list_of_baits)
 
-use_non_default = input("Would you like to use a different list? (Y/N)  ")
-if use_non_default == "Y": 
-	list_of_baits = ListInputter("Enter the baits you would like to include values for when generating the matrices.")
+use_default = input("Use this list? (Y/N)  ")
+if use_default != "Y": 
+	number_of_baits = int(input("Enter the number of baits to use for generating matrices:  "))
+	list_of_baits = []
+	for i in np.arange(1, number_of_baits + 1): 
+		bait = input("Bait " + str(i) + " name:  ")
+		list_of_baits.append(bait)
 
 #--------------------------------------------------------------------------
 
@@ -48,7 +66,9 @@ print("----------------")
 def WeightedMatrix(bait, motif_length, source_dataframe, min_members, amino_acid_list, extreme_thres, high_thres, mid_thres, 
 	points_for_extreme, points_for_high, points_for_mid, points_for_low, position_for_filtering = None, residues_included_at_filter_position = ["D", "E", "R", "H", "K", "S", "T", "N", "Q", "C", "G", "P", "A", "V", "I", "L", "M", "F", "Y", "W", "B", "J", "O"]): 
 
-	list_pos = NumberedList(motif_length)
+	list_pos = [] #creates list to contain numbered positions across the motif length, to use as column headers in weighted matrices
+	for i in range(1, int(motif_length) + 1): 
+		list_pos.append("#" + str(i))
 
 	generic_matrix_df = pd.DataFrame(index = amino_acid_list, columns = list_pos)
 	generic_matrix_df = generic_matrix_df.fillna(0)
@@ -118,18 +138,18 @@ def WeightedMatrix(bait, motif_length, source_dataframe, min_members, amino_acid
 
 #Begin position-aware analysis
 
-slim_length = NumInput("Enter the length of your SLiM of interest (e.g. 15):", use_int = True) #This is the length of the motif being analyzed
+slim_length = int(input("Enter the length of your SLiM of interest as an integer (e.g. 15):  ")) #This is the length of the motif being analyzed
 print("----------------")
 
 #Set the thresholds for the point assignment system
 
-with open("percentiles_dict.ob", "rb") as f:
+with open(os.path.join(os.getcwd(), "temp", "percentiles_dict.ob"), "rb") as f:
 	percentiles_dict = pickle.load(f)
 
 print("Setting thresholds for scoring.")
 print("Guidance:")
-print("    --> Use more points for HIGH signal hits to produce a model that correlates strongly with signal intensity.")
-print("    --> Use more points for LOW signal hits to produce a model that is better at finding weak positives.")
+print("\tUse more points for HIGH signal hits to produce a model that correlates strongly with signal intensity.")
+print("\tUse more points for LOW signal hits to produce a model that is better at finding weak positives.")
 print("We suggest the 90th, 80th, and 70th percentiles as thresholds, but this may vary depending on the number of hits expected.")
 
 print("---")
@@ -137,23 +157,23 @@ print("---")
 use_percentiles = input("Would you like to use percentiles? If not, manually inputted numbers will be used. (Y/N)  ")
 
 if use_percentiles == "Y": 
-	thres_extreme = NumInput("Enter the upper percentile threshold (1 of 3):")
+	thres_extreme = int(input("Enter the upper percentile threshold (1 of 3):  "))
 	thres_extreme = percentiles_dict.get(thres_extreme)
-	thres_high = NumInput("Enter the upper-middle percentile threshold (2 of 3):")
+	thres_high = int(input("Enter the upper-middle percentile threshold (2 of 3):  "))
 	thres_high = percentiles_dict.get(thres_high)
-	thres_mid = NumInput("Enter the lower-middle percentile threshold (3 of 3):")
+	thres_mid = int(input("Enter the lower-middle percentile threshold (3 of 3):  "))
 	thres_mid = percentiles_dict.get(thres_mid)
 else: 
-	thres_extreme = NumInput("Enter the upper threshold as a value (1 of 3):")
-	thres_high = NumInput("Enter the upper-middle threshold as a value (2 of 3):")
-	thres_mid = NumInput("Enter the lower-middle threshold as a value (3 of 3):")
+	thres_extreme = int(input("Enter the upper signal threshold (1 of 3):  "))
+	thres_high = int(input("Enter the upper-middle signal threshold (2 of 3):  "))
+	thres_mid = int(input("Enter the lower-middle signal threshold (3 of 3):  "))
 
 #Set number of points
 
-points_extreme = NumInput("How many points for values greater than " + str(thres_extreme) + "? Input:")
-points_high = NumInput("How many points for values greater than " + str(thres_high) + "? Input:")
-points_mid = NumInput("How many points for values greater than " + str(thres_mid) + "? Input:")
-points_low = NumInput("Some hits are marked significant but fall below the threshold. How many points for these lower hits? Input:")
+points_extreme = float(input("How many points for values greater than " + str(thres_extreme) + "? Input:  "))
+points_high = float(input("How many points for values greater than " + str(thres_high) + "? Input:  "))
+points_mid = float(input("How many points for values greater than " + str(thres_mid) + "? Input:  "))
+points_low = float(input("Some hits are marked significant but fall below the signal threshold. How many points for these lower hits? Input:  "))
 
 print("----------------")
 
@@ -163,8 +183,6 @@ print("If max_bait >", thres_high, "and passes, points =", points_high)
 print("If max_bait >", thres_mid, "and passes, points =", points_mid)
 print("If max_bait > 0 and passes, points =", points_low)
 print("----------------")
-
-positions = np.arange(1, slim_length + 1)
 
 #Construction of weighted matrices that are position-aware
 
@@ -176,7 +194,7 @@ dictionary_of_matrices = {}
 for col_num in range(1, slim_length + 1): 
 	for charac, mem_list in aa_charac_dict.items(): 
 
-		weighted_matrix_containing_charac = WeightedMatrix("Significant", slim_length, dens_final_df, minimum_members, list_aa, thres_extreme, thres_high, thres_mid, points_extreme, points_high, points_mid, points_low, position_for_filtering = col_num, residues_included_at_filter_position = mem_list)
+		weighted_matrix_containing_charac = WeightedMatrix("Significant", slim_length, dens_df, minimum_members, list_aa, thres_extreme, thres_high, thres_mid, points_extreme, points_high, points_mid, points_low, position_for_filtering = col_num, residues_included_at_filter_position = mem_list)
 		
 		for n in np.arange(1, slim_length + 1): 
 			col_name = "#" + str(n)
@@ -233,8 +251,8 @@ for key, df in dictionary_of_matrices.items():
 print("Creating a dictionary of position weights.")
 print("Enter numerical weights for each position based on their expected structural importance. If unknown, use 1.")
 pos_weights = {}
-for position in positions: 
-	pos_weights[position] = NumInput("Enter weight for position " + str(position) + ":")
+for position in np.arange(1, slim_length + 1): 
+	pos_weights[position] = float(input("\tEnter weight for position " + str(position) + ":  "))
 print("Inputted dict:")
 print(pos_weights)
 
@@ -244,6 +262,10 @@ print("Constructing dictionary of weighted matrices and save the dataframes by k
 
 dictionary_of_weighted_matrices = {}
 
+matrix_directory = os.path.join(os.getcwd(), "Pairwise_Matrices")
+if not os.path.exists(matrix_directory): 
+	os.makedirs(matrix_directory) #Makes the directory for outputted weighted matrices
+
 for key, df in dictionary_of_matrices.items(): 
 	for i in np.arange(1, slim_length + 1): 
 		position = "#" + str(i)
@@ -251,18 +273,23 @@ for key, df in dictionary_of_matrices.items():
 		for aa in list_aa_no_phos:
 			df.at[aa, position] = df.at[aa, position] * position_weight
 	dictionary_of_weighted_matrices[key] = df
-	df.to_csv(FilenameSubdir("dictionary_of_weighted_matrices", key + ".csv"))
+	df.to_csv(os.path.join(matrix_directory, key + ".csv"))
 
-
-print("Done! Saved", str(len(dictionary_of_weighted_matrices)), "to /dictionary_of_weighted_matrices")
+print("Done! Saved", str(len(dictionary_of_weighted_matrices)), "matrices to", matrix_directory)
 
 #--------------------------------------------------------------------------
 
 #Begin scoring algorithm construction
 
-dens_final_scored_df = dens_final_df.copy()
+dens_scored_df = dens_df.copy()
 
 #Calculate individual residue scores based on neighbouring residues' matching matrices in dictionary_of_weighted_matrices
+
+def CharacAA(amino_acid, dict_of_aa_characs = aa_charac_dict): 
+	for charac, mem_list in dict_of_aa_characs.items(): 
+		if amino_acid in mem_list: 
+			charac_result = charac
+	return charac_result
 
 def DynamicAAScorer(index, sequence): 
 	output_total_score = 0
@@ -291,7 +318,7 @@ def DynamicAAScorer(index, sequence):
 		res_previous_weighted_matrix = dictionary_of_weighted_matrices.get(res_previous_weighted_matrix_key)
 		res_subsequent_weighted_matrix = dictionary_of_weighted_matrices.get(res_subsequent_weighted_matrix_key)
 
-		dens_final_scored_df.at[index, "No_Phos_Res_" + str(j)] = res
+		dens_scored_df.at[index, "No_Phos_Res_" + str(j)] = res
 
 		score_previous = res_previous_weighted_matrix.at[res, "#" + str(j)]
 		score_subsequent = res_subsequent_weighted_matrix.at[res, "#" + str(j)]
@@ -301,10 +328,10 @@ def DynamicAAScorer(index, sequence):
 		output_total_score = output_total_score + score_current_position
 	return output_total_score
 
-for i in np.arange(len(dens_final_scored_df)): 
-	seq = dens_final_scored_df.at[i, "No_Phos_Sequence"]
+for i in np.arange(len(dens_scored_df)): 
+	seq = dens_scored_df.at[i, "No_Phos_Sequence"]
 	total_score = DynamicAAScorer(i, seq)
-	dens_final_scored_df.at[i, "SLiM_Score"] = total_score
+	dens_scored_df.at[i, "SLiM_Score"] = total_score
 
 print("Produced edited densitometry data file containing scores for each peptide.")
 
@@ -312,15 +339,55 @@ print("Produced edited densitometry data file containing scores for each peptide
 
 #User selection of threshold for calling hits as TP/FP/TN/FN
 
-min_score = dens_final_scored_df["SLiM_Score"].min()
-max_score = dens_final_scored_df["SLiM_Score"].max()
+#Define function that divides numbers and returns a code value for divide_by_zero errors
+def divide_inf(numerator, denominator, infinity_value = 999): 
+	if denominator == 0: 
+		value = inf_value
+	else: 
+		value = numerator / denominator
+	return value
+
+def diagnostic_value(score_threshold, dataframe, significance_col = "Significant", score_col = "SLiM_Score"): 
+	pred_val_dict = {
+		"TP": 0,
+		"FP": 0,
+		"TN": 0,
+		"FN": 0,
+	}
+
+	for i in np.arange(len(dataframe)): 
+		sig_truth = dataframe.at[i, significance_col]
+		score = dataframe.at[i, score_col]
+		if score >= score_threshold: 
+			score_over_n = "Yes"
+		else: 
+			score_over_n = "No"
+
+		if score_over_n == "Yes" and sig_truth == "Yes": 
+			pred_val_dict["TP"] = pred_val_dict["TP"] + 1
+		elif score_over_n == "Yes" and sig_truth == "No": 
+			pred_val_dict["FP"] = pred_val_dict["FP"] + 1
+		elif score_over_n != "Yes" and sig_truth == "Yes": 
+			pred_val_dict["FN"] = pred_val_dict["FN"] + 1
+		elif score_over_n != "Yes" and sig_truth == "No": 
+			pred_val_dict["TN"] = pred_val_dict["TN"] + 1
+
+	pred_val_dict["Sensitivity"] = round(divide_inf(numerator = pred_val_dict.get("TP"), denominator = pred_val_dict.get("TP") + pred_val_dict.get("FN")), 3)
+	pred_val_dict["Specificity"] = round(divide_inf(numerator = pred_val_dict.get("TN"), denominator = pred_val_dict.get("TN") + pred_val_dict.get("FP")), 3)
+	pred_val_dict["PPV"] = round(divide_inf(numerator = pred_val_dict.get("TP"), denominator = pred_val_dict.get("TP") + pred_val_dict.get("FP")), 3)
+	pred_val_dict["NPV"] = round(divide_inf(numerator = pred_val_dict.get("TN"), denominator = pred_val_dict.get("TN") + pred_val_dict.get("FN")), 3)
+
+	return pred_val_dict
+
+min_score = dens_scored_df["SLiM_Score"].min()
+max_score = dens_scored_df["SLiM_Score"].max()
 score_range_series = np.linspace(min_score, max_score, num = 100)
 
 threshold_selection_dict = {}
 
 for i in score_range_series: 
 	i_rounded = round(i, 1)
-	pv_dict = PredVal(i, dens_final_scored_df)
+	pv_dict = diagnostic_value(i, dens_scored_df)
 	ppv_npv_list = [pv_dict.get("PPV"), pv_dict.get("NPV")]
 	threshold_selection_dict[i_rounded] = ppv_npv_list
 
@@ -331,34 +398,35 @@ for key, value in threshold_selection_dict.items():
 
 print("-------------------")
 
-selected_threshold = NumInput("Input your selected threshold for calling hits:")
+selected_threshold = float(input("Input your selected threshold for calling hits:  "))
 
-for i in np.arange(len(dens_final_scored_df)): 
-	current_score = dens_final_scored_df.at[i, "SLiM_Score"]
-	sig_y_n = dens_final_scored_df.at[i, "Significant"]
+for i in np.arange(len(dens_scored_df)): 
+	current_score = dens_scored_df.at[i, "SLiM_Score"]
+	sig_y_n = dens_scored_df.at[i, "Significant"]
 	if current_score >= selected_threshold: 
-		dens_final_scored_df.at[i, "Call"] = "Positive"
+		dens_scored_df.at[i, "Call"] = "Positive"
 		if sig_y_n == "Yes":
 			call_type = "TP"
 		else: 
 			call_type = "FP"
 	else: 
-		dens_final_scored_df.at[i, "Call"] = "-"
+		dens_scored_df.at[i, "Call"] = "-"
 		if sig_y_n == "Yes": 
 			call_type = "FN"
 		else: 
 			call_type = "TN"
-	dens_final_scored_df.at[i, "Call_Type"] = call_type
+	dens_scored_df.at[i, "Call_Type"] = call_type
 
 print("Applied hit calls based on threshold.")
 
 #Save to output folder
 
-dest_filename = "Position_Aware_SLiM_Scored_Dens_DF" + "_Thres" + str(selected_threshold) + ".csv"
-dens_final_scored_df.to_csv(FilenameSubdir("Output", dest_filename))
+output_filename = "pairwise_scored_data" + "_thres" + str(selected_threshold) + ".csv"
+output_file_path = os.path.join(os.getcwd(), "Array_Output", output_filename)
+dens_scored_df.to_csv(output_file_path)
 
-with open("Step2_Results_Filename.ob", "wb") as f:
-	pickle.dump(dest_filename, f)
+with open(os.path.join(os.getcwd(), "temp", "pairwise_results_filename.ob"), "wb") as f:
+	pickle.dump(output_file_path, f)
 
-print("Saved! Filename:", dest_filename)
+print("Saved! Filename:", output_file_path)
 print("-------------------")
