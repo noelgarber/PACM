@@ -1,7 +1,4 @@
-#This script computes log2fc and does significance testing for the SPOT blot densitometry data.
-#SPOT peptide synthesis is a method in which peptides are synthesized directly onto cellulose membranes...
-#... and probed with recombinant bait proteins detected by a fluorescent reporter. Fluorescence is...
-#... logarithmically related to binding affinity. 
+#This script standardizes and makes preliminary comparisons for SPOT peptide array results obtained by densitometry. 
 
 #Import required functions and packages
 
@@ -10,23 +7,32 @@ import pandas as pd
 import math
 import os
 import pickle
-from PACM_General_Functions import FilenameSubdir, Log2fc, BaitPermuter, ListInputter, NumInput
 
 print("----------------")
 print("Script 1:")
 print("This script is performing comparisons on SPOT densitometry data.")
 print("----------------")
 
-#Read the SPOT densitometry data. This script assumes there are 2 replicates.
+#Make temp directory for holding pickled objects between scripts
 
-dens_source_filename = input("Please enter the filename for your CSV containing SPOT densitometry data:  ")
+temp_directory = os.path.join(os.getcwd(), "temp")
+if not os.path.exists(temp_directory): 
+	os.makedirs(temp_directory)
 
-dens_df = pd.read_csv(dens_source_filename)
+#Read the SPOT densitometry data. This script assumes there are 2 replicates. Compatibility for more will be added in a future release. 
+
+dens_filename = input("Filename (in this folder) or path for SPOT input data:  ")
+dens_df = pd.read_csv(dens_filename)
 
 #Write the bait list here; it will be permuted for various calculations
 
-list_of_baits = ListInputter("Please input the baits you want to analyze one at a time and hit enter when done.")
-with open("list_of_baits.ob", "wb") as lob:
+number_of_baits = int(input("How many baits are you analyzing? Enter an integer:  "))
+list_of_baits = []
+for i in np.arange(1, number_of_baits + 1): 
+	bait = input("Bait " + str(i) + " name:  ")
+	list_of_baits.append(bait)
+
+with open(os.path.join(temp_directory, "list_of_baits.ob"), "wb") as lob:
 	pickle.dump(list_of_baits, lob)
 
 #Standardization
@@ -71,7 +77,17 @@ if standardize == "Y":
 
 #Calculation of fold change (log2fc) between each pair of hits
 
-log2fc_columns = BaitPermuter(list_of_baits, "log2fc")
+def bait_permuter(bait_list, text_to_append): 
+	output_list = []
+	for bait1 in bait_list: 
+		for bait2 in bait_list: 
+			if bait1 == bait2: 
+				continue
+			else: 
+				output_list.append(bait1 + "_" + bait2 + "_" + text_to_append)
+	return output_list
+
+log2fc_columns = bait_permuter(list_of_baits, "log2fc")
 
 #Construct empty DataFrame to contain log2fc values for the previous columns
 
@@ -80,7 +96,11 @@ log2fc_df = log2fc_df.fillna(0)
 
 #Conditionally compute log2fc while aware of controls
 
-def ConditionalLog2fc(first_bait, second_bait, source_dataframe, dest_dataframe, control_multiplier_val):
+def log2fc(mean1, mean2): 
+	value = math.log2(mean1 + 0.01) - math.log2(mean2 + 0.01)
+	return value
+
+def conditional_log2fc(first_bait, second_bait, source_dataframe, dest_dataframe, control_multiplier_val):
 	if first_bait != second_bait and source_dataframe.loc[i, first_bait + "_Total_Pass"] == "NaN" and source_dataframe.loc[i, second_bait + "_Total_Pass"] == "NaN": 
 		# Tests if at least one bait passes manual qualitative analysis; if neither do, assigns log2fc as NaN
 		dest_dataframe.loc[i, first_bait + "_" + second_bait + "_log2fc"] = "NaN"
@@ -98,15 +118,17 @@ def ConditionalLog2fc(first_bait, second_bait, source_dataframe, dest_dataframe,
 			mean_bait1 = 0
 			mean_bait2 = 0
 
-		log2fc_bait1_bait2 = Log2fc(mean_bait1, mean_bait2)
+		log2fc_bait1_bait2 = log2fc(mean_bait1, mean_bait2)
 
 		dest_dataframe.loc[i, first_bait + "_" + second_bait + "_log2fc"] = log2fc_bait1_bait2
 
-control_multiplier = NumInput("Log2fc values are returned when the two compared values are above a defined multiple of the control to prevent erroneous results. A multiplier between 2 and 5 is advised. Enter the control multiplier:")
+print("A control multiplier value is used to determine the threshold for considering a hit as 'above control'.")
+control_multiplier = float("Enter a control multiplier (recommended between 2 and 5):  ")
+
 for i in np.arange(len(dens_df)): 
 	for bait1 in list_of_baits: 
 		for bait2 in list_of_baits: 
-			ConditionalLog2fc(bait1, bait2, dens_df, log2fc_df, control_multiplier)
+			conditional_log2fc(bait1, bait2, dens_df, log2fc_df, control_multiplier)
 
 dens_log2fc_df = pd.concat([dens_df, log2fc_df], axis = 1)
 
@@ -224,14 +246,19 @@ percentiles_dict = {}
 for i in np.arange(1, 100):
 	percentiles_dict[i] = np.percentile(controlled_values_list, i)
 
-with open("percentiles_dict.ob", "wb") as f:
+with open(os.path.join(temp_directory, "percentiles_dict.ob"), "wb") as f:
 	pickle.dump(percentiles_dict, f)
 
 #--------------------------------------------------------------------------
 
 #Save to output folder
 
-dens_final_df.to_csv(FilenameSubdir("Output", "Densitometry_Analyzed_Results.csv"))
+output_folder = os.path.join(os.getcwd(), "Array_Output")
+if not os.path.exists(output_folder): 
+	os.makedirs(output_folder)
+output_path = os.path.join(output_folder, "processed_array_data.csv")
 
-print("Saved! Filename: Output/Densitometry_Analyzed_Results.csv")
+dens_final_df.to_csv(output_path)
+
+print("Saved! Path:", output_path)
 print("-------------------")
