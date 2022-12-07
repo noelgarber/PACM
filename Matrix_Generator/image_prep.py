@@ -150,6 +150,42 @@ def ellipsoid_evaluator(x, y, a, b, c, d, return_value = False, eval_verbose = F
         return inside
 
 '''
+Simple function to take a list of peaks from find_peaks() and collapse it to a single mean peak.
+Input: 
+    peaks = list of peaks
+    values = the values that find_peaks() was originally applied to
+Output: 
+    peak = a single integer
+'''
+def collapse_peaks(peaks, values): 
+    if len(peaks) > 0: 
+        peak = round(peaks.mean())
+    else: 
+        print("\t\t\tWarning: no peaks; defaulting to center.")
+        peak = round(len(values) / 2)
+    return peak
+
+#Simple function to check if a peak index is within the tolerated bounds, and if not, nudge it to the inner edge of the bounds.
+def nudge_peak(peak, tolerated_variance, spot_midpoint): 
+    if peak < (spot_midpoint - tolerated_variance): 
+        peak = spot_midpoint - tolerated_variance
+    elif peak > (spot_midpoint + tolerated_variance): 
+        peak = spot_midpoint + tolerated_variance
+    return peak
+
+#Finds the distance to the nearest border to a given index in a range of indices.
+def nearest_border(index, length, verbose = False):
+    if (index - 0) <= (length - index): 
+        radius = index - 0
+        if verbose: 
+            print("\t\t\tradius from distance to index[0]:", radius)
+    else: 
+        radius = length - index
+        if centering_verbose: 
+            print("\t\t\tradius from distance to index[-1]:", radius)
+    return radius
+
+'''
 Finds the center and radii of a sliced spot image.
 Marks the centre of the spot as the intersection of the peak values for horizontal and vertical summed lines in the image array. 
 If more than one peak is found in either the horizontal or vertical dimension, the peaks are averaged. 
@@ -158,11 +194,14 @@ Inputs:
     tolerance_fraction = a value from 0 to 1 for the allowed deviation from image center while finding peaks/crosshairs/actual spot center
         0 = no tolerance
         1 = total tolerance
+    tolerance_mode = "whole" or "subslice"
+        "whole": find_peaks applied to whole image and then nudged based on tolerance_fraction
+        "subslice": find_peaks applied to subslice of spot image sliced based on tolerance_fraction
 Returns: 
     peak_intersect = (height, width) as a point
     vertical_radius, horizontal_radius = the radii of the spot, defined by the distance to the nearest image border from the peak_intersect
 '''
-def center_spot(spot_image, tolerance_fraction, centering_verbose = False): 
+def center_spot(spot_image, tolerance_fraction, tolerance_mode = "whole", centering_verbose = False): 
     if centering_verbose: 
         print("\t\t\trunning center_spot()...")
         print("\t\t\tspot_image shape =", spot_image.shape)
@@ -191,8 +230,14 @@ def center_spot(spot_image, tolerance_fraction, centering_verbose = False):
         print("\t\t\ttolerated_horizontal_variance =", tolerated_horizontal_variance)
         print("\t\t\tfinding spot_vlinesums and spot_hlinesums...")
 
-    spot_vlinesums = spot_image[:,image_horizontal_midpoint - tolerated_horizontal_variance : image_horizontal_midpoint + tolerated_horizontal_variance].sum(axis = 0)
-    spot_hlinesums = spot_image[image_vertical_midpoint - tolerated_vertical_variance : image_vertical_midpoint + tolerated_vertical_variance,:].sum(axis = 1)
+    if tolerance_mode == "subslice": 
+        spot_vlinesums = spot_image[:,image_horizontal_midpoint - tolerated_horizontal_variance : image_horizontal_midpoint + tolerated_horizontal_variance].sum(axis = 0)
+        spot_hlinesums = spot_image[image_vertical_midpoint - tolerated_vertical_variance : image_vertical_midpoint + tolerated_vertical_variance,:].sum(axis = 1)
+    elif tolerance_mode == "whole": 
+        spot_vlinesums = spot_image.sum(axis = 0)
+        spot_hlinesums = spot_image.sum(axis = 1)
+    else: 
+        raise Exception("Error in center_spot: tolerance_mode \"" + tolerance_mode + "\" is not an accepted mode (expected \"whole\" or \"subslice\").")
 
     if centering_verbose: 
         print("\t\t\tspot_vlinesums:", spot_vlinesums)
@@ -203,35 +248,36 @@ def center_spot(spot_image, tolerance_fraction, centering_verbose = False):
     spot_hlinepeaks, _ = find_peaks(spot_hlinesums)
 
     if centering_verbose: 
-        print("\t\t\tundadjusted spot_vlinepeaks:", spot_vlinepeaks)
-        print("\t\t\tunadjusted spot_hlinepeaks:", spot_hlinepeaks)
-        print("\t\t\ttaking mean of unadjusted peaks...")
+        #Note that if tolerance_mode is "subslice", these values are unadjusted subslice indices
+        print("\t\t\tspot_vlinepeaks:", spot_vlinepeaks)
+        print("\t\t\tspot_hlinepeaks:", spot_hlinepeaks)
+        print("\t\t\ttaking mean of peaks...")
 
-    if len(spot_vlinepeaks) > 0: 
-        spot_vlinepeak = round(spot_vlinepeaks.mean())
-    else: 
-        print("\t\t\tWarning: find_peaks() found no vertical line peaks; defaulting to center line.")
-        spot_vlinepeak = round(len(spot_vlinesums) / 2)
-
-    if len(spot_hlinepeaks) > 0: 
-        spot_hlinepeak = round(spot_hlinepeaks.mean())
-    else: 
-        print("\t\t\tWarning: find_peaks() found no horizontal line peaks; defaulting to center line.")
-        spot_hlinepeak = round(len(spot_hlinesums) / 2)
-
-    if centering_verbose: 
-        print("\t\t\tunadjusted spot_vlinepeak:", spot_vlinepeak)
-        print("\t\t\tunadjusted spot_hlinepeak:", spot_hlinepeak)
-        print("\t\t\tperforming index adjustment...")
-
-    spot_vlinepeak = spot_vlinepeak + (image_horizontal_midpoint - tolerated_horizontal_variance)
-    spot_hlinepeak = spot_hlinepeak + (image_vertical_midpoint - tolerated_vertical_variance)
-
-    peak_intersect = (spot_hlinepeak, spot_vlinepeak)
+    #Get single mean peak
+    spot_vlinepeak = collapse_peaks(peaks = spot_vlinepeaks, values = spot_vlinesums)
+    spot_hlinepeak = collapse_peaks(peaks = spot_hlinepeaks, values = spot_hlinesums)
 
     if centering_verbose: 
         print("\t\t\tspot_vlinepeak:", spot_vlinepeak)
         print("\t\t\tspot_hlinepeak:", spot_hlinepeak)
+
+    if centering_verbose and tolerance_mode == "subslice": 
+        print("\t\t\tperforming index adjustment...")
+
+    if tolerance_mode == "subslice": 
+        #Adjust indices of slice to apply to whole spot image
+        spot_vlinepeak = spot_vlinepeak + (image_horizontal_midpoint - tolerated_horizontal_variance)
+        spot_hlinepeak = spot_hlinepeak + (image_vertical_midpoint - tolerated_vertical_variance)
+    elif tolerance_mode == "whole": 
+        #Nudge indices to obey tolerance_fraction
+        spot_vlinepeak = nudge_peak(peak = spot_vlinepeak, tolerated_variance = tolerated_horizontal_variance, spot_midpoint = image_horizontal_midpoint)
+        spot_hlinepeak = nudge_peak(peak = spot_hlinepeak, tolerated_variance = tolerated_vertical_variance, spot_midpoint = image_vertical_midpoint)
+
+    peak_intersect = (spot_hlinepeak, spot_vlinepeak)
+
+    if centering_verbose: 
+        print("\t\t\tcorrected spot_vlinepeak:", spot_vlinepeak)
+        print("\t\t\tcorrected spot_hlinepeak:", spot_hlinepeak)
         print("\t\t\tpeak_intersect:", peak_intersect)
 
     #Find nearest distance to border and use this for the radius, for both dimensions
@@ -239,23 +285,8 @@ def center_spot(spot_image, tolerance_fraction, centering_verbose = False):
     if centering_verbose: 
         print("\t\t\tCalculating nearest distance to borders for use as vertical and horizontal radii...")
 
-    if (spot_hlinepeak - 0) <= (spot_image_height - spot_hlinepeak): 
-        vertical_radius = spot_hlinepeak - 0
-        if centering_verbose: 
-            print("\t\t\tvertical_radius from distance to top:", vertical_radius)
-    else: 
-        vertical_radius = spot_image_height - spot_hlinepeak
-        if centering_verbose: 
-            print("\t\t\tvertical_radius from distance to bottom:", vertical_radius)
-
-    if (spot_vlinepeak - 0) <= (spot_image_width - spot_vlinepeak): 
-        horizontal_radius = spot_vlinepeak - 0
-        if centering_verbose: 
-            print("\t\t\thorizontal_radius from distance to left:", horizontal_radius)
-    else: 
-        horizontal_radius = spot_image_width - spot_vlinepeak
-        if centering_verbose: 
-            print("\t\t\thorizontal_radius from distance to right:", horizontal_radius)
+    vertical_radius = nearest_border(index = spot_hlinepeak, length = spot_image_height, verbose = True)
+    horizontal_radius = nearest_border(index = spot_vlinepeak, length = spot_image_width, verbose = True)
 
     return peak_intersect, vertical_radius, horizontal_radius
 
@@ -313,7 +344,8 @@ def ellipsoid_constrain(spot_images, dilation_factor = 1, centering = True, retu
         '''
 
         if centering:             
-            peak_intersect, vertical_radius, horizontal_radius = center_spot(spot_image, centering_verbose = constrain_verbose, tolerance_fraction = 0.5)
+            peak_intersect, vertical_radius, horizontal_radius = center_spot(spot_image, centering_verbose = constrain_verbose, 
+                tolerance_fraction = 0.5, tolerance_mode = "whole")
 
             if constrain_verbose: 
                 print("\t\t\tpeak_intersect =", peak_intersect)
@@ -484,7 +516,7 @@ Outputs results as a tuple of (vertical_line_peaks, vertical_line_mins, horizont
     vertical_line_peaks, vertical_line_mins = peaks and minima in the sums of vertical lines of pixels across the horizontal axis of the image
     horizontal_line_peaks, horizontal_line_mins = peaks and minima in the sums of horizontal lines of pixels across the vertical axis of the image
 '''
-def grid_peak_finder(image_ndarray, grid_dimensions, manual_prompt = False): 
+def grid_peak_finder(image_ndarray, grid_dimensions, manual_prompt = False, grid_peak_verbose = False): 
     #grid_dimensions is a tuple or list
     grid_width, grid_height = grid_dimensions #refers to number of spot positions in the 2D blot
 
@@ -506,11 +538,21 @@ def grid_peak_finder(image_ndarray, grid_dimensions, manual_prompt = False):
         horizontal_line_mins, _ = find_peaks(horizontal_line_sums * -1)
 
     if len(vertical_line_peaks) != grid_width: 
-        exception_text = "Error in grid_finder: found " + str(len(vertical_line_peaks)) + " peaks, but grid should be " + str(grid_width) + " spots in width."
-        raise Exception(exception_text)
+        print("Error in grid_peak_finder: found " + str(len(vertical_line_peaks)) + " peaks, but grid should be " + str(grid_width) + " spots in width.")
+        print("vertical_line_peaks =", vertical_line_peaks)
+        print("vertical_line_sums =", vertical_line_sums)
+        print("showing graph of vertical_line_sums...")
+        plt.plot(vertical_line_sums)
+        plt.show()
+        raise Exception("grid_peak_finder error: wrong number of peaks detected")
     elif len(horizontal_line_peaks) != grid_height: 
-        exception_text = "Error in grid_finder: found " + str(len(horizontal_line_peaks)) + " peaks, but grid should be " + str(grid_height) + " spots in height."
-        raise Exception(exception_text)
+        print("Error in grid_finder: found " + str(len(horizontal_line_peaks)) + " peaks, but grid should be " + str(grid_height) + " spots in height.")
+        print("horizontal_line_peaks =", horizontal_line_peaks)
+        print("horizontal_line_sums =", horizontal_line_sums)
+        print("showing graph of horizontal_line_sums...")
+        plt.plot(horizontal_line_sums)
+        plt.show()
+        raise Exception("grid_peak_finder error: wrong number of peaks detected")
 
     grid_peak_results = (vertical_line_peaks, vertical_line_mins, horizontal_line_peaks, horizontal_line_mins)
 
