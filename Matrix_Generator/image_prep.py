@@ -506,6 +506,29 @@ def manual_peak_finder(line_sums, axis):
     return line_peaks, line_mins
 
 '''
+Infers line peak indices based on grid dimensions (length or width) when searching for actual peaks is not possible. 
+As input, takes: 
+    line_sums = vertical_line_sums or horizontal_line_sums
+    grid_dimension_length = grid_width or grid_height, respectively
+Outputs a NumPy array of peaks. 
+'''
+def infer_peaks(line_sums, grid_dimension_length): 
+    print("\t\t\tinferring peak locations based on grid dimensions...")
+    print("\t\t\t\tcaution: requires images to be cropped to precise edges!")
+    mean_spot_dimension = len(line_sums) / grid_dimension_length
+
+    line_peaks = np.arange(grid_dimension_length - 1) * mean_spot_dimension
+    line_peaks = line_peaks.round().astype(int) + (mean_spot_dimension / 2) #rounds as gives integers, as indices must be ints
+
+    line_mins = np.arange(grid_dimension_length + 1) * mean_spot_dimension
+    line_mins = line_mins.round().astype(int)
+
+    if line_mins[-1] > len(line_sums): 
+        line_mins[-1] = len(line_sums) #catches error where the ending number, rounded up, might otherwise go out of bounds
+    
+    return line_peaks, line_mins
+
+'''
 Function to define the coordinates of the spot array grid. 
 As input, takes: 
     image_ndarray = an image as a grayscale 2D numpy array
@@ -538,21 +561,17 @@ def grid_peak_finder(image_ndarray, grid_dimensions, manual_prompt = False, grid
         horizontal_line_mins, _ = find_peaks(horizontal_line_sums * -1)
 
     if len(vertical_line_peaks) != grid_width: 
-        print("Error in grid_peak_finder: found " + str(len(vertical_line_peaks)) + " peaks, but grid should be " + str(grid_width) + " spots in width.")
-        print("vertical_line_peaks =", vertical_line_peaks)
-        print("vertical_line_sums =", vertical_line_sums)
-        print("showing graph of vertical_line_sums...")
+        print("\t\t\tgrid_peak_finder warning: found " + str(len(vertical_line_peaks)) + " peaks, but grid should be " + str(grid_width) + " spots in width.")
+        print("\t\t\tshowing graph of vertical_line_sums...")
         plt.plot(vertical_line_sums)
         plt.show()
-        raise Exception("grid_peak_finder error: wrong number of peaks detected")
+        vertical_line_peaks, vertical_line_mins = infer_peaks(line_sums = vertical_line_sums, grid_dimension_length = grid_width)
     elif len(horizontal_line_peaks) != grid_height: 
-        print("Error in grid_finder: found " + str(len(horizontal_line_peaks)) + " peaks, but grid should be " + str(grid_height) + " spots in height.")
-        print("horizontal_line_peaks =", horizontal_line_peaks)
-        print("horizontal_line_sums =", horizontal_line_sums)
-        print("showing graph of horizontal_line_sums...")
+        print("\t\t\tgrid_peak_finder warning: found " + str(len(horizontal_line_peaks)) + " peaks, but grid should be " + str(grid_height) + " spots in height.")
+        print("\t\t\tshowing graph of horizontal_line_sums...")
         plt.plot(horizontal_line_sums)
         plt.show()
-        raise Exception("grid_peak_finder error: wrong number of peaks detected")
+        horizontal_line_peaks, horizontal_line_mins = infer_peaks(line_sums = horizontal_line_sums, grid_dimension_length = grid_height)
 
     grid_peak_results = (vertical_line_peaks, vertical_line_mins, horizontal_line_peaks, horizontal_line_mins)
 
@@ -713,7 +732,9 @@ for analyzed_array_tuple in analyzed_array_images:
         data_df.at[spot_coord, ei_col] = ellipsoid_index
 
     #Save modified images
-    imwrite(copy + "_" + scan + "_" + probe + "_reverse-log-transform.tif", array_image)
-    imwrite(copy + "_" + scan + "_" + probe + "_crosshairs.tif", sliced_image_crosshairs)
+    imwrite("Copy" + str(copy) + "_Scan" + str(scan) + "_" + probe + "_reverse-log-transform.tif", array_image)
+    imwrite("Copy" + str(copy) + "_Scan" + str(scan) + "_" + probe + "_crosshairs.tif", sliced_image_crosshairs)
+
+data_df.to_csv("preprocessed_data.csv")
 
 print("Done!")
