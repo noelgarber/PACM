@@ -3,10 +3,9 @@
 import numpy as np
 import pandas as pd
 import os
-import warnings
+import string
 import matplotlib.pyplot as plt
 from tifffile import imread, imwrite, imshow
-from matplotlib import image as img
 from scipy.signal import find_peaks
 
 '''
@@ -63,8 +62,7 @@ def image_slicer(image_ndarray, vlinepeaks_indices, vlinemins_indices, hlinepeak
         green_channel = image_ndarray.copy()
         blue_channel = image_ndarray.copy()
 
-    alphabet = ("A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", 
-        "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z") #Used for declaring coordinates later
+    alphabet = list(string.ascii_uppercase) #Used for declaring coordinates later
 
     vlpeaks_prev_mins, vlpeaks_next_mins = mins_between_peaks(vlinepeaks_indices, vlinemins_indices)
     hlpeaks_prev_mins, hlpeaks_next_mins = mins_between_peaks(hlinepeaks_indices, hlinemins_indices)
@@ -517,14 +515,22 @@ def infer_peaks(line_sums, grid_dimension_length):
     print("\t\t\t\tcaution: requires images to be cropped to precise edges!")
     mean_spot_dimension = len(line_sums) / grid_dimension_length
 
-    line_peaks = np.arange(grid_dimension_length - 1) * mean_spot_dimension
-    line_peaks = line_peaks.round().astype(int) + (mean_spot_dimension / 2) #rounds as gives integers, as indices must be ints
+    print("\t\t\t\tmean spot dimension in axis =", mean_spot_dimension)
+    print("\t\t\t\tgrid dimension =", grid_dimension_length)
+    print("\t\t\t\tgrid dimension (px) =", len(line_sums))
+
+    line_peaks = np.arange(grid_dimension_length) * mean_spot_dimension
+    line_peaks = line_peaks + (mean_spot_dimension / 2) #starts halfway across the first inferred spot square, making the assumption that the peak is in the middle
+    line_peaks = line_peaks.round().astype(int) #rounds and gives integers, as indices must be ints
+    print("\t\t\t\tinferred line peaks =", line_peaks)
+    print("\t\t\t\tpeak count =", len(line_peaks))
 
     line_mins = np.arange(grid_dimension_length + 1) * mean_spot_dimension
     line_mins = line_mins.round().astype(int)
-
-    if line_mins[-1] > len(line_sums): 
-        line_mins[-1] = len(line_sums) #catches error where the ending number, rounded up, might otherwise go out of bounds
+    if line_mins[-1] > (len(line_sums) - 1):
+        line_mins[-1] = len(line_sums) - 1 #catches error where the ending number, rounded up, might otherwise go out of bounds
+    print("\t\t\t\tinferred line mins =", line_mins)
+    print("\t\t\t\tmin count =", len(line_mins))
     
     return line_peaks, line_mins
 
@@ -560,17 +566,10 @@ def grid_peak_finder(image_ndarray, grid_dimensions, manual_prompt = False, grid
         horizontal_line_peaks, _ = find_peaks(horizontal_line_sums)
         horizontal_line_mins, _ = find_peaks(horizontal_line_sums * -1)
 
-    if len(vertical_line_peaks) != grid_width: 
-        print("\t\t\tgrid_peak_finder warning: found " + str(len(vertical_line_peaks)) + " peaks, but grid should be " + str(grid_width) + " spots in width.")
-        print("\t\t\tshowing graph of vertical_line_sums...")
-        plt.plot(vertical_line_sums)
-        plt.show()
+    if len(vertical_line_peaks) != grid_width or len(horizontal_line_peaks) != grid_height:
+        print("\t\t\tgrid_peak_finder warning: found wrong numbers of peaks")
+        print("\t\t\texpected dimensions of", grid_width, "x", grid_height, ", but peak counts of", vertical_line_peaks, "x", horizontal_line_peaks, "were detected.")
         vertical_line_peaks, vertical_line_mins = infer_peaks(line_sums = vertical_line_sums, grid_dimension_length = grid_width)
-    elif len(horizontal_line_peaks) != grid_height: 
-        print("\t\t\tgrid_peak_finder warning: found " + str(len(horizontal_line_peaks)) + " peaks, but grid should be " + str(grid_height) + " spots in height.")
-        print("\t\t\tshowing graph of horizontal_line_sums...")
-        plt.plot(horizontal_line_sums)
-        plt.show()
         horizontal_line_peaks, horizontal_line_mins = infer_peaks(line_sums = horizontal_line_sums, grid_dimension_length = grid_height)
 
     grid_peak_results = (vertical_line_peaks, vertical_line_mins, horizontal_line_peaks, horizontal_line_mins)
@@ -645,7 +644,7 @@ def analyze_array(copy, scan, probe, array_image, verbose_analysis = False, show
     if verbose_analysis: 
         print("\t\tcomputing background-adjusted signal and ellipsoid_index...")
 
-    spot_info_dict = ellipsoid_constrain(spot_images = image_slices, dilation_factor = 1, centering = False, constrain_verbose = True)
+    spot_info_dict = ellipsoid_constrain(spot_images = image_slices, dilation_factor = 1, centering = False, constrain_verbose = False)
         #Data structure: dict[spot_coordinates] = (background_adjusted_signal, ellipsoid_index, peak_intersect, top_left_corner)
 
     #Draw crosshairs on the individual spot peaks, which may not perfectly align with the hlinepeaks and vlinepeaks intersect points
@@ -707,7 +706,7 @@ for i, array_tuple in enumerate(array_images):
     copy, scan, probe, array_image = array_tuple
 
     analyzed_array_tuple = analyze_array(copy = copy, scan = scan, probe = probe, array_image = array_image, 
-        verbose_analysis = True, show_sliced_image = True, show_crosshairs_image = True, show_individual_spot_images = False)
+        verbose_analysis = True, show_sliced_image = False, show_crosshairs_image = True, show_individual_spot_images = False)
 
     analyzed_array_images.append(analyzed_array_tuple)
 
