@@ -5,6 +5,7 @@ import pandas as pd
 import os
 import string
 import matplotlib.pyplot as plt
+import csv
 from tifffile import imread, imwrite, imshow
 from scipy.signal import find_peaks
 
@@ -31,7 +32,7 @@ def mins_between_peaks(peaks_array, mins_array):
     previous_mins_dict = {}
 
     inter_peak_spaces = np.empty(0, dtype = int)
-    for i, peak in enumerate(peaks_array[0:-1]): 
+    for i, peak in enumerate(peaks_array[0:-1]):
         next_peak = peaks_array[i + 1]
         next_mins = array_between(mins_array, peak, next_peak)
         next_min = next_mins.mean()
@@ -53,7 +54,7 @@ Takes a complete spot array image as a 2D numpy array and slices it into images 
 To do this, it takes inputs of the indices of vertical and horizontal line peaks and minima. 
 If render_sliced_image is set to True, it will also draw a new image showing the slice lines. 
 '''
-def image_slicer(image_ndarray, vlinepeaks_indices, vlinemins_indices, hlinepeaks_indices, hlinemins_indices, render_sliced_image = True, slicer_debugging = False): 
+def image_slicer(image_ndarray, vlinepeaks_indices, vlinemins_indices, hlinepeaks_indices, hlinemins_indices, render_sliced_image = True, verbose = False, slicer_debugging = False):
     if render_sliced_image: 
         max_pixel = image_ndarray.max()
 
@@ -179,7 +180,7 @@ def nearest_border(index, length, verbose = False):
             print("\t\t\tradius from distance to index[0]:", radius)
     else: 
         radius = length - index
-        if centering_verbose: 
+        if verbose:
             print("\t\t\tradius from distance to index[-1]:", radius)
     return radius
 
@@ -508,31 +509,95 @@ Infers line peak indices based on grid dimensions (length or width) when searchi
 As input, takes: 
     line_sums = vertical_line_sums or horizontal_line_sums
     grid_dimension_length = grid_width or grid_height, respectively
+Important: 
+    For infer_peaks() to generate valid results, input images must be cropped right to the border of the spots on all sides, with no extra black space
 Outputs a NumPy array of peaks. 
 '''
-def infer_peaks(line_sums, grid_dimension_length): 
-    print("\t\t\tinferring peak locations based on grid dimensions...")
-    print("\t\t\t\tcaution: requires images to be cropped to precise edges!")
-    mean_spot_dimension = len(line_sums) / grid_dimension_length
+def infer_peaks(line_sums, expected_peaks, collapse_extra_peaks = False, detected_peaks = None, tolerance_spot_frac = 0.25):
+    mean_spot_dimension = len(line_sums) / expected_peaks
 
-    print("\t\t\t\tmean spot dimension in axis =", mean_spot_dimension)
-    print("\t\t\t\tgrid dimension =", grid_dimension_length)
-    print("\t\t\t\tgrid dimension (px) =", len(line_sums))
+    inferred_line_peaks = np.arange(expected_peaks) * mean_spot_dimension
+    inferred_line_peaks = inferred_line_peaks + (mean_spot_dimension / 2) #starts halfway across the first inferred spot square, making the assumption that the peak is in the middle
+    inferred_line_peaks = inferred_line_peaks.round().astype(int) #rounds and gives integers, as indices must be ints
 
-    line_peaks = np.arange(grid_dimension_length) * mean_spot_dimension
-    line_peaks = line_peaks + (mean_spot_dimension / 2) #starts halfway across the first inferred spot square, making the assumption that the peak is in the middle
-    line_peaks = line_peaks.round().astype(int) #rounds and gives integers, as indices must be ints
-    print("\t\t\t\tinferred line peaks =", line_peaks)
-    print("\t\t\t\tpeak count =", len(line_peaks))
+    inferred_line_mins = np.arange(expected_peaks + 1) * mean_spot_dimension
+    inferred_line_mins = inferred_line_mins.round().astype(int)
+    if inferred_line_mins[-1] > (len(line_sums) - 1):
+        inferred_line_mins[-1] = len(line_sums) - 1 #catches error where the ending number, rounded up, might otherwise go out of bounds
 
-    line_mins = np.arange(grid_dimension_length + 1) * mean_spot_dimension
-    line_mins = line_mins.round().astype(int)
-    if line_mins[-1] > (len(line_sums) - 1):
-        line_mins[-1] = len(line_sums) - 1 #catches error where the ending number, rounded up, might otherwise go out of bounds
-    print("\t\t\t\tinferred line mins =", line_mins)
-    print("\t\t\t\tmin count =", len(line_mins))
+    if collapse_extra_peaks:
+        print("\t\t\t\tcollapsing extra peaks...")
+        print("\t\t\t\toriginal peaks:", detected_peaks)
+        print("\t\t\t\toriginal peak count:", len(detected_peaks))
+        peak_deltas = detected_peaks[1:] - detected_peaks[0:-1]
+        tolerated_delta = mean_spot_dimension * tolerance_spot_frac
+        print("\t\t\t\ttolerated_delta =", tolerated_delta)
+        deltas_indices = np.where(peak_deltas <= tolerated_delta)[0]
+        print("\t\t\t\tdeltas_indices =", deltas_indices)
+        append_peaks = np.empty(0)
+        remove_peaks = np.empty(0)
+        print("\t\t\t\t---", "\n\t\t\t\tcollapsing qualifying peaks...")
+        for delta_index in deltas_indices:
+            print("\t\t\t\tcurrent delta index:", delta_index)
+            print("\t\t\t\tcorresponding pair of peaks:", detected_peaks[delta_index], detected_peaks[delta_index + 1])
+            mean_detected_peak = round((detected_peaks[delta_index] + detected_peaks[delta_index + 1]) / 2)
+            print("\t\t\t\tmean:", mean_detected_peak)
+            append_peaks = np.append(append_peaks, mean_detected_peak)
+            remove_peaks = np.append(remove_peaks, [delta_index, delta_index + 1])
+        print("\t\t\t\t---")
+        append_peaks, remove_peaks = append_peaks.astype(int), remove_peaks.astype(int)
+        print("\t\t\t\tpeaks indices to remove:", remove_peaks)
+        print("\t\t\t\tpeaks to append:", append_peaks)
+        detected_peaks = np.delete(detected_peaks, remove_peaks)
+        detected_peaks = np.append(detected_peaks, append_peaks)
+        line_peaks = np.sort(detected_peaks)
+        print("\t\t\t\tnew list of peaks:", line_peaks)
+        print("\t\t\t\tnew peak count:", len(line_peaks))
+        line_mins = inferred_line_mins
+    else:
+        line_peaks = inferred_line_peaks
+        line_mins = inferred_line_mins
     
     return line_peaks, line_mins
+
+'''
+Function to conditionally apply infer_peaks() when there is a mismatch between the detected peak count and the expected peak count. 
+As input, it takes: 
+    line_sums = array of vertical or horizontal line sums
+    actual_peaks = the detected peaks
+    actual_peaks_count = the number of detected peaks
+    actual_mins - the detected mins
+    expected_peaks_count = the number of peaks that are expected based on the grid dimensions (number of spots expected)
+    line_axis_name = the line sum axis; must be "vertical" or "horizontal"
+    tolerance_spot_frac = the fraction of the spot dimension (in pixels) that is the allowed distance between peaks for them to be declared mergeable
+    extra_peaks_proportion = the fraction of the expected peak count that is allowed for the collapse_extra_peaks method to be used
+It outputs: 
+    output_line_peaks = new array of line peaks based on conditionally applying infer_peaks()
+    output_line_mins = new array of line mins based on conditionally applying infer_peaks()
+'''
+
+def handle_mismatch(line_sums, actual_peaks, actual_mins, expected_peaks_count, line_axis_name, tolerance_spot_frac = 0.25, extra_peaks_proportion = 0.25):
+    actual_peaks_count = len(actual_peaks)
+    extra_peaks_ceiling = (extra_peaks_proportion + 1) * expected_peaks_count
+
+    print("\t\t\tgrid_peak_finder warning: found", actual_peaks_count, line_axis_name, "line peaks, but", expected_peaks_count, "were expected.")
+
+    if actual_peaks_count < expected_peaks_count or actual_peaks_count > extra_peaks_ceiling:
+        print("\t\t\t\tinferring", line_axis_name, "line peaks from dimensions...")
+        output_line_peaks, output_line_mins = infer_peaks(line_sums = line_sums, expected_peaks = expected_peaks_count)
+    elif actual_peaks_count > expected_peaks_count and actual_peaks_count <= extra_peaks_ceiling:
+        print("\t\t\t\taveraging extra", line_axis_name, "line peaks that are within", tolerance_spot_frac * 100, "% of average spot dimension...")
+        output_line_peaks, output_line_mins = infer_peaks(line_sums = line_sums, expected_peaks = expected_peaks_count,
+                                                              collapse_extra_peaks = True,
+                                                              detected_peaks = actual_peaks,
+                                                              tolerance_spot_frac = tolerance_spot_frac)
+        if len(output_line_peaks) != expected_peaks_count:
+            print("\t\t\t\tfailed to correct number of peaks by averaging within the tolerance; reverting to inferring peaks by grid dimensions...")
+            output_line_peaks, output_line_mins = infer_peaks(line_sums=line_sums, expected_peaks=expected_peaks_count)
+    else:
+        output_line_peaks, output_line_mins = actual_peaks, actual_mins
+
+    return output_line_peaks, output_line_mins
 
 '''
 Function to define the coordinates of the spot array grid. 
@@ -566,11 +631,19 @@ def grid_peak_finder(image_ndarray, grid_dimensions, manual_prompt = False, grid
         horizontal_line_peaks, _ = find_peaks(horizontal_line_sums)
         horizontal_line_mins, _ = find_peaks(horizontal_line_sums * -1)
 
-    if len(vertical_line_peaks) != grid_width or len(horizontal_line_peaks) != grid_height:
-        print("\t\t\tgrid_peak_finder warning: found wrong numbers of peaks")
-        print("\t\t\texpected dimensions of", grid_width, "x", grid_height, ", but peak counts of", vertical_line_peaks, "x", horizontal_line_peaks, "were detected.")
-        vertical_line_peaks, vertical_line_mins = infer_peaks(line_sums = vertical_line_sums, grid_dimension_length = grid_width)
-        horizontal_line_peaks, horizontal_line_mins = infer_peaks(line_sums = horizontal_line_sums, grid_dimension_length = grid_height)
+    if len(vertical_line_peaks) != grid_width:
+        vertical_line_peaks, vertical_line_mins = handle_mismatch(line_sums = vertical_line_sums, actual_peaks = vertical_line_peaks,
+                                                                  actual_mins = vertical_line_mins, expected_peaks_count = grid_width,
+                                                                  line_axis_name = "vertical", tolerance_spot_frac = 0.25)
+    else:
+        print("\t\t\tfound correct number of vertical line peaks")
+
+    if len(horizontal_line_peaks) != grid_height:
+        horizontal_line_peaks, horizontal_line_mins = handle_mismatch(line_sums = horizontal_line_sums, actual_peaks = horizontal_line_peaks,
+                                                                      actual_mins = horizontal_line_mins, expected_peaks_count = grid_height,
+                                                                      line_axis_name = "horizontal", tolerance_spot_frac = 0.25)
+    else:
+        print("\t\t\tfound correct number of horizontal line peaks")
 
     grid_peak_results = (vertical_line_peaks, vertical_line_mins, horizontal_line_peaks, horizontal_line_mins)
 
@@ -659,12 +732,32 @@ def analyze_array(copy, scan, probe, array_image, verbose_analysis = False, show
     sliced_image_crosshairs = np.stack(channels, axis = 2)
 
     if show_crosshairs_image: 
-        imshow(sliced_image_crosshairs)
+        imshow(sliced_image_crosshairs / sliced_image_crosshairs.max())
         plt.show()
 
     analyzed_array_tuple = (copy, scan, probe, array_image, spot_info_dict, sliced_image_crosshairs)
 
     return analyzed_array_tuple
+
+#Function to convert a 2-column CSV file into a dictionary, where the first column holds keys and the second column holds values
+def csv_to_dict(filepath):
+    result = {}
+    with open(filepath, 'r') as csvfile:
+        reader = csv.reader(csvfile)
+        for row in reader:
+            key = row[0]
+            value = row[1]
+            result[key] = value
+    return result
+
+#Function to append elements to the value of a key-value pair in a dictionary, where the value is a list
+def dict_value_append(input_dict, key, element_to_append):
+    if input_dict.get(key) == None:
+        input_dict[key] = [element_to_append]
+    else:
+        value_list = input_dict.get(key)
+        value_list.append(element_to_append)
+        input_dict[key] = value_list
 
 #---------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -697,6 +790,12 @@ for filename in filenames_list:
 print("-----------------------")
 print("Extracting signals from array images...")
 
+crosshairs_image_popup = input("Display images as popups as they are generated? (Y/N)  ")
+if crosshairs_image_popup == "Y":
+    crosshairs_image_popup = True
+else:
+    crosshairs_image_popup = False
+
 analyzed_array_images = []
 
 for i, array_tuple in enumerate(array_images): 
@@ -706,7 +805,7 @@ for i, array_tuple in enumerate(array_images):
     copy, scan, probe, array_image = array_tuple
 
     analyzed_array_tuple = analyze_array(copy = copy, scan = scan, probe = probe, array_image = array_image, 
-        verbose_analysis = True, show_sliced_image = False, show_crosshairs_image = True, show_individual_spot_images = False)
+        verbose_analysis = True, show_sliced_image = False, show_crosshairs_image = crosshairs_image_popup, show_individual_spot_images = False)
 
     analyzed_array_images.append(analyzed_array_tuple)
 
@@ -716,24 +815,102 @@ print("Assembling dataframe and saving images...")
 
 data_df = pd.DataFrame() #initialize blank dataframe
 
+output_directory = os.path.join(os.getcwd(), "image_prep_output")
+if not os.path.exists(output_directory):
+    os.makedirs(output_directory)
+
+rlt_output_directory = os.path.join(output_directory, "reverse_log_transformed_images")
+if not os.path.exists(rlt_output_directory):
+    os.makedirs(rlt_output_directory)
+
+crosshairs_output_directory = os.path.join(output_directory, "crosshairs-marked_spot_images")
+if not os.path.exists(crosshairs_output_directory):
+    os.makedirs(crosshairs_output_directory)
+
+bas_cols_dict = {} #Dictionary of lists of background-adjusted signal column names, where the key is the probe name
+ei_cols_dict = {} #Dictionary of lists of ellipsoid index column names, where the key is the probe name
+new_cols_dict = {} #Dictionary that includes both of the above, along with the copy and scan numbers, in the form of (copy, scan, bas_col, ei_col)
+
 for analyzed_array_tuple in analyzed_array_images: 
     copy, scan, probe, array_image, spot_info_dict, sliced_image_crosshairs = analyzed_array_tuple
-    
+
+    col_prefix = probe + "\nCopy " + str(copy) + "\nScan " + str(scan)
+    bas_col = col_prefix + "\nBackground-Adjusted_Signal"
+    ei_col = col_prefix + "\nEllipsoid_Index"
+
+    #Assign column names to dict by probe name
+    dict_value_append(bas_cols_dict, probe, bas_col)
+    dict_value_append(ei_cols_dict, probe, ei_col)
+    dict_value_append(new_cols_dict, probe, (copy, scan, bas_col, ei_col))
+
     #Assign dataframe values
-    col_prefix = probe + "\n" + copy + "," + scan
     for spot_coord, signal_tuple in spot_info_dict.items(): 
         background_adjusted_signal, ellipsoid_index, _, _ = signal_tuple
-        
-        bas_col = col_prefix + "\nBackground-Adjusted_Signal"
+
         data_df.at[spot_coord, bas_col] = background_adjusted_signal
-        
-        ei_col = col_prefix + "\nEllipsoid_Index"
         data_df.at[spot_coord, ei_col] = ellipsoid_index
 
-    #Save modified images
-    imwrite("Copy" + str(copy) + "_Scan" + str(scan) + "_" + probe + "_reverse-log-transform.tif", array_image)
-    imwrite("Copy" + str(copy) + "_Scan" + str(scan) + "_" + probe + "_crosshairs.tif", sliced_image_crosshairs)
+    #Save modified image
+    imwrite(os.path.join(rlt_output_directory, "Copy" + str(copy) + "_Scan" + str(scan) + "_" + probe + "_reverse-log-transform.tif"), array_image)
+    imwrite(os.path.join(crosshairs_output_directory, "Copy" + str(copy) + "_Scan" + str(scan) + "_" + probe + "_crosshairs.tif"), sliced_image_crosshairs)
 
-data_df.to_csv("preprocessed_data.csv")
+#Declare probe order for sorting dataframe columns
+probes_ordered = []
+input_probe_order = input("Would you like to specify the order of probes for sorting columns? (Y/N)  ")
+if input_probe_order == "Y":
+    print("\tThe probes in this dataset are:", list(ei_cols_dict.keys()))
+    print("\tPlease enter the probes in the order you wish them to appear. Hit enter when done.")
+    no_more_probes = False
+    while not no_more_probes:
+        next_probe = input("Probe name:  ")
+        if next_probe != "":
+            probes_ordered.append(next_probe)
+        else:
+            no_more_probes = True
+else:
+    probes_ordered = list(ei_cols_dict.keys())
+    print("\tUsing arbitrary probe order:", probes_ordered)
+
+#Sorting dataframe and testing significance of hits
+print("Organizing dataframe...")
+
+sorted_cols = ["Peptide_Name"] #Adds a column to receive peptide names later
+data_df.insert(0, "Peptide_Name", "")
+for current_probe in probes_ordered:
+    col_tuples = new_cols_dict.get(current_probe)
+    col_tuples = sorted(col_tuples, key = lambda x: x[0]) #Sorts by copy number
+    new_cols_dict[current_probe] = col_tuples
+    for col_tuple in col_tuples:
+        sorted_cols.append(col_tuple[2]) #Appends background_adjusted_signal column name
+        sorted_cols.append(col_tuple[3]) #Appends ellipsoid_index column name
+    data_df.insert(1, current_probe + "_call", "")
+    sorted_cols.append(current_probe + "_call")
+
+data_df = data_df[sorted_cols]
+
+#Test significance
+print("Testing significance of hits...")
+ei_sig_thres = float(input("\tEnter the ellipsoid index threshold above which a hit is considered significant:  "))
+
+for current_probe in probes_ordered:
+    call_col = current_probe + "_call"
+    ei_cols = ei_cols_dict.get(current_probe)
+    data_df[call_col] = data_df.apply(lambda x: "Pass" if (x[ei_cols] > ei_sig_thres).all() else "", axis = 1)
+
+#Add peptide names
+add_names = input("Add peptide names from CSV file mapping coordinates to names? (Y/N)  ")
+if add_names == "Y":
+    names_path = input("\tEnter the path containing the CSV with coordinate-name pairs:  ")
+    names_dict = csv_to_dict(names_path)
+    print("Dictionary of coordinate-name pairs:")
+    print(names_dict)
+
+for i, row in data_df.iterrows():
+    print("Row:", i)
+    pep_name = names_dict.get(i)
+    print("Peptide name:", pep_name)
+    data_df.at[i, "Peptide_Name"] = pep_name
+
+data_df.to_csv(os.path.join(output_directory, "preprocessed_data.csv"))
 
 print("Done!")
