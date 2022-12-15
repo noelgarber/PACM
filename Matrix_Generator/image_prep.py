@@ -39,11 +39,26 @@ As arguments, it requires:
     spot_dimensions = a tuple of (number of spots in width, number of spots in height)
 Usage: 
     var = SpotArray(tiff_path = ______, spot_dimensions = _______, verbose = False/True, suppress_warnings = False/True)
+Default objects: 
+    Basic info: 
+        self.copy_number = the copy/replicate number, parsed from the filename
+        self.scan_number = the scan order number, for when arrays have been probed multiple times with different baits
+        self.probe_name = the name of the probe protein
+    Source image data: 
+        self.grayscale_array = the original grayscale array held by the inputted tiff image
+        self.linear_array = the grayscale array with values squared, restoring the linear correlation between luminance and pixel value (undoes log transform)
+    Objects initialized automatically by self.analyze_array(): 
+        self.sliced_image = the sliced image, without crosshairs, showing grid borders
+        self.spot_info_dict = dict where keys = alphanumeric spot coordinates, and values = (background_adjusted_signal, ellipsoid_index, peak_intersect, top_left_corner)
+        self.sliced_image_crosshairs = the sliced image with crosshairs added to mark spot centers
+High-level methods: 
+    analyze_array(self, ellipsoid_dilation_factor = 1, show_sliced_image = False, show_crosshairs_image = False, show_individual_spot_images = False, center_spots = True, verbose = False)
+        This function auto-runs with the default settings, but can be run again with different settings. 
 '''
 class SpotArray:
     def __init__(self, tiff_path, spot_dimensions, verbose = False, suppress_warnings = False):
-
         self.grid_shape = spot_dimensions
+        self.filename = tiff_path.split("/")[-1].split(",")[0]
 
         # Initialize main grayscale image stored in tiff_path
         img = imread(tiff_path)
@@ -51,38 +66,29 @@ class SpotArray:
             layers = img.shape[2]
         except:
             layers = 1
-        if layers > 1:grid_peak_finder(
+        if layers > 1:
             img = img[:,:,0]
-            warnings.warn("SpotArray warning: multiple layers were found when importing " + tiff_path + "; the first layer was used.") if not suppress_warnings else None
+            print("\t\tCaution: multiple layers were found when importing " + self.filename + "; the first layer was used.") if not suppress_warnings else None
         self.grayscale_array = img
         self.linear_array = self.reverse_log_transform(img) # This creates an image where all the pixel values are squared, restoring the linear correlation between pixel value and true brightness.
 
         # Auto-extract copy, scan, and probe information from filename
-        filename = tiff_path.split("/")[-1].split(",")[0]
-        self.copy_number, self.scan_number, self.probe_name = None, None, None
-        print("\t\tcomputing background-adjusted signal and ellipsoid_index...") if verbose else None
-
-        # Make a dictionary holding alphanumeric spot coordinates as keys, storing tuples of (background_adjusted_signal, ellipsoid_index, peak_intersect, top_left_corner)
-        self.spot_info_dict = self.ellipsoid_constrain(spot_images = image_slices, dilation_factor = ellipsoid_dilation_factor, centering = center_spots, constrain_verbose = False)
-
-        # Draw crosshairs on the individual spot peaks, which may not perfectly align with the hlinepeaks and vlinepeaks intersect points
-        print("\t\tmaking image highlighting detected spots...") if verbose else None
+        self.probe_name = filename.split("_")[0] # Assumes that the first underscore-delimited element of the filename is the probe name
+        self.copy_number, self.scan_number = None, None
         for element in filename.split("_"):
             if "Copy" in element or "copy" in element:
                 self.copy_number = element[4:]
             elif "Scan" in element or "scan" in element:
                 self.scan_number = element[4:]
-            elif "Probe" in element or "probe" in element:
-                self.probe_name = element[5:]
 
         # Analyze the array automatically with the default variables
         self.analyze_array()
 
     # Function to reverse the log transform on an image such that intensity linearly correlates with luminance.
-    def reverse_log_transform(self):
-        if self.grayscale_array.max() > 1:
+    def reverse_log_transform(self, array):
+        if array.max() > 1:
             raise Exception("SpotArray.reverse_log_transform error: image array values out of range (expected: float between 0 and 1)")
-        array_squared = np.power(self.grayscale_array, 2)
+        array_squared = np.power(array, 2)
         return array_squared
 
     # High-level function that segments and analyzes the spots in the array
@@ -140,17 +146,17 @@ class SpotArray:
         vlpeaks, _ = find_peaks(vlsums)
         vlmins, _ = find_peaks(vlsums * -1)
         hlpeaks, _ = find_peaks(hlsums)
-        hlmins, _ = find_peaks(hlsums * -1) actual_peaks_count = the number of detected peaks
+        hlmins, _ = find_peaks(hlsums * -1)
 
         if len(vlpeaks) != grid_width:
-            vlpeaks, vlmins = handle_mismatch(line_sums = vlsums, actual_peaks = vlpeaks, actual_mins = vlmins,
+            vlpeaks, vlmins = self.handle_mismatch(line_sums = vlsums, actual_peaks = vlpeaks, actual_mins = vlmins,
                                               expected_peaks_count = grid_width, line_axis_name = "vertical",
                                               tolerance_spot_frac = 0.25, verbose = verbose)
         else:
             print("\t\t\tfound correct number of vertical line peaks")
 
         if len(hlpeaks) != grid_height:
-            hlpeaks, hlmins = handle_mismatch(line_sums = hlsums, actual_peaks=hlpeaks, actual_mins=hlmins,
+            hlpeaks, hlmins = self.handle_mismatch(line_sums = hlsums, actual_peaks=hlpeaks, actual_mins=hlmins,
                                               expected_peaks_count = grid_height, line_axis_name = "horizontal",
                                               tolerance_spot_frac = 0.25, verbose = verbose)
         else:
@@ -381,7 +387,7 @@ class SpotArray:
 
         for spot_coordinates, value in spot_images.items():
             top_left_corner, spot_image = value
-            print("\t\t\ttop left corner of current spot:", top_left_corner) if verbose else none
+            print("\t\t\ttop left corner of current spot:", top_left_corner) if verbose else None
 
             spot_image_height = len(spot_image)
             spot_image_width = len(spot_image[0])
@@ -409,7 +415,7 @@ class SpotArray:
             print("\t\t\tpeak_intersect =", peak_intersect, "\n\t\t\tvertical_radius =", vertical_radius,
                   "\n\t\t\thorizontal_radius =", horizontal_radius, "\n\t\t\tdilation factor =", dilation_factor) if verbose else None
 
-            a, b = horizontal_radius, vertical_radius
+            a, b = radii[1], radii[0] # horizontal radius, vertical radius
             c, d = peak_intersect[1], peak_intersect[0]
 
             print("\t\t\tThe inside-ellipsoid equation is (x-c)^2/(a^2) + (y-d)^2/(b^2) < 1",
@@ -549,7 +555,7 @@ class SpotArray:
         print("\t\t\tCalculating nearest distance to borders for use as vertical and horizontal radii...") if verbose else None
 
         # Make a list of vertical and horizontal radii, respectively
-        radii = [self.nearest_border(index=spot_hlinepeak, length=spot_image_height, verbose=True), self.nearest_border(index=spot_vlinepeak, length=spot_image_width, verbose=True)]
+        radii = [self.nearest_border(index = spot_hlinepeak, length = spot_image_height), self.nearest_border(index = spot_vlinepeak, length = spot_image_width)]
 
         return peak_intersect, radii
 
@@ -601,15 +607,11 @@ class SpotArray:
         return peak
 
     # Finds the distance to the nearest border to a given index in a range of indices.
-    def nearest_border(self, index, length, verbose = False):
+    def nearest_border(self, index, length):
         if (index - 0) <= (length - index):
-            radius = index - 0
-            if verbose:
-                print("\t\t\tradius from distance to index[0]:", radius)
+            radius = index - 0 # radius from distance to index[0]
         else:
-            radius = length - index
-            if verbose:
-                print("\t\t\tradius from distance to index[-1]:", radius)
+            radius = length - index # radius from distance to index[-1]
         return radius
 
     #-------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -666,51 +668,44 @@ for filename in filenames_list:
     spot_arrays.append(spot_array)
 
 print("-----------------------")
-
-#TODO Change the dataframe assembly process to work with SpotArray class objects
-
 print("Assembling dataframe and saving images...")
 
 data_df = pd.DataFrame() #initialize blank dataframe
 
-output_directory = os.path.join(os.getcwd(), "image_prep_output")
-if not os.path.exists(output_directory):
-    os.makedirs(output_directory)
-
-rlt_output_directory = os.path.join(output_directory, "reverse_log_transformed_images")
-if not os.path.exists(rlt_output_directory):
-    os.makedirs(rlt_output_directory)
-
-crosshairs_output_directory = os.path.join(output_directory, "crosshairs-marked_spot_images")
-if not os.path.exists(crosshairs_output_directory):
-    os.makedirs(crosshairs_output_directory)
+# Declare output directories and ensure that they exist
+output_dirs = {
+    "output": os.path.join(os.getcwd(), "image_prep_output"),
+    "rlt_output": os.path.join(os.getcwd(), "image_prep_output", "reverse_log_transformed_images"),
+    "crosshairs_output": os.path.join(os.getcwd(), "image_prep_output", "crosshairs-marked_spot_images")
+}
+for name, path in output_dirs.items():
+    if not os.path.exists(path):
+        os.makedirs(path)
 
 bas_cols_dict = {} #Dictionary of lists of background-adjusted signal column names, where the key is the probe name
 ei_cols_dict = {} #Dictionary of lists of ellipsoid index column names, where the key is the probe name
 new_cols_dict = {} #Dictionary that includes both of the above, along with the copy and scan numbers, in the form of (copy, scan, bas_col, ei_col)
 
-for analyzed_array_tuple in analyzed_array_images: 
-    copy, scan, probe, array_image, spot_info_dict, sliced_image_crosshairs = analyzed_array_tuple
-
-    col_prefix = probe + "\nCopy " + str(copy) + "\nScan " + str(scan)
+for spot_array in spot_arrays:
+    col_prefix = spot_array.probe_name + "\nCopy " + str(spot_array.copy_number) + "\nScan " + str(spot_array.scan_number)
     bas_col = col_prefix + "\nBackground-Adjusted_Signal"
     ei_col = col_prefix + "\nEllipsoid_Index"
 
     #Assign column names to dict by probe name
-    dict_value_append(bas_cols_dict, probe, bas_col)
-    dict_value_append(ei_cols_dict, probe, ei_col)
-    dict_value_append(new_cols_dict, probe, (copy, scan, bas_col, ei_col))
+    dict_value_append(bas_cols_dict, spot_array.probe_name, bas_col)
+    dict_value_append(ei_cols_dict, spot_array.probe_name, ei_col)
+    dict_value_append(new_cols_dict, spot_array.probe_name, (spot_array.copy_number, spot_array.scan_number, bas_col, ei_col))
 
     #Assign dataframe values
-    for spot_coord, signal_tuple in spot_info_dict.items(): 
+    for spot_coord, signal_tuple in spot_array.spot_info_dict.items():
         background_adjusted_signal, ellipsoid_index, _, _ = signal_tuple
 
         data_df.at[spot_coord, bas_col] = background_adjusted_signal
         data_df.at[spot_coord, ei_col] = ellipsoid_index
 
     #Save modified image
-    imwrite(os.path.join(rlt_output_directory, "Copy" + str(copy) + "_Scan" + str(scan) + "_" + probe + "_reverse-log-transform.tif"), array_image)
-    imwrite(os.path.join(crosshairs_output_directory, "Copy" + str(copy) + "_Scan" + str(scan) + "_" + probe + "_crosshairs.tif"), sliced_image_crosshairs)
+    imwrite(os.path.join(output_dirs.get("rlt_output"), "Copy" + str(spot_array.copy_number) + "_Scan" + str(spot_array.scan_number) + "_" + spot_array.probe_name + "_reverse-log-transform.tif"), spot_array.linear_array)
+    imwrite(os.path.join(output_dirs.get("crosshairs_output"), "Copy" + str(spot_array.copy_number) + "_Scan" + str(spot_array.scan_number) + "_" + spot_array.probe_name + "_crosshairs.tif"), spot_array.sliced_image_crosshairs)
 
 #Declare probe order for sorting dataframe columns
 probes_ordered = []
@@ -769,6 +764,6 @@ for i, row in data_df.iterrows():
     print("Peptide name:", pep_name)
     data_df.at[i, "Peptide_Name"] = pep_name
 
-data_df.to_csv(os.path.join(output_directory, "preprocessed_data.csv"))
+data_df.to_csv(os.path.join(output_dirs.get("output"), "preprocessed_data.csv"))
 
 print("Done!")
