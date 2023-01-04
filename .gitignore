@@ -21,3 +21,6 @@ SLiM_Densitometry.csv
 
 #Ignore private files
 /Private
+
+#Ignore PyCharm idea files
+*.idea
