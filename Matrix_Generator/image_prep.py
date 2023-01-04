@@ -97,8 +97,8 @@ class SpotArray:
         return array_squared
 
     # High-level function that segments and analyzes the spots in the array
-    def analyze_array(self, ellipsoid_dilation_factor = 1, show_sliced_image = False, show_crosshairs_image = False,
-                      show_individual_spot_images = False, center_spots = True, verbose = False):
+    def analyze_array(self, ellipsoid_dilation_factor = 1, show_sliced_image = False, show_crosshairs_image = True,
+                      show_individual_spot_images = False, center_spots = True, verbose = True):
         print("\tProcessing: Copy", self.copy_number, " - Scan", self.scan_number, "- Probe", self.probe_name) if verbose else None
         print("\t\tfinding grid peaks...") if verbose else None
 
@@ -122,7 +122,7 @@ class SpotArray:
         # Draw crosshairs on the individual spot peaks, which may not perfectly align with the hlinepeaks and vlinepeaks intersect points
         print("\t\tmaking image highlighting detected spots...") if verbose else None
 
-        self.sliced_image_crosshairs = self.draw_crosshairs(color_image = self.sliced_image, spot_info = self.spot_info_dict, crosshair_width = 5)
+        self.sliced_image_crosshairs = self.draw_crosshairs(color_image = self.sliced_image, spot_info = self.spot_info_dict, crosshair_diameter = 5, crosshair_width = 3)
 
         # Display popup of sliced image with drawn crosshairs if prompted
         imshow(self.sliced_image_crosshairs / self.sliced_image_crosshairs.max()) if show_crosshairs_image else None
@@ -227,7 +227,7 @@ class SpotArray:
             inferred_line_mins[-1] = len(line_sums) - 1  # catches error where the ending number, rounded up, might otherwise go out of bounds
 
         if collapse_extra_peaks:
-            print("\t\t\t\tcollapsing extra peaks (detected" + str(len(detected_peaks)) + ")...")
+            print("\t\t\t\tcollapsing extra peaks (detected " + str(len(detected_peaks)) + ")...")
             peak_deltas = detected_peaks[1:] - detected_peaks[0:-1]
             tolerated_delta = mean_spot_dimension * tolerance_spot_frac
             deltas_indices = np.where(peak_deltas <= tolerated_delta)[0]
@@ -245,7 +245,7 @@ class SpotArray:
             line_peaks = np.append(line_peaks, append_peaks)
             line_peaks = np.sort(line_peaks)
 
-            print("\t\t\t\tdone; collapsed", len(detected_peaks), "peaks to", len(line_peaks)) if verbose else None
+            print("\t\t\t\tdone; collapsed", len(detected_peaks), "peaks to", len(line_peaks))
 
             line_mins = inferred_line_mins # Currently does not apply the collapse_extra_peaks method to minima, but this feature may be added in a later release
         else:
@@ -630,7 +630,7 @@ class SpotArray:
         crosshair_width = the width of the crosshair lines. Must be an odd integer; if not odd, +1 will be added. 
     Returns the image with crosshairs drawn on all the spots. 
     '''
-    def draw_crosshairs(self, color_image, spot_info, crosshair_width = 3):
+    def draw_crosshairs(self, color_image, spot_info, crosshair_diameter = 5, crosshair_width = 3):
         max_green_pixel = color_image[:,:,1].max()
 
         if crosshair_width % 2 == 0:
@@ -643,12 +643,12 @@ class SpotArray:
             real_peak_intersect = (top_left_corner[0] + peak_intersect[0], top_left_corner[1] + peak_intersect[1])
 
             # Draw horizontal green crosshair
-            color_image[:,:,1][real_peak_intersect[0] - deviation: real_peak_intersect[0] + deviation, real_peak_intersect[1] - crosshair_width: real_peak_intersect[1] + crosshair_width] = max_green_pixel
-            color_image[:,:,[0,2]][real_peak_intersect[0] - deviation: real_peak_intersect[0] + deviation, real_peak_intersect[1] - crosshair_width: real_peak_intersect[1] + crosshair_width] = 0
+            color_image[:,:,1][real_peak_intersect[0] - deviation: real_peak_intersect[0] + deviation, real_peak_intersect[1] - crosshair_diameter: real_peak_intersect[1] + crosshair_diameter] = max_green_pixel
+            color_image[:,:,[0,2]][real_peak_intersect[0] - deviation: real_peak_intersect[0] + deviation, real_peak_intersect[1] - crosshair_diameter: real_peak_intersect[1] + crosshair_diameter] = 0
 
             # Draw vertical green crosshair
-            color_image[:,:,1][real_peak_intersect[0] - crosshair_width: real_peak_intersect[0] + crosshair_width, real_peak_intersect[1] - deviation: real_peak_intersect[1] + deviation] = max_green_pixel
-            color_image[:,:,[0,2]][real_peak_intersect[0] - crosshair_width: real_peak_intersect[0] + crosshair_width, real_peak_intersect[1] - deviation: real_peak_intersect[1] + deviation] = 0
+            color_image[:,:,1][real_peak_intersect[0] - crosshair_diameter: real_peak_intersect[0] + crosshair_diameter, real_peak_intersect[1] - deviation: real_peak_intersect[1] + deviation] = max_green_pixel
+            color_image[:,:,[0,2]][real_peak_intersect[0] - crosshair_diameter: real_peak_intersect[0] + crosshair_diameter, real_peak_intersect[1] - deviation: real_peak_intersect[1] + deviation] = 0
 
         return color_image
     #-------------------------------------------------------------------------------------------------------------------------------------------------------
