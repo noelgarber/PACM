@@ -2,8 +2,8 @@
 /dictionary_of_weighted_matrices
 
 #Ignore output folder, which varies by user-selected options when running the scripts
-/Output
-/Archive
+/Output*
+/Archive*
 /Matrix_Generator/image_prep_output*
 
 #Ignore pycache
