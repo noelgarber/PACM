@@ -12,6 +12,7 @@ import os
 import string
 import matplotlib.pyplot as plt
 import csv
+import cv2
 from tifffile import imread, imwrite, imshow
 from scipy.signal import find_peaks
 
@@ -98,7 +99,7 @@ class SpotArray:
 
     # High-level function that segments and analyzes the spots in the array
     def analyze_array(self, ellipsoid_dilation_factor = 1, show_sliced_image = False, show_crosshairs_image = True,
-                      show_individual_spot_images = False, center_spots = True, verbose = True):
+                      show_individual_spot_images = False, center_spots_mode = "blob", verbose = True):
         print("\tProcessing: Copy", self.copy_number, " - Scan", self.scan_number, "- Probe", self.probe_name) if verbose else None
         print("\t\tfinding grid peaks...") if verbose else None
 
@@ -117,7 +118,7 @@ class SpotArray:
         print("\t\tcomputing background-adjusted signal and ellipsoid_index...") if verbose else None
 
         # Make a dictionary holding alphanumeric spot coordinates as keys, storing tuples of (background_adjusted_signal, ellipsoid_index, peak_intersect, top_left_corner)
-        self.spot_info_dict = self.ellipsoid_constrain(spot_images = image_slices, dilation_factor = ellipsoid_dilation_factor, centering = center_spots, verbose = False)
+        self.spot_info_dict = self.ellipsoid_constrain(spot_images = image_slices, dilation_factor = ellipsoid_dilation_factor, centering_mode = center_spots_mode, verbose = False)
 
         # Draw crosshairs on the individual spot peaks, which may not perfectly align with the hlinepeaks and vlinepeaks intersect points
         print("\t\tmaking image highlighting detected spots...") if verbose else None
@@ -367,13 +368,14 @@ class SpotArray:
     #-------------------------------------------------------------------------------------------------------------------------------------------------------
     '''
     Function that returns a dictionary of spot coordinates where the value is a tuple of (background-adjusted signal, ellipsoid_index)
-    Uses the center_spot() method in this class, found below. 
+    Uses the center_peak_spot() method in this class, found below. 
     Inputs: 
         spot_images = a dictionary of spot coordinates where the value is a tuple of (top_left_corner, spot_image array)
         dilation_factor = a multiplier to enlarge (>1) or constrict (<1) the defined constraining ellipsoid
-        centering = a boolean
-            True => uses center_spot() to find the peak intersect point to define a surrounding ellipsoid.
-            False => sets the center point of the spot as equal to the center point of the spot image for defining a surrounding ellipsoid. 
+        centering_mode = "blob", "line_peaks", or None: 
+            "blob" => uses center_blob_spot() to find the spot midpoint for defining the surrounding ellipsoid.
+            "line_peaks" => uses center_peak_spot() to find the vertical and horizontal line peak intersect point for defining a surrounding ellipsoid.
+            None => sets the center point of the spot as equal to the center point of the spot image for defining a surrounding ellipsoid. 
         return_coordinates_list = a boolean for whether to return an additional simple list of alphanumeric spot coordinates.
     Outputs in returned dict: 
         background_adjusted_signal = (sum of pixel values inside the ellipsoid) - (mean pixel value outside the ellipsoid)*(number of pixels inside the ellipsoid)
@@ -382,7 +384,7 @@ class SpotArray:
             Values ~1 represent smears that are not ellipsoidal. 
             Values <1 usually represent situations where most of the signal is non-specific bleed-over from neighbouring spots. 
     '''
-    def ellipsoid_constrain(self, spot_images, dilation_factor = 1, centering = True, return_coordinates_list = False, verbose = False):
+    def ellipsoid_constrain(self, spot_images, dilation_factor = 1, centering_mode = "blob", return_coordinates_list = False, verbose = False):
         print("\t\t\trunning ellipsoid_constrain()...") if verbose else None
 
         output_dict = {}
@@ -408,20 +410,23 @@ class SpotArray:
                     For arrays, the midpoint is (d, c). Coordinates are effectively (y,x) rather than (x,y). 
             '''
 
-            if centering:
-                peak_intersect, radii = self.center_spot(spot_image = spot_image, tolerance_fraction = 0.5, tolerance_mode = "whole", verbose = verbose)
-                radii[0] = radii[0] * dilation_factor
-                radii[1] = radii[1] * dilation_factor
-
+            if centering_mode == "blob":
+                spot_midpoint, spot_radii = self.center_blob_spot(spot_image, show_detected_blobs = False, verbose = True)
+            elif centering_mode == "line_peaks":
+                spot_midpoint, spot_radii = self.center_peak_spot(spot_image = spot_image, tolerance_fraction = 0.5,
+                                                              tolerance_mode = "whole", verbose = verbose)
+                spot_radii[0] = spot_radii[0] * dilation_factor
+                spot_radii[1] = spot_radii[1] * dilation_factor
             else:
-                radii = [round((spot_image_height / 2) * dilation_factor), round((spot_image_width / 2) * dilation_factor)]
-                peak_intersect = (radii[0], radii[1])
+                print("\t\t\tcaution: centering_mode", centering_mode, "is not recognized; defaulting to None") if centering_mode != None else None
+                spot_radii = [round((spot_image_height / 2) * dilation_factor), round((spot_image_width / 2) * dilation_factor)]
+                spot_midpoint = (spot_radii[0], spot_radii[1])
 
-            print("\t\t\tpeak_intersect =", peak_intersect, "\n\t\t\tvertical_radius =", vertical_radius,
+            print("\t\t\tpeak_intersect =", spot_midpoint, "\n\t\t\tvertical_radius =", vertical_radius,
                   "\n\t\t\thorizontal_radius =", horizontal_radius, "\n\t\t\tdilation factor =", dilation_factor) if verbose else None
 
-            a, b = radii[1], radii[0] # horizontal radius, vertical radius
-            c, d = peak_intersect[1], peak_intersect[0]
+            a, b = spot_radii[1], spot_radii[0] # horizontal radius, vertical radius
+            c, d = spot_midpoint[1], spot_midpoint[0]
 
             print("\t\t\tThe inside-ellipsoid equation is (x-c)^2/(a^2) + (y-d)^2/(b^2) < 1",
                   "\n\t\t\tHere, the equation is (x-" + str(c) + ")^2/(" + str(a) + "^2) + (y-" + str(d) + ")^2/(" + str(b) + "^2) < 1,",
@@ -467,7 +472,7 @@ class SpotArray:
             ellipsoid_index = mean_intensity_inside / mean_intensity_outside
 
             # To the output dict, add a tuple containing the background-adjusted signal and the ellipsoid index
-            output_dict[spot_coordinates] = (background_adjusted_signal, ellipsoid_index, peak_intersect, top_left_corner)
+            output_dict[spot_coordinates] = (background_adjusted_signal, ellipsoid_index, spot_midpoint, top_left_corner)
             if return_coordinates_list:
                 coordinates_list.append(spot_coordinates)
 
@@ -481,10 +486,67 @@ class SpotArray:
             return output_dict
 
     #----------
+
     '''
-    Function that finds the center and radii of a sliced spot image.
-    Marks the centre of the spot as the intersection of the peak values for horizontal and vertical summed lines in the image array. 
-    If more than one peak is found in either the horizontal or vertical dimension, the peaks are averaged. 
+    center_blob_spot() uses cv2.SimpleBlobDetector to define a spot as a blob and get the centre and bounding coordinates.
+    Optionally, it also invokes self.make_keypoint_image() if show_detected_blobs is set to True. 
+    Note that when a single blob is not found, center_blob_spot will default to using the center_peak_spot() method. 
+    Inputs for center_blob_spot(): 
+        spot_image = the sliced spot image; must be a grayscale image with float values from 0-1
+        show_detected_blobs = boolean for whether to show individual spot image slices with blob outlines and centre point markers
+    Outputs from center_blob_spot(): 
+        spot_center_coords = (height, width) as a point
+        vertical_radius, horizontal_radius = the radii of the spot, defined by the distance to the nearest image border from spot_center_coords    
+    '''
+
+    # Function for drawing and displaying a single blob on an image
+    def make_keypoint_image(self, image, keypoints, keypoint_coords):
+        image_keypoints = cv2.drawKeypoints(image, keypoints, np.array([]), (0, 0, 255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+        image_keypoints[keypoint_coords[0],keypoint_coords[1]] = (255,0,0) #places a red dot at the keypoint coordinates
+        imshow(image_keypoints)
+        plt.show()
+
+    def center_blob_spot(self, spot_image, show_detected_blobs = False, verbose = False):
+        print("\t\t\trunning center_blob_spot()...") if verbose else None
+
+        spot_image_height, spot_image_width = spot_image.shape[0:2]
+        spot_image_area = spot_image_height * spot_image_width
+
+        #Invert image and convert to np.uint8; SimpleBlobDetector requires black blobs on a white background
+        spot_image_8bit = spot_image * 256
+        spot_image_8bit = 256 - spot_image_8bit #inverts the image
+
+        #Set 8-bit image contrast to max, then convert to np.uint8 as required by SimpleBlobDetector
+        spot_image_8bit = spot_image_8bit - spot_image_8bit.min()
+        spot_image_8bit = spot_image_8bit * (255 / spot_image_8bit.max())
+        spot_image_8bit = spot_image_8bit.astype(np.uint8)
+
+        #Set up the blob detector, where blobs must encompass at least 1/4 of the total spot image area to prevent small artifact spots
+        params = cv2.SimpleBlobDetector_Params()
+        params.minArea = round(spot_image_area / 4)
+        detector = cv2.SimpleBlobDetector_create(params)
+        keypoints = detector.detect(spot_image_8bit)
+
+        #Get spot center coordinates
+        if len(keypoints) == 1:
+            print("\t\t\t\tfound blob!") if verbose else None
+            keypoint_coords = keypoints[0].pt
+            spot_center_coords = (round(keypoint_coords[1]), round(keypoint_coords[0]))
+            self.make_keypoint_image(image = spot_image_8bit, keypoints = keypoints, keypoint_coords = spot_center_coords) if show_detected_blobs else None
+        else:
+            print("\t\t\t\tcould not find single blob; declaring spot image slice midpoint as pseudo-blob center...") if verbose else None
+            spot_center_coords = (round(spot_image_height / 2), round(spot_image_width / 2))
+
+        #Get spot ellipsoid radii based, inferred based on the distance between the spot center coords and the nearest image border in each dimension
+        spot_radii = [self.nearest_border(index = spot_center_coords[0], length = spot_image_height),
+                      self.nearest_border(index = spot_center_coords[1], length = spot_image_width)]
+
+        return spot_center_coords, spot_radii
+
+    '''
+    center_peak_spot() uses find_peaks() on vertical and horizontal line sums to infer the center point of a spot in a sliced spot image. 
+    It is somewhat less accurate than center_blob_spot(), and for most usages, it should only be defaulted to if center_blob_spot() fails. 
+    Note that if more than one peak is found in either the horizontal or vertical dimension, the peaks are averaged. 
     Inputs: 
         spot_image = the sliced spot image as a numpy array
         tolerance_fraction = a value from 0 to 1 for the allowed deviation from image center while finding peaks/crosshairs/actual spot center
@@ -498,21 +560,14 @@ class SpotArray:
         vertical_radius, horizontal_radius = the radii of the spot, defined by the distance to the nearest image border from the peak_intersect
     '''
 
-    def center_spot(self, spot_image, tolerance_fraction, tolerance_mode = "whole", verbose = False):
-        print("\t\t\trunning center_spot()...") if verbose else None
+    def center_peak_spot(self, spot_image, tolerance_fraction, tolerance_mode = "whole", verbose = False):
+        print("\t\t\trunning center_peak_spot()...") if verbose else None
 
-        spot_image_height, spot_image_width = len(spot_image), len(spot_image[0])
-
-        print("\t\t\tspot_image_height =", spot_image_height, "\n\t\t\tspot_image_width =", spot_image_width,
-              "\n\t\t\tfinding midpoints...") if verbose else None
-
+        spot_image_height, spot_image_width = spot_image.shape[0:2]
         image_midpoints = (round(spot_image_height / 2), round(spot_image_width / 2)) # vertical midpoint, horizontal midpoint
-        print("\t\t\timage vertical midpoint =", image_midpoints[0], "\n\t\t\timage horizontal midpoint =", image_midpoints[1],
-              "\n\t\t\tappying the tolerance_fraction of", tolerance_fraction, "...") if verbose else None
-
         tolerated_variances = (round(tolerance_fraction * image_midpoints[0]), round(tolerance_fraction * image_midpoints[1]))
-        print("\t\t\ttolerated_vertical_variance =", tolerated_variances[0], "\n\t\t\ttolerated_horizontal_variance =", tolerated_variances[1],
-              "\n\t\t\tfinding spot_vlinesums and spot_hlinesums...") if verbose else None
+
+        print("\t\t\tfinding spot_vlinesums and spot_hlinesums...") if verbose else None
 
         if tolerance_mode == "subslice":
             spot_vlinesums = spot_image[:,image_midpoints[1] - tolerated_variances[1]: image_midpoint[1] + tolerated_variances[1]].sum(axis=0)
@@ -529,8 +584,7 @@ class SpotArray:
         spot_vlinepeaks, _ = find_peaks(spot_vlinesums)
         spot_hlinepeaks, _ = find_peaks(spot_hlinesums)
 
-        print("\t\t\tspot_vlinepeaks:", spot_vlinepeaks, "\n\t\t\tspot_hlinepeaks:", spot_hlinepeaks,
-              "\n\t\t\ttaking mean of peaks...") if verbose else None
+        print("\t\t\tspot_vlinepeaks:", spot_vlinepeaks, "\n\t\t\tspot_hlinepeaks:", spot_hlinepeaks) if verbose else None
 
         # Get single mean peak
         spot_vlinepeak = self.collapse_peaks(peaks=spot_vlinepeaks, values=spot_vlinesums)
@@ -560,7 +614,8 @@ class SpotArray:
         print("\t\t\tCalculating nearest distance to borders for use as vertical and horizontal radii...") if verbose else None
 
         # Make a list of vertical and horizontal radii, respectively
-        radii = [self.nearest_border(index = spot_hlinepeak, length = spot_image_height), self.nearest_border(index = spot_vlinepeak, length = spot_image_width)]
+        radii = [self.nearest_border(index = spot_hlinepeak, length = spot_image_height),
+                 self.nearest_border(index = spot_vlinepeak, length = spot_image_width)]
 
         return peak_intersect, radii
 
