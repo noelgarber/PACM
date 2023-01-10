@@ -5,6 +5,7 @@
 /Output*
 /Archive*
 /Matrix_Generator/image_prep_output*
+/Matrix_Generator/Preserved_Data*
 
 #Ignore pycache
 __pycache__
