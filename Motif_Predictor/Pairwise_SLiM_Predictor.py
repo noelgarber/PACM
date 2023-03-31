@@ -9,8 +9,7 @@ import glob
 import os
 import pickle
 import warnings
-from am_functions import CharacAA, FilenameSubdir, ListInputter
-from am_vars import list_aa_no_phos
+from am_functions import CharacAA, ListInputter
 
 # Function to import an additional parallel scoring method (not part of public repo) for scoring SLiMs if one exists
 def get_private_method():
@@ -26,7 +25,7 @@ def get_private_method():
 def import_weighted_matrices():
 	pickled_matrices_dir = os.path.join(os.getcwd(), "temp", "conditional_weighted_matrices.pkl")
 	if os.path.exists(pickled_matrices_dir):
-		with open(pickled_matrices_dir, "wb") as f:
+		with open(pickled_matrices_dir, "rb") as f:
 			unpickled_matrices_dict = pickle.load(f)
 	else:
 		raise Exception("Source matrices not found; expected path: " + pickled_matrices_dir)
