@@ -12,6 +12,8 @@ __pycache__
 
 #Ignore pickled objects generated while running the scripts, as these vary by user input as well
 *.ob
+*.pkl
+*.pickle
 
 #Ignore Uniprot databases
 Uniprot_All_Human_Protein_Isoforms.csv
