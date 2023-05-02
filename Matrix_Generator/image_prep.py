@@ -12,9 +12,31 @@ import os
 import string
 import matplotlib.pyplot as plt
 import csv
-import cv2
+from Matrix_Generator.image_utils.hough_circle_detector import detect_circle as hough_detect_circle
+from Matrix_Generator.image_utils.scan_optimal_circle import spot_circle_scan
 from tifffile import imread, imwrite, imshow
 from scipy.signal import find_peaks
+
+def input_number(prompt, mode):
+    if mode not in ["int", "float"]:
+        raise Exception(f"input_number error: mode was set to {mode}, but either \"int\" or \"float\" was expected")
+
+    input_finished = False
+    output_value = None
+
+    while not input_finished:
+        input_value = input(prompt)
+        try:
+            if mode == "int":
+                output_value = int(input_value)
+                input_finished = True
+            elif mode == "float":
+                output_value = float(input_float)
+                input_finished = True
+        except:
+            print(f"\tinput value was not an {mode}; please try again.")
+
+    return output_value
 
 #Function to convert a 2-column CSV file into a dictionary, where the first column holds keys and the second column holds values
 def csv_to_dict(filepath):
@@ -36,35 +58,186 @@ def dict_value_append(input_dict, key, element_to_append):
         value_list.append(element_to_append)
         input_dict[key] = value_list
 
+def concatenate_images(image_list):
+    """
+    Concatenates a list of small images into a larger image, using the top-left corner
+    coordinates provided for each small image.
+
+    Args:
+        image_list (list): A list of tuples, where each tuple is (image, top_left_coords),
+            where image is a 3D numpy array representing a color image, and top_left_coords
+            is a tuple of (x, y) integers representing the top-left corner coordinates of
+            that small image in the final concatenated image.
+
+    Returns:
+        numpy.ndarray: A 3D numpy array representing the concatenated image.
+    """
+    # Determine the size of the final concatenated image
+    max_x, max_y = 0, 0
+    for _, (x, y) in image_list:
+        max_x = max(max_x, x + _.shape[0])
+        max_y = max(max_y, y + _.shape[1])
+
+    # Create a blank image of the correct size
+    channels = image_list[0][0].shape[2]
+    concatenated_image = np.zeros((max_x, max_y, channels), dtype=image_list[0][0].dtype)
+
+    # Paste each small image onto the concatenated image at the correct location
+    for image, (x, y) in image_list:
+        concatenated_image[x:x + image.shape[0], y:y + image.shape[1], :] = image
+
+    return concatenated_image
+
+def draw_color_circle(image, midpoints, radius, circle_color = "green"):
+    '''
+    Simple function or drawing circle(s) of defined radius around a defined midpoint in a primary color.
+
+    Args:
+        image (np.ndarray): 2D (grayscale) or 3D (color) numpy array of floating points representing an image
+        midpoints (list of tuples): one or more coordinates of the midpoint(s) of the circle(s), in (y,x) format
+        radius (int): the radius of the circle; must not exceed the distance to the nearest border from the midpoint
+        circle_color (str): the color of the circle to draw; default is green
+
+    Returns:
+        color_image (np.ndarray): 3D numpy array of floating points representing the image with the drawn circle
+    '''
+
+    # Convert 2D grayscale array to 3D color array
+    if image.ndim == 2:
+        color_image = np.stack([image]*3, axis=-1)
+    elif image.ndim == 3:
+        color_image = image
+    else:
+        raise Exception(f"draw_color_circle error: image has {image.ndim} dimensions, but 2 or 3 were expected.")
+
+    # Define the color of the circle
+    if circle_color in ["red", "Red", "r", "R"]:
+        r, g, b = (image.max(), 0, 0)
+    elif circle_color in ["green", "Green", "g", "G"]:
+        r, g, b = (0, image.max(), 0)
+    elif circle_color in ["blue", "Blue", "b", "B"]:
+        r, g, b = (0, 0, image.max())
+    else:
+        raise Exception(f"draw_color_circle error: circle_color was given as {circle_color}, but must be one of [Red, Green, Blue, red, green, blue, R, G, B, r, g, b].")
+
+    # Draw circle in green on the color image
+    h, w = image.shape[:2]
+    y_idxs, x_idxs = np.ogrid[:h, :w]
+    for midpoint in midpoints:
+        y, x = midpoint # assume numpy notation where (y,x) defines coordinates
+        dists = np.sqrt((x_idxs - x)**2 + (y_idxs - y)**2)
+        circle = (dists <= radius) & (dists >= radius-1)
+        color_image[circle] = [r, g, b]
+
+    return color_image
+
+# Function that defines a circle on an image and counts the pixels and their sums inside and outside of the circle
+def circle_stats(grayscale_image, center, radius):
+    '''
+    Function to obtain pixel counts/sums inside and outside of a defined circle
+
+    Args:
+        grayscale_image (np.ndarray): image as 2D numpy array
+        center (tuple): pair of (x,y) values representing the center point of the circle; x=horizontal and y=vertical
+        radius (int): the radius of the circle to define
+
+    Returns:
+        pixels_inside (np.int64): number of pixels inside the defined circle
+        pixels_outside (np.int64): number of pixels outside the defined circle
+        sum_inside (same dtype as input image, e.g. np.float16): sum of pixel values inside the circle
+        sum_outside (same dtype as input image, e.g. np.float16): sum of pixel values outside the circle
+    '''
+    # Create a mesh grid of coordinates for the image
+    x, y = np.meshgrid(np.arange(grayscale_image.shape[1]), np.arange(grayscale_image.shape[0]))
+
+    # Calculate the distance between each pixel and the center
+    distance = np.sqrt((x - center[0]) ** 2 + (y - center[1]) ** 2)
+
+    # Create a binary mask to identify the pixels inside the circle
+    mask = distance <= radius
+
+    # Flatten the image and mask arrays
+    flat_image = grayscale_image.flatten()
+    flat_mask = mask.flatten()
+
+    # Count the number of pixels inside the circle and outside the circle
+    pixels_inside = np.sum(flat_mask)
+    pixels_outside = np.sum(~flat_mask)
+
+    # Calculate the sum of pixel values inside the circle and outside the circle
+    sum_inside = np.sum(flat_image[flat_mask])
+    sum_outside = np.sum(flat_image[~flat_mask])
+
+    # Calculate the ellipsoid index
+    mean_intensity_inside = sum_inside / pixels_inside
+    mean_intensity_outside = sum_outside / pixels_outside
+    if mean_intensity_outside > 0:
+        ellipsoid_index = mean_intensity_inside / mean_intensity_outside
+    else:
+        ellipsoid_index = "inf"
+
+    # Find the background-adjusted sum of pixels inside the defined circle
+    background_adjusted_inside_sum = sum_inside - (pixels_inside * mean_intensity_outside)
+
+    return pixels_inside, pixels_outside, sum_inside, sum_outside, ellipsoid_index, background_adjusted_inside_sum
+
+
 #---------------------------------------------------------------------------------------------------------------------------------------------
 
-'''
-Define a new SpotArray class, which will contain the numpy arrays from a source tiff file
-As arguments, it requires: 
-    tiff_path = the path to the tiff file
-    spot_dimensions = a tuple of (number of spots in width, number of spots in height)
-Usage: 
-    var = SpotArray(tiff_path = ______, spot_dimensions = _______, verbose = False/True, suppress_warnings = False/True)
-Default objects: 
-    Basic info: 
-        self.copy_number = the copy/replicate number, parsed from the filename
-        self.scan_number = the scan order number, for when arrays have been probed multiple times with different baits
-        self.probe_name = the name of the probe protein
-    Source image data: 
-        self.grayscale_array = the original grayscale array held by the inputted tiff image
-        self.linear_array = the grayscale array with values squared, restoring the linear correlation between luminance and pixel value (undoes log transform)
-    Objects initialized automatically by self.analyze_array(): 
-        self.sliced_image = the sliced image, without crosshairs, showing grid borders
-        self.spot_info_dict = dict where keys = alphanumeric spot coordinates, and values = (background_adjusted_signal, ellipsoid_index, peak_intersect, top_left_corner)
-        self.sliced_image_crosshairs = the sliced image with crosshairs added to mark spot centers
-High-level methods: 
-    analyze_array(self, ellipsoid_dilation_factor = 1, show_sliced_image = False, show_crosshairs_image = False, show_individual_spot_images = False, center_spots = True, verbose = False)
-        This function auto-runs with the default settings, but can be run again with different settings. 
-'''
+# Define a new SpotArray class for spot image arrays and associated data
 class SpotArray:
-    def __init__(self, tiff_path, spot_dimensions, verbose = False, suppress_warnings = False):
+    '''
+    SpotArray class to contain spot image data and methods
+
+    This class contains spot image data as 2D numpy arrays, metadata, and quantitation methods.
+
+    Attributes:
+        self.copy_number (str): the copy/replicate number, parsed from the filename
+        self.scan_number (str): the scan order number, for when spot blots have been probed multiple times
+        self.probe_name (str):  the name of the probe (e.g. a recombinant protein or antibody)
+
+        self.grayscale_array (arr): original grayscale array from the inputted tiff image, as a 2D numpy array
+        self.linear_array (arr):    grayscale_array with values squared, restoring linear luminance values
+
+        self.sliced_image (arr):            the sliced image, without crosshairs, showing grid borders
+        self.outlined_image (arr):          the sliced image with crosshairs added to mark spot centers
+        self.spot_info_dict (dict):         key (str) [alphanumeric spot coordinates] =>
+                                            (unadjusted_signal, background_adjusted_signal, ellipsoid_index,
+                                            peak_intersect, top_left_corner)
+
+    Methods:
+        __init__(self, tiff_path, spot_dimensions, verbose, suppress_warnings): function to initialize a class object
+        analyze_array(self, ellipsoid_dilation_factor, [options]): function that auto-runs to quantify the array, but
+                                                                   can be run again with different settings afterwards
+        reverse_log_transform(self, image_array, base): function to reverse logarithmic pixel encoding, restoring the
+                                                        linear correlation between luminance and pixel value
+        grid_peak_finder(self, show_line_sums, verbose): function to mark spots based on known grid dimensions; also
+                                                         uses subsidiary functions handle_mismatch() and infer_peaks()
+
+        #TODO Finish this docstring
+    '''
+
+    def __init__(self, tiff_path, spot_dimensions, metadata = (None, None, None), suppress_warnings = False, pixel_log_base = 1, verbose = False):
+        '''
+        Initialization function invoked when a new instance of the SpotArray class is created
+
+        Args:
+            tiff_path (str): the path to the tiff file where a spot image is stored
+            spot_dimensions (tuple): a tuple of (number of spots in width, number of spots in height)
+            metadata (tuple): a tuple of (probe_name, copy_number, scan_number)
+            verbose (Boolean): whether to report initialization progress/steps in the terminal (default: False)
+            suppress_warnings (Boolean): whether to suppress warnings that occur during initialization (default: False)
+            pixel_log_base (int or float): if a logarithmic pixel encoding was used, this should be the logarithm's base
+
+        Returns:
+            None
+
+        Raises:
+            Warning: multiple layers found; uses the first layer when reading multi-layer TIFFs. Can be caused by an alpha-layer being present.
+        '''
         self.grid_shape = spot_dimensions
-        self.filename = tiff_path.split("/")[-1].split(",")[0]
+        self.filename = os.path.basename(tiff_path).rsplit(".", 1)[0] # gets the filename without the extension
+        self.probe_name, self.copy_number, self.scan_number = metadata
 
         # Initialize main grayscale image stored in tiff_path
         img = imread(tiff_path)
@@ -74,122 +247,209 @@ class SpotArray:
             layers = 1
         if layers > 1:
             img = img[:,:,0]
-            print("\t\tCaution: multiple layers were found when importing " + self.filename + "; the first layer was used.") if not suppress_warnings else None
-        self.grayscale_array = img
-        self.linear_array = self.reverse_log_transform(img) # This creates an image where all the pixel values are squared, restoring the linear correlation between pixel value and true brightness.
+            print(f"\t\tCaution: {layers} layers were found when importing " + self.filename + ", but 1 was expected; the first layer was used.") if not suppress_warnings else None
 
-        # Auto-extract copy, scan, and probe information from filename
-        self.probe_name = filename.split("_")[0] # Assumes that the first underscore-delimited element of the filename is the probe name
-        self.copy_number, self.scan_number = None, None
-        for element in filename.split("_"):
-            if "Copy" in element or "copy" in element:
-                self.copy_number = element[4:]
-            elif "Scan" in element or "scan" in element:
-                self.scan_number = element[4:]
+        self.grayscale_array = img
+        self.image_shape = img.shape[1], img.shape[0] #image_width, image_height
+        self.linear_array = self.reverse_log_transform(img, base = pixel_log_base) # Ensures that pixel values linearly correlate with luminance
 
         # Analyze the array automatically with the default variables
-        self.analyze_array()
-
-    # Function to reverse the log transform on an image such that intensity linearly correlates with luminance.
-    def reverse_log_transform(self, array):
-        if array.max() > 1:
-            raise Exception("SpotArray.reverse_log_transform error: image array values out of range (expected: float between 0 and 1)")
-        array_squared = np.power(array, 2)
-        return array_squared
+        self.analyze_array(verbose = verbose)
 
     # High-level function that segments and analyzes the spots in the array
-    def analyze_array(self, ellipsoid_dilation_factor = 1, show_sliced_image = False, show_crosshairs_image = True,
-                      show_individual_spot_images = False, center_spots_mode = "blob", verbose = True):
-        print("\tProcessing: Copy", self.copy_number, " - Scan", self.scan_number, "- Probe", self.probe_name) if verbose else None
-        print("\t\tfinding grid peaks...") if verbose else None
+    def analyze_array(self, ellipsoid_dilation_factor = 1, show_sliced_image = False, show_outlined_image = False,
+                      show_individual_spot_images = False, center_spots_mode = "iterative", verbose = True):
+        '''
+        Main function to analyze and quantify grids of spots
 
+        Args:
+            ellipsoid_dilation_factor (float): multiplier that dilates identified spot borders
+            show_sliced_image (Boolean): whether to display the source image with gridlines after spot borders are found
+            show_outlined_image (Boolean): whether to display the image with detected spots circled in green
+            show_individual_spot_images (Boolean): whether to consecutively display individual spots for debugging
+            center_spots_mode (Boolean): whether to assume that the center of an identified spot equals the center
+                                         of the sliced spot image
+            verbose (Boolean): whether to display progress information for debugging
+
+        Returns:
+            analyzed_array_tuple (tuple): (copy_number, scan_number, probe_name, linear_array, spot_info_dict,
+                                           outlined_image)
+        '''
+        if verbose:
+            print("\tProcessing: Copy", self.copy_number, " - Scan", self.scan_number, "- Probe", self.probe_name)
+            print("\t\tfinding grid peaks...")
+
+        # Find the indices of the vertical and horizontal maxima and minima
         self.vlpeaks_indices, self.vlmins_indices, self.hlinepeaks_indices, self.hlinemins_indices = self.grid_peak_finder(verbose = verbose)
 
+        # Slice the image based on vertical and horizontal maxima and minima
         print("\t\tslicing image...") if verbose else None
-
         image_peak_coordinates, image_slices, self.sliced_image = self.image_slicer(image_ndarray = self.linear_array, vlinepeaks_indices = self.vlpeaks_indices, vlinemins_indices = self.vlmins_indices,
                                                                                     hlinepeaks_indices = self.hlinepeaks_indices, hlinemins_indices = self.hlinemins_indices,
-                                                                                    render_sliced_image = True, slicer_debugging = show_individual_spot_images)
+                                                                                    render_sliced_image = True, slicer_debugging = show_individual_spot_images, verbose = verbose)
 
         # Display popup of sliced image if prompted
-        imshow(self.sliced_image) if show_sliced_image else None
-        plt.show() if show_sliced_image else None
+        if show_sliced_image:
+            imshow(self.sliced_image)
+            plt.show()
 
+        # Make a dictionary holding alphanumeric spot coordinates as keys, storing tuples of (unadjusted_signal, background_adjusted_signal, ellipsoid_index, peak_intersect, top_left_corner)
         print("\t\tcomputing background-adjusted signal and ellipsoid_index...") if verbose else None
-
-        # Make a dictionary holding alphanumeric spot coordinates as keys, storing tuples of (background_adjusted_signal, ellipsoid_index, peak_intersect, top_left_corner)
-        self.spot_info_dict = self.ellipsoid_constrain(spot_images = image_slices, dilation_factor = ellipsoid_dilation_factor, centering_mode = center_spots_mode, verbose = False)
-
-        # Draw crosshairs on the individual spot peaks, which may not perfectly align with the hlinepeaks and vlinepeaks intersect points
-        print("\t\tmaking image highlighting detected spots...") if verbose else None
-
-        self.sliced_image_crosshairs = self.draw_crosshairs(color_image = self.sliced_image, spot_info = self.spot_info_dict, crosshair_diameter = 5, crosshair_width = 3)
+        self.outlined_image, self.spot_info_dict = self.ellipsoid_constrain(spot_images = image_slices, dilation_factor = ellipsoid_dilation_factor, centering_mode = center_spots_mode, verbose = False)
 
         # Display popup of sliced image with drawn crosshairs if prompted
-        imshow(self.sliced_image_crosshairs / self.sliced_image_crosshairs.max()) if show_crosshairs_image else None
-        plt.show() if show_crosshairs_image else None
+        if show_outlined_image:
+            imshow(self.outlined_image / self.outlined_image.max())
+            plt.show()
 
         # In addition to assigning to internal variables, also returns a tuple of results that can be optionally assigned when this function is invoked
-        analyzed_array_tuple = (self.copy_number, self.scan_number, self.probe_name, self.linear_array, self.spot_info_dict, self.sliced_image_crosshairs)
+        analyzed_array_tuple = (self.copy_number, self.scan_number, self.probe_name, self.linear_array, self.spot_info_dict, self.outlined_image)
         return analyzed_array_tuple
 
-    #-------------------------------------------------------------------------------------------------------------------------------------------------------
     '''
-    Function to define the coordinates of the spot array grid. 
-    Uses the handle_mismatch() and infer_peaks() methods in this class. 
-        - First creates lists of the pixel intensity sums of vertical and horizontal lines of pixels in self.linear_array. 
-        - Then uses scipy.signal.find_peaks() to find peaks and valleys in these lists. 
-    Outputs results as a tuple of (vertical_line_peaks, vertical_line_mins, horizontal_line_peaks, horizontal_line_mins) where: 
-        vertical_line_peaks, vertical_line_mins = peaks and minima in the sums of vertical lines of pixels across the horizontal axis of the image
-        horizontal_line_peaks, horizontal_line_mins = peaks and minima in the sums of horizontal lines of pixels across the vertical axis of the image
+    ----------------------------------------------------------------------------------------------------
+    The following are functions used by analyze_array(); they generally should not be used on their own.
+    ----------------------------------------------------------------------------------------------------
     '''
-    def grid_peak_finder(self, verbose = False):
+
+    # Function to reverse the log transform on an image such that intensity linearly correlates with luminance
+    def reverse_log_transform(self, array, base = 1):
+        '''
+        Applies the inverse log (exp) function to convert logarithmic pixel encoding to linear encoding
+
+        Args:
+            array: a 2D numpy array representing the image
+            base:  the base of the logarithmic encoding scale, which varies depending on format and camera manufacturer
+                   if base == "e", base will be set to 2.718281828459045 (inverse of natural logarithm)
+
+        Returns:
+            array_out: the modified 2D numpy array, where pixel values are linearly correlated with luminance
+
+        Raises:
+            Exception: image array values out of range (pixel values must be floats between 0 and 1)
+        '''
+        if base == "e":
+            from math import e
+            base = e
+        if array.max() > 1:
+            raise Exception("SpotArray.reverse_log_transform error: image array values out of range (expected: float between 0 and 1)")
+        array_out = np.power(array, base)
+        return array_out
+
+    # Function to define the coordinates of the spot array grid.
+    def grid_peak_finder(self, show_line_sums = False, verbose = False):
+        '''
+        Function to define the coordinates of the spot array grid.
+
+        This function uses the handle_mismatch() and infer_peaks() methods in this class.
+            - First creates lists of pixel value sums of vertical and horizontal lines of pixels in self.linear_array.
+            - Then uses scipy.signal.find_peaks() to find peaks and valleys in these lists.
+
+        Args:
+            show_line_sums (Boolean): whether to show a plot of the vertical and horizontal line sums
+            verbose (Boolean): whether to output additional information for debugging
+
+        Returns:
+            vertical_line_peaks (list of ints):   list of horizontal indices where peaks exist in summed vertical lines
+            vertical_line_mins (list of ints):    list of horizontal indices where minima exist in summed vertical lines
+            horizontal_line_peaks (list of ints): list of vertical indices where peaks exist in summed horizontal lines
+            horizontal_line_mins (list of ints):  list of vertical indices where minima exist in summed horizontal lines
+        '''
         grid_width, grid_height = self.grid_shape
+        image_width, image_height = self.image_shape
 
         # Find the sums of vertical and horizontal lines of pixels in the grayscale image array
         vlsums, hlsums = self.linear_array.sum(axis=0), self.linear_array.sum(axis=1)
 
+        if show_line_sums:
+             print("\t\t\tShowing vertical line sums...")
+             plt.plot(vlsums)
+             plt.show()
+             print("\t\t\tShowing horizontal line sums...")
+             plt.plot(hlsums)
+             plt.show()
+
+        # Find peaks and valleys in the vertical and horizontal line sums
         vlpeaks, _ = find_peaks(vlsums)
         vlmins, _ = find_peaks(vlsums * -1)
         hlpeaks, _ = find_peaks(hlsums)
         hlmins, _ = find_peaks(hlsums * -1)
 
-        if len(vlpeaks) != grid_width:
-            vlpeaks, vlmins = self.handle_mismatch(line_sums = vlsums, actual_peaks = vlpeaks, actual_mins = vlmins,
-                                              expected_peaks_count = grid_width, line_axis_name = "vertical",
-                                              tolerance_spot_frac = 0.25, verbose = verbose)
+        # Find distances between adjacent indices of vertical and horizontal line peaks
+        vlpeaks_deltas = vlpeaks[1:] - vlpeaks[:-1]
+        hlpeaks_deltas = hlpeaks[1:] - hlpeaks[:-1]
+
+        # Handle vertical line peaks (horizontal axis)
+        vlpeaks, vlmins = self.check_line_peaks(line_axis_name = "vertical", line_sums = vlsums, line_peaks = vlpeaks, line_mins = vlmins,
+                                                line_peaks_deltas = vlpeaks_deltas, expected_peaks_count = grid_width, length_px = image_width, verbose = True)
+        hlpeaks, hlmins = self.check_line_peaks(line_axis_name = "horizontal", line_sums = hlsums, line_peaks = hlpeaks, line_mins = hlmins,
+                                                line_peaks_deltas = hlpeaks_deltas, expected_peaks_count = grid_height, length_px = image_height, verbose = True)
+
+        return vlpeaks, vlmins, hlpeaks, hlmins
+
+    # Function to check whether detected vertical/horizontal line peaks match expected horizontal/vertical spot count
+    def check_line_peaks(self, line_axis_name, line_sums, line_peaks, line_mins, line_peaks_deltas, expected_peaks_count, length_px, verbose = False):
+        '''
+        Function to check whether the detected line peaks match the number of expected spots and correct as necessary
+
+        Args:
+            line_axis_name (str): name of the axis of the line sums, i.e. "vertical" or "horizontal"
+            line_sums (arr of floats): list of sums of lines of pixels along the orthogonal axis
+            line_peaks (arr of ints): list of indices in line_sums where local peaks exist
+            line_mins (arr of ints): list of indices in line_sums where local minima exist
+            line_peaks_deltas (arr of ints): list of spacings between adjacent indices in line_peaks
+            expected_peaks_count (int): expected number of peaks
+            length_px (int): number of pixels in the image in the orthogonal axis to lines of pixels being summed
+            verbose (Boolean): whether to output additional information for debugging
+
+        Returns:
+            line_peaks (arr of ints): adjusted input line_peaks depending on whether a mismatch was found
+            line_mins (arr of ints): adjusted input line_mins depending on whether a mismatch was found
+        '''
+        if len(line_peaks) != expected_peaks_count:
+            '''
+            Mismatch handling for when the number of vertical/horizontal line peaks in the horizontal/vertical axis does 
+            not equal the number of spots expected in the horizontal axis
+            '''
+            print(f"\t\t\tWarning: number of {line_axis_name} line peaks does not match expected peaks count (found {len(line_peaks)}, expected {expected_peaks_count}); invoking self.handle_mismatch()")
+            line_peaks, line_mins = self.handle_mismatch(line_sums = line_sums, actual_peaks = line_peaks, actual_mins = line_mins,
+                                                         expected_peaks_count = expected_peaks_count, line_axis_name = line_axis_name,
+                                                         length_px = length_px, tolerance_spot_frac = 0.25, verbose = verbose)
+        elif line_peaks_deltas.min() < (0.5 * len(line_sums) / expected_peaks_count) or line_peaks_deltas.max() > (1.5 * len(line_sums) / expected_peaks_count):
+            '''
+            Tests whether the spacing between vertical/horizontal line peaks is regular; if outside tolerances, reverts 
+            to inferring peaks based on image size and known grid dimensions instead of actually identifying the peaks.
+            '''
+            print("\t\t\tWarning: irregular line peak spacing; defaulting to inferring peaks from grid dimensions")
+            line_peaks, line_mins = self.infer_peaks(line_sums = line_sums, expected_peaks = expected_peaks_count, verbose = verbose)
         else:
-            print("\t\t\tfound correct number of vertical line peaks")
+            print(f"\t\t\tfound correct number of {line_axis_name} line peaks") if verbose else None
+        return line_peaks, line_mins
 
-        if len(hlpeaks) != grid_height:
-            hlpeaks, hlmins = self.handle_mismatch(line_sums = hlsums, actual_peaks=hlpeaks, actual_mins=hlmins,
-                                              expected_peaks_count = grid_height, line_axis_name = "horizontal",
-                                              tolerance_spot_frac = 0.25, verbose = verbose)
-        else:
-            print("\t\t\tfound correct number of horizontal line peaks")
+    # Function for resolving mismatches between detected peak counts and expected peak counts
+    def handle_mismatch(self, line_sums, actual_peaks, actual_mins, expected_peaks_count, line_axis_name, length_px,
+                        tolerance_spot_frac = 0.25, extra_peaks_proportion = 0.1, deltas_threshold = 1.5, verbose = False):
+        '''
+        Function to resolve mismatches between the detected peak count and the expected peak count.
 
-        return (vlpeaks, vlmins, hlpeaks, hlmins)
+        Args:
+            line_sums (arr of floats): list of sums of lines of pixels along the orthogonal axis
+            actual_peaks (arr of ints): the detected peaks (which are given as indices referring to the line_sums)
+            actual_mins (arr of ints): the detected mins (indices referring to line_sums)
+            expected_peaks_count (int): the number of peaks that are expected based on the grid dimensions (number of spots expected)
+            line_axis_name (str): the line sum axis; must be "vertical" or "horizontal"
+            tolerance_spot_frac (float): the fraction of the spot dimension (in pixels) that is the allowed distance between peaks for them to be declared mergeable
+            extra_peaks_proportion (float): the fraction of the expected peak count that is allowed for the collapse_extra_peaks method to be used
+            deltas_threshold (float or None): if float, it is used to test the distances between output line minima to ensure no aberrant differences
+                                              default is 1.5, allowing 50% variance from mean distances between minima
 
-    '''
-    Function to conditionally apply infer_peaks() when there is a mismatch between the detected peak count and the expected peak count. 
-    As input, it takes: 
-        line_sums = array of vertical or horizontal line sums
-        actual_peaks = the detected peaks (which are given as indices referring to the original line_sums)
-        actual_mins - the detected mins (indices referring to line_sums)
-        expected_peaks_count = the number of peaks that are expected based on the grid dimensions (number of spots expected)
-        line_axis_name = the line sum axis; must be "vertical" or "horizontal"
-        tolerance_spot_frac = the fraction of the spot dimension (in pixels) that is the allowed distance between peaks for them to be declared mergeable
-        extra_peaks_proportion = the fraction of the expected peak count that is allowed for the collapse_extra_peaks method to be used
-    It returns: 
-        output_line_peaks = new array of line peaks based on conditionally applying infer_peaks()
-        output_line_mins = new array of line mins based on conditionally applying infer_peaks()
-    '''
-    def handle_mismatch(self, line_sums, actual_peaks, actual_mins, expected_peaks_count, line_axis_name,
-                        tolerance_spot_frac = 0.25, extra_peaks_proportion = 0.25, verbose = False):
+        Returns:
+            output_line_peaks (arr of ints): new array of line peaks based on conditionally applying infer_peaks()
+            output_line_mins (arr of ints): new array of line mins based on conditionally applying infer_peaks()
+        '''
         actual_peaks_count = len(actual_peaks)
         extra_peaks_ceiling = (extra_peaks_proportion + 1) * expected_peaks_count
-
-        print("\t\t\tgrid_peak_finder warning: found", actual_peaks_count, line_axis_name, "line peaks, but", expected_peaks_count, "were expected.") if verbose else None
+        extra_peaks_ceiling = round(extra_peaks_ceiling)
 
         if actual_peaks_count < expected_peaks_count or actual_peaks_count > extra_peaks_ceiling:
             print("\t\t\t\tinferring", line_axis_name, "line peaks from dimensions...") if verbose else None
@@ -198,9 +458,25 @@ class SpotArray:
             print("\t\t\t\taveraging extra", line_axis_name, "line peaks that are within", tolerance_spot_frac * 100, "% of average spot dimension...") if verbose else None
             output_line_peaks, output_line_mins = self.infer_peaks(line_sums = line_sums, expected_peaks = expected_peaks_count, collapse_extra_peaks = True,
                                                                    detected_peaks=actual_peaks, tolerance_spot_frac = tolerance_spot_frac, verbose = verbose)
+            print("\t\t\t\tgot", len(output_line_peaks), "line peaks and", len(output_line_mins), "line mins")
+
+            if deltas_threshold is not None:
+                line_mins_deltas = output_line_mins[1:] - output_line_mins[:-1]
+                deltas_mean_expected = (length_px / expected_peaks_count) * deltas_threshold
+                excessive_variance = any(line_mins_deltas > (deltas_threshold * deltas_mean_expected)) #boolean value
+                print("\t\t\t\texcessive variances between line mins were detected...") if excessive_variance else None
+            else:
+                excessive_variance = False
+
             if len(output_line_peaks) != expected_peaks_count:
-                print("\t\t\t\tfailed to correct number of peaks by averaging within the tolerance; reverting to inferring peaks by grid dimensions...") if verbose else None
+                print("\t\t\t\tfailed to correct number of peaks by averaging within the tolerance: wrong number of peaks found",
+                      "\n\t\t\t\treverting to inferring peaks by grid dimensions...") if verbose else None
                 output_line_peaks, output_line_mins = self.infer_peaks(line_sums = line_sums, expected_peaks = expected_peaks_count, verbose = verbose)
+            elif excessive_variance:
+                print("\t\t\t\tfailed to correct number of peaks by averaging within the tolerance: excessive variance was detected",
+                      "\n\t\t\t\treverting to inferring peaks by grid dimensions...") if verbose else None
+                output_line_peaks, output_line_mins = self.infer_peaks(line_sums = line_sums, expected_peaks = expected_peaks_count, verbose = verbose)
+
         else:
             output_line_peaks, output_line_mins = actual_peaks, actual_mins
 
@@ -262,15 +538,27 @@ class SpotArray:
     If render_sliced_image is set to True, it will also draw a new image showing the slice lines. 
     '''
     def image_slicer(self, image_ndarray, vlinepeaks_indices, vlinemins_indices, hlinepeaks_indices, hlinemins_indices,
-                     render_sliced_image = True, slicer_debugging = False):
+                     render_sliced_image = True, slicer_debugging = False, verbose = False):
+        print("\t\t\tstarting image_slicer()...") if verbose else None
+
+        # Show the input image if slicer debugging is enabled
+        if slicer_debugging:
+            print("\t\t\tshowing input image...")
+            imshow(image_ndarray, cmap="gray")
+            plt.show()
+
         if render_sliced_image:
             max_pixel = image_ndarray.max()
             color_image = np.repeat(image_ndarray[:,:,np.newaxis], 3, axis=2) #Red=[:,:,0], Green=[:,:,1], Blue=[:,:,2]
 
         alphabet = list(string.ascii_uppercase)  # Used for declaring coordinates later
 
+        print("\t\t\tfinding minima between line peaks (horizontal and vertical lines)...") if verbose else None
         vlpeaks_prev_mins, vlpeaks_next_mins = self.mins_between_peaks(vlinepeaks_indices, vlinemins_indices)
         hlpeaks_prev_mins, hlpeaks_next_mins = self.mins_between_peaks(hlinepeaks_indices, hlinemins_indices)
+
+        print("\t\t\tfound", len(vlpeaks_prev_mins), "minima to the left and", len(vlpeaks_next_mins), "to the right of vlpeaks",
+              "\n\t\t\tfound", len(hlpeaks_prev_mins), "minima to the left and", len(hlpeaks_next_mins), "to the right of hlpeaks") if verbose else None
 
         peak_coordinates_dict = {}
         sliced_spot_dict = {}
@@ -280,11 +568,9 @@ class SpotArray:
                 col_number = j + 1
                 alphanumeric_coordinates = row_letter + str(col_number)
 
-                horizontal_prev_min = int(
-                    hlpeaks_prev_mins.get(horizontal_peak))  # horizontal peaks are along the vertical axis
+                horizontal_prev_min = int(hlpeaks_prev_mins.get(horizontal_peak))  # horizontal peaks are along the vertical axis
                 horizontal_next_min = int(hlpeaks_next_mins.get(horizontal_peak))
-                vertical_prev_min = int(
-                    vlpeaks_prev_mins.get(vertical_peak))  # vertical peaks are along the horizontal axis
+                vertical_prev_min = int(vlpeaks_prev_mins.get(vertical_peak))  # vertical peaks are along the horizontal axis
                 vertical_next_min = int(vlpeaks_next_mins.get(vertical_peak))
 
                 peak_coordinates = (horizontal_peak, vertical_peak)  # (height, width)
@@ -292,12 +578,30 @@ class SpotArray:
 
                 sliced_spot = image_ndarray[horizontal_prev_min:horizontal_next_min,
                               vertical_prev_min:vertical_next_min]  # height range, width range
+
+                # Define the coordinates of the top left corner, midpoint, and radius of a given image snippet in the source image (self.linear_array)
+                top_left_corner = (horizontal_prev_min, vertical_prev_min)  # height x width (y,x)
+                sliced_spot_midpoint = (round(sliced_spot.shape[0] / 2), round(sliced_spot.shape[1] / 2))
+                sliced_spot_radius = min(sliced_spot_midpoint)
+
+                # Derive the coordinates of the spot midpoint in the source image
+                spot_midpoint_coords = (top_left_corner[0] + sliced_spot_midpoint[0], top_left_corner[1] + sliced_spot_midpoint[1])
+
+                # Package the results into a dictionary
+                values_at_coord = {
+                    "top_left_corner": top_left_corner,
+                    "spot_midpoint_coords": spot_midpoint_coords,
+                    "spot_radius": sliced_spot_radius,
+                    "spot_image_snippet": sliced_spot
+                }
+
+                # Assign the values dict to a dictionary with the alphanumeric coordinates as the key
+                sliced_spot_dict[alphanumeric_coordinates] = values_at_coord
+
                 if slicer_debugging:
+                    print(f"\t\t\t{alphanumeric_coordinates} info: {values_at_coord}")
                     imshow(sliced_spot, cmap="gray")
                     plt.show()
-
-                top_left_corner = (horizontal_prev_min, vertical_prev_min)  # height x width
-                sliced_spot_dict[alphanumeric_coordinates] = (top_left_corner, sliced_spot)
 
         if render_sliced_image:
             # Mark peaks with blue lines
@@ -332,6 +636,7 @@ class SpotArray:
     '''
     def mins_between_peaks(self, peaks_array, mins_array):
         # where peaks_array contains indices of peaks in an image
+
         next_mins_dict = {}
         previous_mins_dict = {}
 
@@ -366,34 +671,55 @@ class SpotArray:
         return in_range_values
 
     #-------------------------------------------------------------------------------------------------------------------------------------------------------
-    '''
-    Function that returns a dictionary of spot coordinates where the value is a tuple of (background-adjusted signal, ellipsoid_index)
-    Uses the center_peak_spot() method in this class, found below. 
-    Inputs: 
-        spot_images = a dictionary of spot coordinates where the value is a tuple of (top_left_corner, spot_image array)
-        dilation_factor = a multiplier to enlarge (>1) or constrict (<1) the defined constraining ellipsoid
-        centering_mode = "blob", "line_peaks", or None: 
-            "blob" => uses center_blob_spot() to find the spot midpoint for defining the surrounding ellipsoid.
-            "line_peaks" => uses center_peak_spot() to find the vertical and horizontal line peak intersect point for defining a surrounding ellipsoid.
-            None => sets the center point of the spot as equal to the center point of the spot image for defining a surrounding ellipsoid. 
-        return_coordinates_list = a boolean for whether to return an additional simple list of alphanumeric spot coordinates.
-    Outputs in returned dict: 
-        background_adjusted_signal = (sum of pixel values inside the ellipsoid) - (mean pixel value outside the ellipsoid)*(number of pixels inside the ellipsoid)
-        ellipsoid_index = (mean pixel value inside the ellipsoid) / (mean pixel value outside the ellipsoid)
-            Values >>> 1 represent signals which are highly constrained to the ellipsoid. 
-            Values ~1 represent smears that are not ellipsoidal. 
-            Values <1 usually represent situations where most of the signal is non-specific bleed-over from neighbouring spots. 
-    '''
-    def ellipsoid_constrain(self, spot_images, dilation_factor = 1, centering_mode = "blob", return_coordinates_list = False, verbose = False):
+
+    def ellipsoid_constrain(self, spot_images, dilation_factor = 1, centering_mode = "iterative", return_coordinates_list = False, verbose = False):
+        '''
+        Function that returns a dictionary of spot coordinates where the value is a tuple of:
+            unadjusted_signal (float): sum of pixel values inside the ellipse defining the spot
+            background_adjusted_signal (float): sum of pixel values inside the spot ellipse, minus area-adjusted signal from outside the ellipse
+            ellipsoid_index (float): the ratio of mean pixel values inside the spot ellipse to mean pixel values outside the ellipse
+            spot_midpoint (tuple): a tuple representing coordinates of the center of the defined spot ellipse
+            top_left_corner (tuple): a tuple representing coordinates of the top left corner of each spot image snippet
+            stitched_image (np.ndarray): if hough_stitch mode is used, is an image showing the outlined detected spots
+
+        The ellipsoid centering mode can be any of the following options:
+            "hough": Hough circle transform method
+            "hough_stitch": Hough circle transform, also returning a stitched image showing the defined circles
+            "blob": uses self.center_blob_spot()
+            "line_peaks": uses self.center_peak_spot()
+            None: defaults to defining an ellipsoid based on the height and width of each spot image snippet
+
+        Args:
+            spot_images (dict): a dictionary of spot coordinates where the value is a tuple of (top_left_corner, spot_image)
+            dilation_factor (float): a multiplier to enlarge or constrict the defined constraining ellipsoid
+            centering_mode (str): mode for how to center and constrain the spot ellipsoid
+            return_coordinates_list (bool): whether to reutrn a list of coordinates for the spots, in addition to the results dictionary
+            verbose (bool): whether to display debugging information
+
+        Returns:
+            output_dict (dict): a dictionary of spot coordinates where the value is a tuple of (unadjusted_signal, background_adjusted_signal, ellipsoid_index, spot_midpoint, top_left_corner, stitched_image)
+        '''
+
         print("\t\t\trunning ellipsoid_constrain()...") if verbose else None
 
+        # Get the minimum spot radius of all spots in the dictionary
+        spot_radii_list = []
+        for values_dict in spot_images.values():
+            spot_image_radius = values_dict.get("spot_radius")
+            spot_radii_list.append(spot_image_radius)
+        spot_radius_min = min(spot_radii_list)
+
+        # Perform spot image quantification
         output_dict = {}
+        coordinates_list = []
+        image_stitching_list = []
+        final_midpoints_list = []
 
-        if return_coordinates_list:
-            coordinates_list = []
+        for spot_coordinates, values_dict in spot_images.items():
+            top_left_corner = values_dict.get("top_left_corner")
+            spot_midpoint_coords = values_dict.get("spot_midpoint_coords")
+            spot_image = values_dict.get("spot_image_snippet")
 
-        for spot_coordinates, value in spot_images.items():
-            top_left_corner, spot_image = value
             print("\t\t\ttop left corner of current spot:", top_left_corner) if verbose else None
 
             spot_image_height = len(spot_image)
@@ -401,278 +727,60 @@ class SpotArray:
 
             print("\t\t\tSpot image height: ", spot_image_height, "px", "\n\t\t\tSpot image width: ", spot_image_width, "px") if verbose else None
 
-            '''
-            The ellipsoid equation is (x-c)^2/(a^2) + (y-d)^2/(b^2) = 1, where <1 is inside the ellipsoid, and >1 is outside. 
-                a = horizontal radius (stretch)     b = vertical radius (stretch)
-                c = horizontal translation          d = vertical translation
-                The middle of the circle is a point at (c, d). 
-                    CAUTION: The coordinates are reversed for NumPy image arrays, which are a vertical list of horizontal lines. 
-                    For arrays, the midpoint is (d, c). Coordinates are effectively (y,x) rather than (x,y). 
-            '''
+            if centering_mode == "iterative":
+                final_midpoint_coords, results = spot_circle_scan(image_snippet = spot_image, source_image = self.linear_array,
+                                                                  midpoint_coords = spot_midpoint_coords, enforced_radius = spot_radius_min,
+                                                                  alphanumeric_coords = spot_coordinates, radius_variance_multiplier = 0.33,
+                                                                  radius_shrink_multiplier = 0.9, value_to_maximize = "inside_sum", verbose = False)
 
-            if centering_mode == "blob":
-                spot_midpoint, spot_radii = self.center_blob_spot(spot_image, show_detected_blobs = False, verbose = True)
-            elif centering_mode == "line_peaks":
-                spot_midpoint, spot_radii = self.center_peak_spot(spot_image = spot_image, tolerance_fraction = 0.5,
-                                                              tolerance_mode = "whole", verbose = verbose)
-                spot_radii[0] = spot_radii[0] * dilation_factor
-                spot_radii[1] = spot_radii[1] * dilation_factor
+                # Append midpoint coordinates to the list for drawing circles later
+                final_midpoints_list.append(final_midpoint_coords)
+
+                # Declare quantified metrics
+                ellipsoid_index = results.get("ellipsoid_index")
+                spot_midpoint = results.get("spot_midpoint")
+                mean_intensity_outside = results.get("outside_sum") / results.get("outside_count")
+                background_adjusted_signal = results.get("inside_sum") - (results.get("inside_count") * mean_intensity_outside)
+                unadjusted_signal = results.get("inside_sum")
+
+            elif centering_mode == "hough" or centering_mode == "hough_stitch":
+                results = hough_detect_circle(spot_image, dilate_to_edge = True, verbose = True)
+                ellipsoid_index = results.get("ellipsoid_index")
+                spot_midpoint = results.get("spot_midpoint")
+                mean_intensity_outside = results.get("outside_sum") / results.get("outside_count")
+                background_adjusted_signal = results.get("inside_sum") - (results.get("inside_count") * mean_intensity_outside)
+                unadjusted_signal = results.get("inside_sum")
+                if centering_mode == "hough_stitch":
+                    image_for_stitching = results.get("outlined_image")
+                    image_stitching_list.append((image_for_stitching, top_left_corner))
+
             else:
                 print("\t\t\tcaution: centering_mode", centering_mode, "is not recognized; defaulting to None") if centering_mode != None else None
-                spot_radii = [round((spot_image_height / 2) * dilation_factor), round((spot_image_width / 2) * dilation_factor)]
+                spot_radii = np.array([round((spot_image_height / 2) * dilation_factor), round((spot_image_width / 2) * dilation_factor)])
                 spot_midpoint = (spot_radii[0], spot_radii[1])
-
-            print("\t\t\tpeak_intersect =", spot_midpoint, "\n\t\t\tvertical_radius =", vertical_radius,
-                  "\n\t\t\thorizontal_radius =", horizontal_radius, "\n\t\t\tdilation factor =", dilation_factor) if verbose else None
-
-            a, b = spot_radii[1], spot_radii[0] # horizontal radius, vertical radius
-            c, d = spot_midpoint[1], spot_midpoint[0]
-
-            print("\t\t\tThe inside-ellipsoid equation is (x-c)^2/(a^2) + (y-d)^2/(b^2) < 1",
-                  "\n\t\t\tHere, the equation is (x-" + str(c) + ")^2/(" + str(a) + "^2) + (y-" + str(d) + ")^2/(" + str(b) + "^2) < 1,",
-                  "\n\t\t\twhere x and y are the pixel coordinates that may or may not be within the ellipsoid.") if verbose else None
-
-            pixels_inside, pixels_outside = 0, 0
-            sum_intensities_inside, sum_intensities_outside = 0, 0
-
-            for i, row in enumerate(spot_image):
-                print("\t\t\tWorking on row", i, "of spot_image...") if verbose else None
-                for j, pixel_value in enumerate(row):
-                    print("\t\t\tevaluating column index", j, "in this row...", "\n\t\t\tpixel_value is", pixel_value) if verbose else None
-
-                    values_dict = {
-                        "x": j,
-                        "y": i,
-                        "a": a,
-                        "b": b,
-                        "c": c,
-                        "d": d
-                    }
-
-                    pixel_is_inside = self.ellipsoid_evaluator(values_dict, verbose = verbose)
-                    print("\t\t\tpixel_is_inside =", pixel_is_inside) if verbose else None
-
-                    if pixel_is_inside:
-                        pixels_inside += 1
-                        sum_intensities_inside += pixel_value
-                    else:
-                        pixels_outside += 1
-                        sum_intensities_outside += pixel_value
-
-            mean_intensity_inside = sum_intensities_inside / pixels_inside
-            mean_intensity_outside = sum_intensities_outside / pixels_outside
-
-            # Assume that everything outside the circle is background, and subtract to get the true signal
-            background_adjusted_signal = sum_intensities_inside - (pixels_inside * mean_intensity_outside)
-
-            '''
-            Make an index where >>>1 means strong positive, ~1 means negative/smear, 
-            and <1 indicates that the majority of the signal comes from neighbouring spots bleeding over.
-            '''
-            ellipsoid_index = mean_intensity_inside / mean_intensity_outside
+                spot_radius = spot_radii.min() * dilation_factor  # enforce circles when ellipsoids are oblong
+                pixels_inside, pixels_outside, unadjusted_signal, sum_outside, ellipsoid_index, background_adjusted_signal = circle_stats(grayscale_image, center = spot_midpoint, radius = spot_radius)
 
             # To the output dict, add a tuple containing the background-adjusted signal and the ellipsoid index
-            output_dict[spot_coordinates] = (background_adjusted_signal, ellipsoid_index, spot_midpoint, top_left_corner)
-            if return_coordinates_list:
-                coordinates_list.append(spot_coordinates)
+            output_dict[spot_coordinates] = (unadjusted_signal, background_adjusted_signal, ellipsoid_index, spot_midpoint, top_left_corner)
+            coordinates_list.append(spot_coordinates)
+
+        # If a method was used that supports circling the detected spots, generate an image showing circles in green
+        if centering_mode == "iterative":
+            outlined_image = draw_color_circle(self.sliced_image, final_midpoints_list, spot_radius_min, "green")
+        elif centering_mode == "hough_stitch":
+            outlined_image = concatenate_images(image_stitching_list)
+        else:
+            outlined_image = None
 
         '''
         Returns a dictionary where the key is spot coordinates and the value is a tuple containing 
         (background-adjusted signal, ellipsoid index)
         '''
         if return_coordinates_list:
-            return output_dict, coordinates_list
+            return outlined_image, output_dict, coordinates_list
         else:
-            return output_dict
-
-    #----------
-
-    '''
-    center_blob_spot() uses cv2.SimpleBlobDetector to define a spot as a blob and get the centre and bounding coordinates.
-    Optionally, it also invokes self.make_keypoint_image() if show_detected_blobs is set to True. 
-    Note that when a single blob is not found, center_blob_spot will default to using the center_peak_spot() method. 
-    Inputs for center_blob_spot(): 
-        spot_image = the sliced spot image; must be a grayscale image with float values from 0-1
-        show_detected_blobs = boolean for whether to show individual spot image slices with blob outlines and centre point markers
-    Outputs from center_blob_spot(): 
-        spot_center_coords = (height, width) as a point
-        vertical_radius, horizontal_radius = the radii of the spot, defined by the distance to the nearest image border from spot_center_coords    
-    '''
-
-    # Function for drawing and displaying a single blob on an image
-    def make_keypoint_image(self, image, keypoints, keypoint_coords):
-        image_keypoints = cv2.drawKeypoints(image, keypoints, np.array([]), (0, 0, 255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
-        image_keypoints[keypoint_coords[0],keypoint_coords[1]] = (255,0,0) #places a red dot at the keypoint coordinates
-        imshow(image_keypoints)
-        plt.show()
-
-    def center_blob_spot(self, spot_image, show_detected_blobs = False, verbose = False):
-        print("\t\t\trunning center_blob_spot()...") if verbose else None
-
-        spot_image_height, spot_image_width = spot_image.shape[0:2]
-        spot_image_area = spot_image_height * spot_image_width
-
-        #Invert image and convert to np.uint8; SimpleBlobDetector requires black blobs on a white background
-        spot_image_8bit = spot_image * 256
-        spot_image_8bit = 256 - spot_image_8bit #inverts the image
-
-        #Set 8-bit image contrast to max, then convert to np.uint8 as required by SimpleBlobDetector
-        spot_image_8bit = spot_image_8bit - spot_image_8bit.min()
-        spot_image_8bit = spot_image_8bit * (255 / spot_image_8bit.max())
-        spot_image_8bit = spot_image_8bit.astype(np.uint8)
-
-        #Set up the blob detector, where blobs must encompass at least 1/4 of the total spot image area to prevent small artifact spots
-        params = cv2.SimpleBlobDetector_Params()
-        params.minArea = round(spot_image_area / 4)
-        detector = cv2.SimpleBlobDetector_create(params)
-        keypoints = detector.detect(spot_image_8bit)
-
-        #Get spot center coordinates
-        if len(keypoints) == 1:
-            print("\t\t\t\tfound blob!") if verbose else None
-            keypoint_coords = keypoints[0].pt
-            spot_center_coords = (round(keypoint_coords[1]), round(keypoint_coords[0]))
-            self.make_keypoint_image(image = spot_image_8bit, keypoints = keypoints, keypoint_coords = spot_center_coords) if show_detected_blobs else None
-        else:
-            print("\t\t\t\tcould not find single blob; declaring spot image slice midpoint as pseudo-blob center...") if verbose else None
-            spot_center_coords = (round(spot_image_height / 2), round(spot_image_width / 2))
-
-        #Get spot ellipsoid radii based, inferred based on the distance between the spot center coords and the nearest image border in each dimension
-        spot_radii = [self.nearest_border(index = spot_center_coords[0], length = spot_image_height),
-                      self.nearest_border(index = spot_center_coords[1], length = spot_image_width)]
-
-        return spot_center_coords, spot_radii
-
-    '''
-    center_peak_spot() uses find_peaks() on vertical and horizontal line sums to infer the center point of a spot in a sliced spot image. 
-    It is somewhat less accurate than center_blob_spot(), and for most usages, it should only be defaulted to if center_blob_spot() fails. 
-    Note that if more than one peak is found in either the horizontal or vertical dimension, the peaks are averaged. 
-    Inputs: 
-        spot_image = the sliced spot image as a numpy array
-        tolerance_fraction = a value from 0 to 1 for the allowed deviation from image center while finding peaks/crosshairs/actual spot center
-            0 = no tolerance
-            1 = total tolerance
-        tolerance_mode = "whole" or "subslice"
-            "whole": find_peaks applied to whole image and then nudged based on tolerance_fraction
-            "subslice": find_peaks applied to subslice of spot image sliced based on tolerance_fraction
-    Returns: 
-        peak_intersect = (height, width) as a point
-        vertical_radius, horizontal_radius = the radii of the spot, defined by the distance to the nearest image border from the peak_intersect
-    '''
-
-    def center_peak_spot(self, spot_image, tolerance_fraction, tolerance_mode = "whole", verbose = False):
-        print("\t\t\trunning center_peak_spot()...") if verbose else None
-
-        spot_image_height, spot_image_width = spot_image.shape[0:2]
-        image_midpoints = (round(spot_image_height / 2), round(spot_image_width / 2)) # vertical midpoint, horizontal midpoint
-        tolerated_variances = (round(tolerance_fraction * image_midpoints[0]), round(tolerance_fraction * image_midpoints[1]))
-
-        print("\t\t\tfinding spot_vlinesums and spot_hlinesums...") if verbose else None
-
-        if tolerance_mode == "subslice":
-            spot_vlinesums = spot_image[:,image_midpoints[1] - tolerated_variances[1]: image_midpoint[1] + tolerated_variances[1]].sum(axis=0)
-            spot_hlinesums = spot_image[image_midpoints[0] - tolerated_variances[0]: image_midpoints[0] + tolerated_variances[0],:].sum(axis=1)
-        elif tolerance_mode == "whole":
-            spot_vlinesums = spot_image.sum(axis=0)
-            spot_hlinesums = spot_image.sum(axis=1)
-        else:
-            raise Exception("Error in center_spot: tolerance_mode \"" + tolerance_mode + "\" is not an accepted mode. Expected \"whole\" or \"subslice\").")
-
-        print("\t\t\tspot_vlinesums:", spot_vlinesums, "\n\t\t\tspot_hlinesums:", spot_hlinesums) if verbose else None
-
-        # Note that if tolerance_mode is "subslice", these values are unadjusted subslice indices
-        spot_vlinepeaks, _ = find_peaks(spot_vlinesums)
-        spot_hlinepeaks, _ = find_peaks(spot_hlinesums)
-
-        print("\t\t\tspot_vlinepeaks:", spot_vlinepeaks, "\n\t\t\tspot_hlinepeaks:", spot_hlinepeaks) if verbose else None
-
-        # Get single mean peak
-        spot_vlinepeak = self.collapse_peaks(peaks=spot_vlinepeaks, values=spot_vlinesums)
-        spot_hlinepeak = self.collapse_peaks(peaks=spot_hlinepeaks, values=spot_hlinesums)
-
-        print("\t\t\tspot_vlinepeak:", spot_vlinepeak, "\n\t\t\tspot_hlinepeak:", spot_hlinepeak) if verbose else None
-
-        if tolerance_mode == "subslice":
-            # Adjust indices of slice to apply to whole spot image
-            print("\t\t\tperforming index adjustment...") if verbose else None
-            spot_vlinepeak = spot_vlinepeak + (image_midpoints[1] - tolerated_variances[1])
-            spot_hlinepeak = spot_hlinepeak + (image_midpoints[0] - tolerated_variances[0])
-        elif tolerance_mode == "whole":
-            # Nudge indices to obey tolerance_fraction
-            print("\t\t\tnudging peaks to obey tolerated variances...") if verbose else None
-            spot_vlinepeak = self.nudge_peak(peak=spot_vlinepeak, tolerated_variance=tolerated_variances[1],
-                                        spot_midpoint=image_midpoints[1])
-            spot_hlinepeak = self.nudge_peak(peak=spot_hlinepeak, tolerated_variance=tolerated_variances[0],
-                                        spot_midpoint=image_midpoints[0])
-
-        peak_intersect = (spot_hlinepeak, spot_vlinepeak)
-
-        print("\t\t\tcorrected spot_vlinepeak:", spot_vlinepeak, "\n\t\t\tcorrected spot_hlinepeak:", spot_hlinepeak,
-              "\n\t\t\tpeak_intersect:", peak_intersect) if verbose else None
-
-        # Find nearest distance to border and use this for the radius, for both dimensions
-        print("\t\t\tCalculating nearest distance to borders for use as vertical and horizontal radii...") if verbose else None
-
-        # Make a list of vertical and horizontal radii, respectively
-        radii = [self.nearest_border(index = spot_hlinepeak, length = spot_image_height),
-                 self.nearest_border(index = spot_vlinepeak, length = spot_image_width)]
-
-        return peak_intersect, radii
-
-    '''
-    Simple function to evaluate whether a point defined by (x,y) is within a defined ellipsoid. 
-    The ellipsoid is defined by the equation x^2+y^2=1, with scaling factors. 
-    Returns a truth value for whether the point is inside the ellipsoid. 
-    '''
-    def ellipsoid_evaluator(self, values_dict, return_value = False, verbose = False):
-        print("\t\t\t", values_dict) if verbose else None
-
-        value = ((values_dict.get("x") - values_dict.get("c")) ** 2) / (values_dict.get("a") ** 2) + ((values_dict.get("y") - values_dict.get("d")) ** 2) / (values_dict.get("b") ** 2)
-        print("\t\t\t((x-c)**2)/(a**2) + ((y-d)**2)/(b**2) =", value) if verbose else None
-
-        if value <= 1:
-            inside = True
-        elif value > 1:
-            inside = False
-
-        print("\t\t\tinside =", inside) if verbose else None
-
-        if return_value:
-            return value, inside
-        else:
-            return inside
-
-    '''
-    Simple function to take a list of peaks from find_peaks() and collapse it to a single mean peak. 
-    Input: 
-        peaks = list of peaks (indices)
-        values = the values that find_peaks() was originally applied to
-    Output: 
-        peak = a single integer
-    '''
-    def collapse_peaks(self, peaks, values):
-        if len(peaks) > 0:
-            peak = round(peaks.mean())
-        else:
-            print("\t\t\tWarning: no peaks; defaulting to center.")
-            peak = round(len(values) / 2)
-        return peak
-
-    # Simple function to check if a peak index is within the tolerated bounds, and if not, nudge it to the inner edge of the bounds.
-    def nudge_peak(self, peak, tolerated_variance, spot_midpoint):
-        if peak < (spot_midpoint - tolerated_variance):
-            peak = spot_midpoint - tolerated_variance
-        elif peak > (spot_midpoint + tolerated_variance):
-            peak = spot_midpoint + tolerated_variance
-        return peak
-
-    # Finds the distance to the nearest border to a given index in a range of indices.
-    def nearest_border(self, index, length):
-        if (index - 0) <= (length - index):
-            radius = index - 0 # radius from distance to index[0]
-        else:
-            radius = length - index # radius from distance to index[-1]
-        return radius
+            return outlined_image, output_dict
 
     #-------------------------------------------------------------------------------------------------------------------------------------------------------
     '''
@@ -694,7 +802,7 @@ class SpotArray:
         deviation = int((crosshair_width - 1) / 2)
 
         for spot_coordinates, value_tuple in spot_info.items():
-            background_adjusted_signal, ellipsoid_index, peak_intersect, top_left_corner = value_tuple
+            unadjusted_signal, background_adjusted_signal, ellipsoid_index, peak_intersect, top_left_corner = value_tuple
             real_peak_intersect = (top_left_corner[0] + peak_intersect[0], top_left_corner[1] + peak_intersect[1])
 
             # Draw horizontal green crosshair
@@ -706,120 +814,132 @@ class SpotArray:
             color_image[:,:,[0,2]][real_peak_intersect[0] - crosshair_diameter: real_peak_intersect[0] + crosshair_diameter, real_peak_intersect[1] - deviation: real_peak_intersect[1] + deviation] = 0
 
         return color_image
-    #-------------------------------------------------------------------------------------------------------------------------------------------------------
 
 #---------------------------------------------------------------------------------------------------------------------------------------------
 #Begin processing the images
 
-print("Please enter the dimensions of the array (number of spots in width x number of spots in height).")
-spot_grid_width = int(input("Width (number of spots):  "))
-spot_grid_height = int(input("Height (number of spots):  "))
-spot_grid_dimensions = (spot_grid_width, spot_grid_height)
-print("-----------------------")
+def main():
+    print("Please enter the dimensions of the array (number of spots in width x number of spots in height).")
 
-image_directory = input("Enter the full directory where TIFF images are stored: ")
-filenames_list = os.listdir(image_directory)
-print("Loading and processing files as SpotArray objects...")
-spot_arrays = []
-for filename in filenames_list: 
-    print("\tLoading", filename)
-    file_path = os.path.join(image_directory, filename)
-    spot_array = SpotArray(tiff_path = file_path, spot_dimensions = spot_grid_dimensions, verbose = True)
-    spot_arrays.append(spot_array)
+    spot_grid_width = input_number(prompt = "Width (number of spots):  ", mode = "int")
+    spot_grid_height = input_number(prompt = "Height (number of spots):  ", mode = "int")
+    spot_grid_dimensions = (spot_grid_width, spot_grid_height)
+    print("-----------------------")
 
-print("-----------------------")
-print("Assembling dataframe and saving images...")
+    image_directory = input("Enter the full directory where TIFF images are stored: ")
+    filenames_list = os.listdir(image_directory)
+    print("Loading and processing files as SpotArray objects...")
+    spot_arrays = []
+    for filename in filenames_list:
+        print("\tLoading", filename)
+        file_path = os.path.join(image_directory, filename)
 
-data_df = pd.DataFrame() #initialize blank dataframe
+        # Extract metadata from filename
+        filename_elements = filename.split("_")
+        metadata_tuple = (filename_elements[0], filename_elements[1][4:], filename_elements[2][4:])
 
-# Declare output directories and ensure that they exist
-output_dirs = {
-    "output": os.path.join(os.getcwd(), "image_prep_output"),
-    "rlt_output": os.path.join(os.getcwd(), "image_prep_output", "reverse_log_transformed_images"),
-    "crosshairs_output": os.path.join(os.getcwd(), "image_prep_output", "crosshairs-marked_spot_images")
-}
-for name, path in output_dirs.items():
-    if not os.path.exists(path):
-        os.makedirs(path)
+        spot_array = SpotArray(tiff_path = file_path, spot_dimensions = spot_grid_dimensions, metadata = metadata_tuple,
+                               suppress_warnings = False, pixel_log_base = 1, verbose = True)
+        spot_arrays.append(spot_array)
 
-bas_cols_dict = {} #Dictionary of lists of background-adjusted signal column names, where the key is the probe name
-ei_cols_dict = {} #Dictionary of lists of ellipsoid index column names, where the key is the probe name
-new_cols_dict = {} #Dictionary that includes both of the above, along with the copy and scan numbers, in the form of (copy, scan, bas_col, ei_col)
+    print("-----------------------")
+    print("Assembling dataframe and saving images...")
 
-for spot_array in spot_arrays:
-    col_prefix = spot_array.probe_name + "\nCopy " + str(spot_array.copy_number) + "\nScan " + str(spot_array.scan_number)
-    bas_col = col_prefix + "\nBackground-Adjusted_Signal"
-    ei_col = col_prefix + "\nEllipsoid_Index"
+    data_df = pd.DataFrame() #initialize blank dataframe
 
-    #Assign column names to dict by probe name
-    dict_value_append(bas_cols_dict, spot_array.probe_name, bas_col)
-    dict_value_append(ei_cols_dict, spot_array.probe_name, ei_col)
-    dict_value_append(new_cols_dict, spot_array.probe_name, (spot_array.copy_number, spot_array.scan_number, bas_col, ei_col))
+    # Declare output directories and ensure that they exist
+    output_dirs = {
+        "output": os.path.join(os.getcwd(), "image_prep_output"),
+        "rlt_output": os.path.join(os.getcwd(), "image_prep_output", "reverse_log_transformed_images"),
+        "crosshairs_output": os.path.join(os.getcwd(), "image_prep_output", "crosshairs-marked_spot_images")
+    }
+    for name, path in output_dirs.items():
+        if not os.path.exists(path):
+            os.makedirs(path)
 
-    #Assign dataframe values
-    for spot_coord, signal_tuple in spot_array.spot_info_dict.items():
-        background_adjusted_signal, ellipsoid_index, _, _ = signal_tuple
+    bas_cols_dict = {} #Dictionary of lists of background-adjusted signal column names, where the key is the probe name
+    ei_cols_dict = {} #Dictionary of lists of ellipsoid index column names, where the key is the probe name
+    new_cols_dict = {} #Dictionary that includes both of the above, along with the copy and scan numbers, in the form of (copy, scan, bas_col, ei_col)
 
-        data_df.at[spot_coord, bas_col] = background_adjusted_signal
-        data_df.at[spot_coord, ei_col] = ellipsoid_index
+    for spot_array in spot_arrays:
+        col_prefix = spot_array.probe_name + "\nCopy " + str(spot_array.copy_number) + "\nScan " + str(spot_array.scan_number)
+        uas_col = col_prefix + "\nRaw_Spot_Signal"
+        bas_col = col_prefix + "\nBackground-Adjusted_Signal"
+        ei_col = col_prefix + "\nEllipsoid_Index"
 
-    #Save modified image
-    imwrite(os.path.join(output_dirs.get("rlt_output"), "Copy" + str(spot_array.copy_number) + "_Scan" + str(spot_array.scan_number) + "_" + spot_array.probe_name + "_reverse-log-transform.tif"), spot_array.linear_array)
-    imwrite(os.path.join(output_dirs.get("crosshairs_output"), "Copy" + str(spot_array.copy_number) + "_Scan" + str(spot_array.scan_number) + "_" + spot_array.probe_name + "_crosshairs.tif"), spot_array.sliced_image_crosshairs)
+        #Assign column names to dict by probe name
+        dict_value_append(bas_cols_dict, spot_array.probe_name, bas_col)
+        dict_value_append(ei_cols_dict, spot_array.probe_name, ei_col)
+        dict_value_append(new_cols_dict, spot_array.probe_name, (spot_array.copy_number, spot_array.scan_number, bas_col, ei_col))
 
-#Declare probe order for sorting dataframe columns
-probes_ordered = []
-input_probe_order = input("Would you like to specify the order of probes for sorting columns? (Y/N)  ")
-if input_probe_order == "Y":
-    print("\tThe probes in this dataset are:", list(ei_cols_dict.keys()))
-    print("\tPlease enter the probes in the order you wish them to appear. Hit enter when done.")
-    no_more_probes = False
-    while not no_more_probes:
-        next_probe = input("Probe name:  ")
-        if next_probe != "":
-            probes_ordered.append(next_probe)
-        else:
-            no_more_probes = True
-else:
-    probes_ordered = list(ei_cols_dict.keys())
-    print("\tUsing arbitrary probe order:", probes_ordered)
+        #Assign dataframe values
+        for spot_coord, signal_tuple in spot_array.spot_info_dict.items():
+            unadjusted_signal, background_adjusted_signal, ellipsoid_index, _, _ = signal_tuple
 
-#Sorting dataframe and testing significance of hits
-print("Organizing dataframe...")
+            data_df.at[spot_coord, uas_col] = unadjusted_signal
+            data_df.at[spot_coord, bas_col] = background_adjusted_signal
+            data_df.at[spot_coord, ei_col] = ellipsoid_index
 
-sorted_cols = ["Peptide_Name"] #Adds a column to receive peptide names later
-data_df.insert(0, "Peptide_Name", "")
-for current_probe in probes_ordered:
-    col_tuples = new_cols_dict.get(current_probe)
-    col_tuples = sorted(col_tuples, key = lambda x: x[0]) #Sorts by copy number
-    new_cols_dict[current_probe] = col_tuples
-    for col_tuple in col_tuples:
-        sorted_cols.append(col_tuple[2]) #Appends background_adjusted_signal column name
-        sorted_cols.append(col_tuple[3]) #Appends ellipsoid_index column name
-    data_df.insert(1, current_probe + "_call", "")
-    sorted_cols.append(current_probe + "_call")
+        #Save modified image
+        imwrite(os.path.join(output_dirs.get("rlt_output"), "Copy" + str(spot_array.copy_number) + "_Scan" + str(spot_array.scan_number) + "_" + spot_array.probe_name + "_reverse-log-transform.tif"), spot_array.linear_array)
+        imwrite(os.path.join(output_dirs.get("crosshairs_output"), "Copy" + str(spot_array.copy_number) + "_Scan" + str(spot_array.scan_number) + "_" + spot_array.probe_name + "_crosshairs.tif"), spot_array.outlined_image)
 
-data_df = data_df[sorted_cols]
+    #Declare probe order for sorting dataframe columns
+    probes_ordered = []
+    input_probe_order = input("Would you like to specify the order of probes for sorting columns? (Y/N)  ")
+    if input_probe_order == "Y":
+        print("\tThe probes in this dataset are:", list(ei_cols_dict.keys()))
+        print("\tPlease enter the probes in the order you wish them to appear. Hit enter when done.")
+        no_more_probes = False
+        while not no_more_probes:
+            next_probe = input("Probe name:  ")
+            if next_probe != "":
+                probes_ordered.append(next_probe)
+            else:
+                no_more_probes = True
+    else:
+        probes_ordered = list(ei_cols_dict.keys())
+        print("\tUsing arbitrary probe order:", probes_ordered)
 
-#Test significance
-print("Testing significance of hits...")
-ei_sig_thres = float(input("\tEnter the ellipsoid index threshold above which a hit is considered significant:  "))
+    #Sorting dataframe and testing significance of hits
+    print("Organizing dataframe...")
 
-for current_probe in probes_ordered:
-    call_col = current_probe + "_call"
-    ei_cols = ei_cols_dict.get(current_probe)
-    data_df[call_col] = data_df.apply(lambda x: "Pass" if (x[ei_cols] > ei_sig_thres).all() else "", axis = 1)
+    sorted_cols = ["Peptide_Name"] #Adds a column to receive peptide names later
+    data_df.insert(0, "Peptide_Name", "")
+    for current_probe in probes_ordered:
+        col_tuples = new_cols_dict.get(current_probe)
+        col_tuples = sorted(col_tuples, key = lambda x: x[0]) #Sorts by copy number
+        new_cols_dict[current_probe] = col_tuples
+        for col_tuple in col_tuples:
+            sorted_cols.append(col_tuple[2]) #Appends background_adjusted_signal column name
+            sorted_cols.append(col_tuple[3]) #Appends ellipsoid_index column name
+        data_df.insert(1, current_probe + "_call", "")
+        sorted_cols.append(current_probe + "_call")
 
-#Add peptide names
-add_names = input("Add peptide names from CSV file mapping coordinates to names? (Y/N)  ")
-if add_names == "Y":
-    names_path = input("\tEnter the path containing the CSV with coordinate-name pairs:  ")
-    names_dict = csv_to_dict(names_path)
+    data_df = data_df[sorted_cols]
 
-for i, row in data_df.iterrows():
-    pep_name = names_dict.get(i)
-    data_df.at[i, "Peptide_Name"] = pep_name
+    #Test significance
+    print("Testing significance of hits...")
+    ei_sig_thres = float(input("\tEnter the ellipsoid index threshold above which a hit is considered significant:  "))
 
-data_df.to_csv(os.path.join(output_dirs.get("output"), "preprocessed_data.csv"))
+    for current_probe in probes_ordered:
+        call_col = current_probe + "_call"
+        ei_cols = ei_cols_dict.get(current_probe)
+        data_df[call_col] = data_df.apply(lambda x: "Pass" if (x[ei_cols] > ei_sig_thres).all() else "", axis = 1)
 
-print("Done!")
+    #Add peptide names
+    add_names = input("Add peptide names from CSV file mapping coordinates to names? (Y/N)  ")
+    if add_names == "Y":
+        names_path = input("\tEnter the path containing the CSV with coordinate-name pairs:  ")
+        names_dict = csv_to_dict(names_path)
+
+    for i, row in data_df.iterrows():
+        pep_name = names_dict.get(i)
+        data_df.at[i, "Peptide_Name"] = pep_name
+
+    data_df.to_csv(os.path.join(output_dirs.get("output"), "preprocessed_data.csv"))
+
+    print("Done!")
+
+if __name__ == "__main__":
+    main()
