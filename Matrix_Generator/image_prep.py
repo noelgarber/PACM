@@ -932,10 +932,9 @@ def main():
     if add_names == "Y":
         names_path = input("\tEnter the path containing the CSV with coordinate-name pairs:  ")
         names_dict = csv_to_dict(names_path)
-
-    for i, row in data_df.iterrows():
-        pep_name = names_dict.get(i)
-        data_df.at[i, "Peptide_Name"] = pep_name
+        for i, row in data_df.iterrows():
+            pep_name = names_dict.get(i)
+            data_df.at[i, "Peptide_Name"] = pep_name
 
     data_df.to_csv(os.path.join(output_dirs.get("output"), "preprocessed_data.csv"))
 
