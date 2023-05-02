@@ -51,6 +51,17 @@ def csv_to_dict(filepath):
 
 #Function to append elements to the value of a key-value pair in a dictionary, where the value is a list
 def dict_value_append(input_dict, key, element_to_append):
+    '''
+    Simple function that appends a key-value pair to an existing dictionary
+
+    Args:
+        input_dict (dict): the dictionary to which a key-value pair will be appended
+        key: the key to use
+        element_to_append: the value to assign for the key in the input_dict
+
+    Returns:
+        None; operation is performed in-place
+    '''
     if input_dict.get(key) == None:
         input_dict[key] = [element_to_append]
     else:
@@ -857,9 +868,10 @@ def main():
         if not os.path.exists(path):
             os.makedirs(path)
 
-    bas_cols_dict = {} #Dictionary of lists of background-adjusted signal column names, where the key is the probe name
-    ei_cols_dict = {} #Dictionary of lists of ellipsoid index column names, where the key is the probe name
-    new_cols_dict = {} #Dictionary that includes both of the above, along with the copy and scan numbers, in the form of (copy, scan, bas_col, ei_col)
+    uas_cols_dict = {} # Dictionary of lists of unadjusted signal column names, where the key is the probe name
+    bas_cols_dict = {} # Dictionary of lists of background-adjusted signal column names, where the key is the probe name
+    ei_cols_dict = {}  # Dictionary of lists of ellipsoid index column names, where the key is the probe name
+    new_cols_dict = {} # Dictionary that includes both of the above, along with the copy and scan numbers, in the form of (copy, scan, bas_col, ei_col)
 
     for spot_array in spot_arrays:
         col_prefix = spot_array.probe_name + "\nCopy " + str(spot_array.copy_number) + "\nScan " + str(spot_array.scan_number)
@@ -868,9 +880,10 @@ def main():
         ei_col = col_prefix + "\nEllipsoid_Index"
 
         #Assign column names to dict by probe name
+        dict_value_append(uas_cols_dict, spot_array.probe_name, uas_col)
         dict_value_append(bas_cols_dict, spot_array.probe_name, bas_col)
         dict_value_append(ei_cols_dict, spot_array.probe_name, ei_col)
-        dict_value_append(new_cols_dict, spot_array.probe_name, (spot_array.copy_number, spot_array.scan_number, bas_col, ei_col))
+        dict_value_append(new_cols_dict, spot_array.probe_name, (spot_array.copy_number, spot_array.scan_number, uas_col, bas_col, ei_col))
 
         #Assign dataframe values
         for spot_coord, signal_tuple in spot_array.spot_info_dict.items():
@@ -911,8 +924,9 @@ def main():
         col_tuples = sorted(col_tuples, key = lambda x: x[0]) #Sorts by copy number
         new_cols_dict[current_probe] = col_tuples
         for col_tuple in col_tuples:
-            sorted_cols.append(col_tuple[2]) #Appends background_adjusted_signal column name
-            sorted_cols.append(col_tuple[3]) #Appends ellipsoid_index column name
+            sorted_cols.append(col_tuple[2]) # Appends unadjusted signal column name
+            sorted_cols.append(col_tuple[3]) # Appends background_adjusted_signal column name
+            sorted_cols.append(col_tuple[4]) # Appends ellipsoid_index column name
         data_df.insert(1, current_probe + "_call", "")
         sorted_cols.append(current_probe + "_call")
 
