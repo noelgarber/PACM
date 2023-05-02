@@ -98,11 +98,27 @@ def spot_circle_scan(image_snippet, source_image, midpoint_coords, enforced_radi
             inside_sum = np.sum(source_image[mask == 255])
             inside_count = len(source_image[mask == 255])
 
-            # Calculate pixel value sum and count outside the circle, as a trailing square mask surrounding the local circle
-            square_surrounding_spot = source_image[y_deviated - spot_radius:y_deviated + spot_radius, x_deviated - spot_radius:x_deviated + spot_radius]
-            square_mask = mask[y_deviated - spot_radius:y_deviated + spot_radius, x_deviated - spot_radius:x_deviated + spot_radius]
-            outside_sum = np.sum(square_surrounding_spot[square_mask == 0])
-            outside_count = len(square_surrounding_spot[square_mask == 0])
+            # Find image snippet borders in source image
+            y_top = y_midpoint - image_snippet.shape[0]
+            y_bottom = y_midpoint + image_snippet.shape[0]
+            x_left = x_midpoint - image_snippet.shape[1]
+            x_right = x_midpoint + image_snippet.shape[1]
+
+            # Avoid out-of-bounds errors
+            if y_top < 0:
+                y_top = 0
+            if y_bottom > source_image.shape[0]-1:
+                y_bottom = source_image.shape[0]-1
+            if x_left < 0:
+                x_left = 0
+            if x_right > source_image.shape[1]-1:
+                x_right = source_image.shape[1]-1
+
+            # Calculate pixel value sum and count outside the circle, bounded by the image_snippet borders
+            square_around_spot = source_image[y_top:y_bottom, x_left:x_right]
+            square_mask_segment = mask[y_top:y_bottom, x_left:x_right]
+            outside_sum = np.sum(square_around_spot[square_mask_segment == 0])
+            outside_count = len(square_around_spot[square_mask_segment == 0])
 
             # Calculate the mean pixel value inside and outside the defined circle, and an index ratio of them
             mean_inside = inside_sum / inside_count
