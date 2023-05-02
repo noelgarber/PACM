@@ -268,7 +268,7 @@ class SpotArray:
         self.analyze_array(verbose = verbose)
 
     # High-level function that segments and analyzes the spots in the array
-    def analyze_array(self, ellipsoid_dilation_factor = 1, show_sliced_image = False, show_outlined_image = False,
+    def analyze_array(self, ellipsoid_dilation_factor = 1, show_sliced_image = False, show_outlined_image = True,
                       show_individual_spot_images = False, center_spots_mode = "iterative", verbose = True):
         '''
         Main function to analyze and quantify grids of spots
@@ -386,20 +386,16 @@ class SpotArray:
         hlpeaks, _ = find_peaks(hlsums)
         hlmins, _ = find_peaks(hlsums * -1)
 
-        # Find distances between adjacent indices of vertical and horizontal line peaks
-        vlpeaks_deltas = vlpeaks[1:] - vlpeaks[:-1]
-        hlpeaks_deltas = hlpeaks[1:] - hlpeaks[:-1]
-
-        # Handle vertical line peaks (horizontal axis)
+        # Handle vertical line peaks (horizontal axis) and horizontal line peaks (vertical axis); use default variance
         vlpeaks, vlmins = self.check_line_peaks(line_axis_name = "vertical", line_sums = vlsums, line_peaks = vlpeaks, line_mins = vlmins,
-                                                line_peaks_deltas = vlpeaks_deltas, expected_peaks_count = grid_width, length_px = image_width, verbose = True)
+                                                expected_peaks_count = grid_width, length_px = image_width, verbose = True)
         hlpeaks, hlmins = self.check_line_peaks(line_axis_name = "horizontal", line_sums = hlsums, line_peaks = hlpeaks, line_mins = hlmins,
-                                                line_peaks_deltas = hlpeaks_deltas, expected_peaks_count = grid_height, length_px = image_height, verbose = True)
+                                                expected_peaks_count = grid_height, length_px = image_height, verbose = True)
 
         return vlpeaks, vlmins, hlpeaks, hlmins
 
     # Function to check whether detected vertical/horizontal line peaks match expected horizontal/vertical spot count
-    def check_line_peaks(self, line_axis_name, line_sums, line_peaks, line_mins, line_peaks_deltas, expected_peaks_count, length_px, verbose = False):
+    def check_line_peaks(self, line_axis_name, line_sums, line_peaks, line_mins, expected_peaks_count, length_px, allowed_variance = 0.2, verbose = False):
         '''
         Function to check whether the detected line peaks match the number of expected spots and correct as necessary
 
@@ -408,33 +404,70 @@ class SpotArray:
             line_sums (arr of floats): list of sums of lines of pixels along the orthogonal axis
             line_peaks (arr of ints): list of indices in line_sums where local peaks exist
             line_mins (arr of ints): list of indices in line_sums where local minima exist
-            line_peaks_deltas (arr of ints): list of spacings between adjacent indices in line_peaks
             expected_peaks_count (int): expected number of peaks
             length_px (int): number of pixels in the image in the orthogonal axis to lines of pixels being summed
-            verbose (Boolean): whether to output additional information for debugging
+            allowed_variance (float): multiplier that defines the allowed deviation from expected spacing between peaks
+            verbose (bool): whether to output additional information for debugging
 
         Returns:
             line_peaks (arr of ints): adjusted input line_peaks depending on whether a mismatch was found
             line_mins (arr of ints): adjusted input line_mins depending on whether a mismatch was found
         '''
+
+        # Find distances between adjacent indices of vertical and horizontal line peaks and mins
+        line_peaks_deltas = line_peaks[1:] - line_peaks[:-1]
+        line_mins_deltas = line_mins[1:] - line_mins[:-1]
+
+        # Define actual minimum and maximum deltas for line peaks and mins
+        actual_deltas_dict = {
+            "peak_min_delta": line_peaks_deltas.min(),
+            "peak_max_delta": line_peaks_deltas.max(),
+            "valley_min_delta": line_mins_deltas.min(),
+            "valley_max_delta": line_mins_deltas.max()
+        }
+
+        # Define expected minimum and maximum deltas based on allowed_variance
+        expected_deltas_dict = {
+            "peak_min_delta": (1 - allowed_variance) * len(line_sums) / expected_peaks_count,
+            "peak_max_delta": (1 + allowed_variance) * len(line_sums) / expected_peaks_count,
+            "valley_min_delta": (1 - allowed_variance) * len(line_sums) / expected_peaks_count,
+            "valley_max_delta": (1 + allowed_variance) * len(line_sums) / expected_peaks_count
+        }
+
         if len(line_peaks) != expected_peaks_count:
             '''
             Mismatch handling for when the number of vertical/horizontal line peaks in the horizontal/vertical axis does 
             not equal the number of spots expected in the horizontal axis
             '''
-            print(f"\t\t\tWarning: number of {line_axis_name} line peaks does not match expected peaks count (found {len(line_peaks)}, expected {expected_peaks_count}); invoking self.handle_mismatch()")
+            print(f"\t\t\tWarning: number of {line_axis_name} line peaks does not match expected peaks count (found {len(line_peaks)}, expected {expected_peaks_count}); invoking self.handle_mismatch()") if verbose else None
             line_peaks, line_mins = self.handle_mismatch(line_sums = line_sums, actual_peaks = line_peaks, actual_mins = line_mins,
                                                          expected_peaks_count = expected_peaks_count, line_axis_name = line_axis_name,
                                                          length_px = length_px, tolerance_spot_frac = 0.25, verbose = verbose)
-        elif line_peaks_deltas.min() < (0.5 * len(line_sums) / expected_peaks_count) or line_peaks_deltas.max() > (1.5 * len(line_sums) / expected_peaks_count):
-            '''
-            Tests whether the spacing between vertical/horizontal line peaks is regular; if outside tolerances, reverts 
-            to inferring peaks based on image size and known grid dimensions instead of actually identifying the peaks.
-            '''
-            print("\t\t\tWarning: irregular line peak spacing; defaulting to inferring peaks from grid dimensions")
+        elif actual_deltas_dict.get("peak_min_delta") < expected_deltas_dict.get("peak_min_delta"):
+            # If the min spacing between line peaks is less than the tolerated min, reverts to inferring peaks
+            actual = actual_deltas_dict.get("peak_min_delta")
+            expected = expected_deltas_dict.get("peak_min_delta")
+            print(f"\t\t\tWarning: irregular line peak spacing (minimum was {actual}, but a valley greater than {expected} is required; defaulting to inferring peaks from grid dimensions") if verbose else None
+            line_peaks, line_mins = self.infer_peaks(line_sums = line_sums, expected_peaks = expected_peaks_count, verbose = verbose)
+        elif actual_deltas_dict.get("peak_max_delta") > expected_deltas_dict.get("peak_max_delta"):
+            # If the max spacing between line peaks is greater than the tolerated max, reverts to inferring peaks
+            actual = actual_deltas_dict.get("peak_max_delta")
+            expected = expected_deltas_dict.get("peak_max_delta")
+            print(f"\t\t\tWarning: irregular line peak spacing (maximum was {actual}, but a value less than {expected} is required); defaulting to inferring peaks from grid dimensions") if verbose else None
+            line_peaks, line_mins = self.infer_peaks(line_sums = line_sums, expected_peaks = expected_peaks_count, verbose = verbose)
+        elif actual_deltas_dict.get("valley_min_delta") < expected_deltas_dict.get("valley_min_delta"):
+            actual = actual_deltas_dict.get("valley_min_delta")
+            expected = expected_deltas_dict.get("valley_min_delta")
+            print(f"\t\t\tWarning: irregular line valley spacing (minimum was {actual}, but a value greater than {expected} is required); defaulting to inferring peaks from grid dimensions") if verbose else None
+            line_peaks, line_mins = self.infer_peaks(line_sums = line_sums, expected_peaks = expected_peaks_count, verbose = verbose)
+        elif actual_deltas_dict.get("valley_max_delta") < expected_deltas_dict.get("valley_max_delta"):
+            actual = actual_deltas_dict.get("valley_max_delta")
+            expected = expected_deltas_dict.get("valley_max_delta")
+            print(f"\t\t\tWarning: irregular line valley spacing (maximum was {actual}, but a value less than {expected} is required); defaulting to inferring peaks from grid dimensions") if verbose else None
             line_peaks, line_mins = self.infer_peaks(line_sums = line_sums, expected_peaks = expected_peaks_count, verbose = verbose)
         else:
             print(f"\t\t\tfound correct number of {line_axis_name} line peaks") if verbose else None
+
         return line_peaks, line_mins
 
     # Function for resolving mismatches between detected peak counts and expected peak counts
@@ -593,7 +626,8 @@ class SpotArray:
                 # Define the coordinates of the top left corner, midpoint, and radius of a given image snippet in the source image (self.linear_array)
                 top_left_corner = (horizontal_prev_min, vertical_prev_min)  # height x width (y,x)
                 sliced_spot_midpoint = (round(sliced_spot.shape[0] / 2), round(sliced_spot.shape[1] / 2))
-                sliced_spot_radius = min(sliced_spot_midpoint)
+                spot_radius_min = min(sliced_spot_midpoint)
+                spot_radius_max = max(sliced_spot_midpoint)
 
                 # Derive the coordinates of the spot midpoint in the source image
                 spot_midpoint_coords = (top_left_corner[0] + sliced_spot_midpoint[0], top_left_corner[1] + sliced_spot_midpoint[1])
@@ -602,7 +636,8 @@ class SpotArray:
                 values_at_coord = {
                     "top_left_corner": top_left_corner,
                     "spot_midpoint_coords": spot_midpoint_coords,
-                    "spot_radius": sliced_spot_radius,
+                    "spot_radius_min": spot_radius_min,
+                    "spot_radius_max": spot_radius_max,
                     "spot_image_snippet": sliced_spot
                 }
 
@@ -713,10 +748,11 @@ class SpotArray:
 
         print("\t\t\trunning ellipsoid_constrain()...") if verbose else None
 
-        # Get the minimum spot radius of all spots in the dictionary
+        # Get the mean radius of all spots, then take the minimum value and enforce it as the radius for all spots
         spot_radii_list = []
         for values_dict in spot_images.values():
-            spot_image_radius = values_dict.get("spot_radius")
+            spot_image_radius = (values_dict.get("spot_radius_min") + values_dict.get("spot_radius_max")) / 2
+            spot_image_radius = round(spot_image_radius)
             spot_radii_list.append(spot_image_radius)
         spot_radius_min = min(spot_radii_list)
 
