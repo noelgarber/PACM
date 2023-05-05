@@ -32,8 +32,8 @@ def load_spot_arrays(filenames_list, image_directory, spot_grid_dimensions, pixe
         metadata_tuple = (filename_elements[0], filename_elements[1][4:], filename_elements[2][4:])
 
         spot_array = SpotArray(tiff_path = file_path, spot_dimensions = spot_grid_dimensions, metadata = metadata_tuple,
-                               show_outlined_image = True, suppress_warnings = False, pixel_log_base = pixel_log_base,
-                               verbose = verbose)
+                               show_sliced_image = False, show_outlined_image = False, suppress_warnings = False,
+                               pixel_log_base = pixel_log_base, verbose = verbose)
         spot_arrays.append(spot_array)
     print("-----------------------") if verbose else None
     return spot_arrays
@@ -120,7 +120,7 @@ def prepare_sorted_cols(data_df, probes_ordered, cols_dict):
     data_df = data_df[sorted_cols]
     return data_df
 
-def significance_testing(data_df, ei_cols_dict):
+def significance_testing(data_df, ei_cols_dict, probes_ordered):
     ei_sig_thres = input_number(prompt = "Enter the ellipsoid index threshold above which a hit is considered significant:  ", mode = "float")
     for current_probe in probes_ordered:
         call_col = current_probe + "_call"
@@ -162,7 +162,7 @@ def main(verbose = True):
     #Sorting dataframe and testing significance of hits
     print("Organizing dataframe and testing hit significance...") if verbose else None
     data_df = prepare_sorted_cols(data_df = data_df, probes_ordered = probes_ordered, cols_dict = new_cols_dict)
-    significance_testing(data_df = data_df, ei_cols_dict = ei_cols_dict)
+    significance_testing(data_df = data_df, ei_cols_dict = ei_cols_dict, probes_ordered = probes_ordered)
 
     # Add peptide names
     add_peptide_names(data_df)
