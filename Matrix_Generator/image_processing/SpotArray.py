@@ -56,7 +56,7 @@ class SpotArray:
         draw_crosshairs:     function to draw crosshairs on the true peak points for each spot in the unsliced image
     '''
 
-    def __init__(self, tiff_path, spot_dimensions, metadata = (None, None, None), show_outlined_image = False, suppress_warnings = False, pixel_log_base = 1, verbose = False):
+    def __init__(self, tiff_path, spot_dimensions, metadata = (None, None, None), show_sliced_image = False, show_outlined_image = False, suppress_warnings = False, pixel_log_base = 1, verbose = False):
         '''
         Initialization function invoked when a new instance of the SpotArray class is created
 
@@ -93,7 +93,7 @@ class SpotArray:
         self.linear_array = reverse_log_transform(img, base = pixel_log_base) # Ensures that pixel values linearly correlate with luminance
 
         # Analyze the array automatically with the default variables
-        self.analyze_array(show_outlined_image = show_outlined_image, verbose = verbose)
+        self.analyze_array(show_sliced_image = show_sliced_image, show_outlined_image = show_outlined_image, verbose = verbose)
 
     def analyze_array(self, ellipsoid_dilation_factor = 1, show_sliced_image = False, show_outlined_image = False,
                       show_individual_spot_images = False, center_spots_mode = "iterative", verbose = False):
@@ -115,25 +115,26 @@ class SpotArray:
         '''
         if verbose:
             print("\tProcessing: Copy", self.copy_number, " - Scan", self.scan_number, "- Probe", self.probe_name)
-            print("\t\tfinding grid peaks...")
+            print(f"\t\tfinding grid peaks in image of shape {self.linear_array.shape}...")
 
         # Find the indices of the vertical and horizontal maxima and minima
-        self.vlpeaks_indices, self.vlmins_indices, self.hlinepeaks_indices, self.hlinemins_indices = self.grid_peak_finder(verbose = verbose)
+        self.vlpeaks_indices, self.vlmins_indices, self.hlinepeaks_indices, self.hlinemins_indices = self.grid_peak_finder(show_line_sums = False, verbose = verbose)
 
         # Slice the image based on vertical and horizontal maxima and minima
         print("\t\tslicing image...") if verbose else None
         image_peak_coordinates, image_slices, self.sliced_image = self.image_slicer(image_ndarray = self.linear_array, vlinepeaks_indices = self.vlpeaks_indices, vlinemins_indices = self.vlmins_indices,
                                                                                     hlinepeaks_indices = self.hlinepeaks_indices, hlinemins_indices = self.hlinemins_indices,
-                                                                                    render_sliced_image = True, slicer_debugging = show_individual_spot_images, verbose = verbose)
+                                                                                    render_sliced_image = True, show_individual_spot_stats = False,
+                                                                                    slicer_debugging = show_individual_spot_images, verbose = verbose)
 
         # Display popup of sliced image if prompted
         if show_sliced_image:
-            imshow(self.sliced_image)
+            imshow(self.sliced_image / self.sliced_image.max())
             plt.show()
 
         # Make a dictionary holding alphanumeric spot coordinates as keys, storing tuples of (unadjusted_signal, background_adjusted_signal, ellipsoid_index, peak_intersect, top_left_corner)
         print("\t\tcomputing background-adjusted signal and ellipsoid_index...") if verbose else None
-        self.outlined_image, self.spot_info_dict = self.ellipsoid_constrain(spot_images = image_slices, dilation_factor = ellipsoid_dilation_factor, centering_mode = center_spots_mode, verbose = False)
+        self.outlined_image, self.spot_info_dict = self.ellipsoid_constrain(spot_images = image_slices, dilation_factor = ellipsoid_dilation_factor, centering_mode = center_spots_mode, verbose = verbose)
 
         # Display popup of sliced image with drawn crosshairs if prompted
         if show_outlined_image:
@@ -217,27 +218,7 @@ class SpotArray:
             line_peaks (arr of ints): adjusted input line_peaks depending on whether a mismatch was found
             line_mins (arr of ints): adjusted input line_mins depending on whether a mismatch was found
         '''
-
-        # Find distances between adjacent indices of vertical and horizontal line peaks and mins
-        line_peaks_deltas = line_peaks[1:] - line_peaks[:-1]
-        line_mins_deltas = line_mins[1:] - line_mins[:-1]
-
-        # Define actual minimum and maximum deltas for line peaks and mins
-        actual_deltas_dict = {
-            "peak_min_delta": line_peaks_deltas.min(),
-            "peak_max_delta": line_peaks_deltas.max(),
-            "valley_min_delta": line_mins_deltas.min(),
-            "valley_max_delta": line_mins_deltas.max()
-        }
-
-        # Define expected minimum and maximum deltas based on allowed_variance
-        expected_deltas_dict = {
-            "peak_min_delta": (1 - allowed_variance) * len(line_sums) / expected_peaks_count,
-            "peak_max_delta": (1 + allowed_variance) * len(line_sums) / expected_peaks_count,
-            "valley_min_delta": (1 - allowed_variance) * len(line_sums) / expected_peaks_count,
-            "valley_max_delta": (1 + allowed_variance) * len(line_sums) / expected_peaks_count
-        }
-
+        # Mismatch handling
         if len(line_peaks) != expected_peaks_count:
             '''
             Mismatch handling for when the number of vertical/horizontal line peaks in the horizontal/vertical axis does 
@@ -250,28 +231,47 @@ class SpotArray:
         else:
             print(f"\t\t\tSuccess: found correct number of {line_axis_name} line peaks") if verbose else None
 
-        print("\t\t\tTesting line peak spacing...") if verbose else None
-        if actual_deltas_dict.get("peak_min_delta") < expected_deltas_dict.get("peak_min_delta"):
+        # Handle case where only 1 or 2 rows/columns exist
+        if len(line_peaks) == 1:
+            print(f"\t\t\t\tNotice: only 1 {line_axis_name} line peak exists; setting {line_axis_name} mins flanking either side") if verbose else None
+            line_mins = [0, len(line_sums)-1]
+            return line_peaks, line_mins
+        elif len(line_peaks) == 2 and len(line_mins) == 1:
+            print(f"\t\t\t\tNotice: only 2 {line_axis_name} line peaks and 1 min between them; adding flanking mins on either side") if verbose else None
+            if line_peaks[0] < line_mins[0] < line_peaks[1]:
+                line_mins = [0, line_mins[0], len(line_sums)-1]
+            else:
+                line_min_between = round((line_peaks[0] + line_peaks[1]) / 2)
+                line_mins = [0, line_min_between, len(line_sums)-1]
+            return line_peaks, line_mins
+
+        # Find distances between adjacent indices of vertical and horizontal line peaks and mins
+        line_peaks_deltas = line_peaks[1:] - line_peaks[:-1]
+        line_mins_deltas = line_mins[1:] - line_mins[:-1]
+
+        # Begin testing line peak and min spacing
+        print("\t\t\tTesting line peak and min spacing...") if verbose else None
+
+        peak_min_delta, peak_max_delta = line_peaks_deltas.min(), line_peaks_deltas.max()
+        valley_min_delta, valley_max_delta = line_mins_deltas.min(), line_mins_deltas.max()
+
+        allowed_min_delta, allowed_max_delta = (((1 - allowed_variance) * len(line_sums) / expected_peaks_count), ((1 + allowed_variance) * len(line_sums) / expected_peaks_count))
+
+        if peak_min_delta < allowed_min_delta:
             # If the min spacing between line peaks is less than the tolerated min, reverts to inferring peaks
-            actual = actual_deltas_dict.get("peak_min_delta")
-            expected = expected_deltas_dict.get("peak_min_delta")
-            print(f"\t\t\t\tSpacing Warning: irregular line peak spacing (minimum was {actual}, but a value greater than {expected} is required; defaulting to inferring peaks from grid dimensions") if verbose else None
+            print(f"\t\t\t\tSpacing Warning: irregular line peak spacing; smallest space was {peak_min_delta}, but the allowed minimum is {allowed_min_delta}; defaulting to inferring peaks from grid dimensions") if verbose else None
             line_peaks, line_mins = self.infer_peaks(line_sums = line_sums, expected_peaks = expected_peaks_count, verbose = verbose)
-        elif actual_deltas_dict.get("peak_max_delta") > expected_deltas_dict.get("peak_max_delta"):
+        elif peak_max_delta > allowed_max_delta:
             # If the max spacing between line peaks is greater than the tolerated max, reverts to inferring peaks
-            actual = actual_deltas_dict.get("peak_max_delta")
-            expected = expected_deltas_dict.get("peak_max_delta")
-            print(f"\t\t\t\tSpacing Warning: irregular line peak spacing (maximum was {actual}, but a value less than {expected} is required); defaulting to inferring peaks from grid dimensions") if verbose else None
+            print(f"\t\t\t\tSpacing Warning: irregular line peak spacing; largest space was {peak_max_delta}, but the allowed maximum is {allowed_max_delta}; defaulting to inferring peaks from grid dimensions") if verbose else None
             line_peaks, line_mins = self.infer_peaks(line_sums = line_sums, expected_peaks = expected_peaks_count, verbose = verbose)
-        elif actual_deltas_dict.get("valley_min_delta") < expected_deltas_dict.get("valley_min_delta"):
-            actual = actual_deltas_dict.get("valley_min_delta")
-            expected = expected_deltas_dict.get("valley_min_delta")
-            print(f"\t\t\t\tSpacing Warning: irregular line valley spacing (minimum was {actual}, but a value greater than {expected} is required); defaulting to inferring peaks from grid dimensions") if verbose else None
+        elif valley_min_delta < allowed_min_delta:
+            # If the min spacing between line minima is less than the tolerated min, reverts to inferring peaks
+            print(f"\t\t\t\tSpacing Warning: irregular line valley spacing; smallest space was {valley_min_delta}, but the allowed minimum is {allowed_min_delta}; defaulting to inferring peaks from grid dimensions") if verbose else None
             line_peaks, line_mins = self.infer_peaks(line_sums = line_sums, expected_peaks = expected_peaks_count, verbose = verbose)
-        elif actual_deltas_dict.get("valley_max_delta") < expected_deltas_dict.get("valley_max_delta"):
-            actual = actual_deltas_dict.get("valley_max_delta")
-            expected = expected_deltas_dict.get("valley_max_delta")
-            print(f"\t\t\t\tSpacing Warning: irregular line valley spacing (maximum was {actual}, but a value less than {expected} is required); defaulting to inferring peaks from grid dimensions") if verbose else None
+        elif valley_max_delta > allowed_max_delta:
+            # If the max spacing between line minima is greater than the tolerated max, reverts to inferring peaks
+            print(f"\t\t\t\tSpacing Warning: irregular line valley spacing largest space was {valley_max_delta}, but the allowed maximum is {allowed_max_delta}; defaulting to inferring peaks from grid dimensions") if verbose else None
             line_peaks, line_mins = self.infer_peaks(line_sums = line_sums, expected_peaks = expected_peaks_count, verbose = verbose)
         else:
             print(f"\t\t\t\tPassed: line spacing is within tolerances") if verbose else None
@@ -393,7 +393,7 @@ class SpotArray:
         return line_peaks, line_mins
 
     def image_slicer(self, image_ndarray, vlinepeaks_indices, vlinemins_indices, hlinepeaks_indices, hlinemins_indices,
-                     render_sliced_image = True, slicer_debugging = False, verbose = False):
+                     render_sliced_image = True, show_individual_spot_stats = False, slicer_debugging = False, verbose = False):
         '''
         Function for slicing a grayscale spot array image into image snippets representing each spot.
 
@@ -431,8 +431,8 @@ class SpotArray:
         alphabet = list(string.ascii_uppercase)  # Used for declaring coordinates later
 
         print("\t\t\tfinding minima between line peaks (horizontal and vertical lines)...") if verbose else None
-        vlpeaks_prev_mins, vlpeaks_next_mins = self.mins_between_peaks(vlinepeaks_indices, vlinemins_indices)
-        hlpeaks_prev_mins, hlpeaks_next_mins = self.mins_between_peaks(hlinepeaks_indices, hlinemins_indices)
+        vlpeaks_prev_mins, vlpeaks_next_mins = self.mins_between_peaks(peaks_array = vlinepeaks_indices, mins_array = vlinemins_indices, max_index = image_ndarray.shape[1])
+        hlpeaks_prev_mins, hlpeaks_next_mins = self.mins_between_peaks(peaks_array = hlinepeaks_indices, mins_array = hlinemins_indices, max_index = image_ndarray.shape[0])
 
         print("\t\t\tfound", len(vlpeaks_prev_mins), "minima to the left and", len(vlpeaks_next_mins), "to the right of vlpeaks",
               "\n\t\t\tfound", len(hlpeaks_prev_mins), "minima to the left and", len(hlpeaks_next_mins), "to the right of hlpeaks") if verbose else None
@@ -444,6 +444,7 @@ class SpotArray:
             for j, vertical_peak in enumerate(vlinepeaks_indices):
                 col_number = j + 1
                 alphanumeric_coordinates = row_letter + str(col_number)
+                print(f"\t\t\t\tprocessing {alphanumeric_coordinates} where hlinepeak = {horizontal_peak} and vlinepeak = {vertical_peak}") if show_individual_spot_stats else None
 
                 horizontal_prev_min = int(hlpeaks_prev_mins.get(horizontal_peak))  # horizontal peaks are along the vertical axis
                 horizontal_next_min = int(hlpeaks_next_mins.get(horizontal_peak))
@@ -452,7 +453,9 @@ class SpotArray:
 
                 peak_coordinates = (horizontal_peak, vertical_peak)  # (height, width)
                 peak_coordinates_dict[alphanumeric_coordinates] = peak_coordinates
+                print(f"\t\t\t\t\tpeak_coordinates = {peak_coordinates}") if show_individual_spot_stats else None
 
+                print(f"\t\t\t\t\tgetting sliced spot at range [{horizontal_prev_min}:{horizontal_next_min}, {vertical_prev_min}:{vertical_next_min}]") if show_individual_spot_stats else None
                 sliced_spot = image_ndarray[horizontal_prev_min:horizontal_next_min,
                               vertical_prev_min:vertical_next_min]  # height range, width range
 
@@ -500,7 +503,7 @@ class SpotArray:
         else:
             return peak_coordinates_dict, sliced_spot_dict
 
-    def mins_between_peaks(self, peaks_array, mins_array):
+    def mins_between_peaks(self, peaks_array, mins_array, max_index):
         '''
         Function for finding minima on either side of peaks defined by scipy.signal.find_peaks().
 
@@ -531,8 +534,18 @@ class SpotArray:
             inter_peak_spaces = np.append(inter_peak_spaces, inter_peak_space)
 
         inter_peak_space = inter_peak_spaces.mean()
-        previous_mins_dict[peaks_array[0]] = peaks_array[0] - (inter_peak_space / 2)
-        next_mins_dict[peaks_array[-1]] = peaks_array[-1] + (inter_peak_space / 2)
+
+        # Handle case where the leftmost min (before the first peak) is negative, such as when the leftmost peak is closer to the left than the mean inter-peak space
+        far_left_min = round(peaks_array[0] - (inter_peak_space / 2))
+        if far_left_min < 0:
+            far_left_min = 0
+        previous_mins_dict[peaks_array[0]] = far_left_min
+
+        # Handle case where the rightmost min (after the last peak) exceeds the maximum allowed index
+        far_right_min = round(peaks_array[-1] + (inter_peak_space / 2))
+        if far_right_min > max_index:
+            far_right_min = max_index
+        next_mins_dict[peaks_array[-1]] = far_right_min
 
         return previous_mins_dict, next_mins_dict
 
@@ -613,13 +626,7 @@ class SpotArray:
             top_left_corner = values_dict.get("top_left_corner")
             spot_midpoint_coords = values_dict.get("spot_midpoint_coords")
             spot_image = values_dict.get("spot_image_snippet")
-
-            print("\t\t\ttop left corner of current spot:", top_left_corner) if verbose else None
-
-            spot_image_height = len(spot_image)
-            spot_image_width = len(spot_image[0])
-
-            print("\t\t\tSpot image height: ", spot_image_height, "px", "\n\t\t\tSpot image width: ", spot_image_width, "px") if verbose else None
+            spot_image_height, spot_image_width = spot_image.shape
 
             if centering_mode == "iterative":
                 # Import the iterative scanning algorithm as a function
