@@ -20,15 +20,18 @@ def input_number(prompt, mode = "float"):
 
     while not input_finished:
         input_value = input(prompt)
-        try:
-            if mode == "int":
+        if mode == "int":
+            try:
                 output_value = int(input_value)
                 input_finished = True
-            elif mode == "float":
-                output_value = float(input_float)
+            except:
+                print("\tinput value was not an integer; please try again.")
+        elif mode == "float":
+            try:
+                output_value = float(input_value)
                 input_finished = True
-        except:
-            print(f"\tinput value was not {mode}; please try again.")
+            except:
+                print("\tinput value was not a float; please try again.")
 
     return output_value
 
