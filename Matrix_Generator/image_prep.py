@@ -50,17 +50,23 @@ def declare_output_dirs():
             os.makedirs(path)
     return output_dirs
 
-def assign_data_values(data_df, spot_arrays):
+def assign_data_values(data_df, spot_arrays, multiline_cols = True):
     uas_cols_dict = {} # Dictionary of lists of unadjusted signal column names, where the key is the probe name
     bas_cols_dict = {} # Dictionary of lists of background-adjusted signal column names, where the key is the probe name
     ei_cols_dict = {}  # Dictionary of lists of ellipsoid index column names, where the key is the probe name
     new_cols_dict = {} # Dictionary that includes both of the above, along with the copy and scan numbers, in the form of (copy, scan, bas_col, ei_col)
 
     for spot_array in spot_arrays:
-        col_prefix = spot_array.probe_name + "\nCopy " + str(spot_array.copy_number) + "\nScan " + str(spot_array.scan_number)
-        uas_col = col_prefix + "\nRaw_Spot_Signal"
-        bas_col = col_prefix + "\nBackground-Adjusted_Signal"
-        ei_col = col_prefix + "\nEllipsoid_Index"
+        if multiline_cols:
+            col_prefix = spot_array.probe_name + "\nCopy " + str(spot_array.copy_number) + "\nScan " + str(spot_array.scan_number)
+            uas_col = col_prefix + "\nRaw_Spot_Signal"
+            bas_col = col_prefix + "\nBackground-Adjusted_Signal"
+            ei_col = col_prefix + "\nEllipsoid_Index"
+        else:
+            col_prefix = spot_array.probe_name + "_Copy-" + str(spot_array.copy_number)
+            uas_col = col_prefix + "_Raw_Spot_Signal"
+            bas_col = col_prefix + "_Background-Adjusted_Signal"
+            ei_col = col_prefix + "_Ellipsoid_Index"
 
         #Assign column names to dict by probe name
         dict_value_append(uas_cols_dict, spot_array.probe_name, uas_col)
@@ -87,10 +93,10 @@ def write_images(output_dirs, spot_arrays):
 
 def get_probe_order(probes_list):
     probes_ordered = []
-    input_probe_order = input("Would you like to specify the order of probes for sorting columns? (Y/N)  ")
+    input_probe_order = input("Would you like to specify the order of probes for sorting columns and/or drop some probes? (Y/N)  ")
     if input_probe_order == "Y":
         print("\tThe probes in this dataset are:", probes_list)
-        print("\tPlease enter the probes in the order you wish them to appear. Hit enter when done.")
+        print("\tEnter the probes in the order you wish them to appear. If a probe is omitted, it is dropped. Hit enter when done.")
         no_more_probes = False
         while not no_more_probes:
             next_probe = input("Probe name:  ")
@@ -136,7 +142,7 @@ def add_peptide_names(data_df):
             pep_name = names_dict.get(i)
             data_df.at[i, "Peptide_Name"] = pep_name
 
-def main(verbose = True):
+def main(multiline_cols = True, verbose = True):
     spot_grid_dimensions = get_grid_dimensions(verbose = verbose)
     image_directory = input("Enter the full directory where TIFF images are stored: ")
     filenames_list = os.listdir(image_directory)
@@ -149,9 +155,9 @@ def main(verbose = True):
     # Assemble a dataframe containing results values
     print("Assembling dataframe and saving images...") if verbose else None
     data_df = pd.DataFrame()
-    uas_cols_dict, bas_cols_dict, ei_cols_dict, new_cols_dict = assign_data_values(data_df = data_df, spot_arrays = spot_arrays)
+    uas_cols_dict, bas_cols_dict, ei_cols_dict, new_cols_dict = assign_data_values(data_df = data_df, spot_arrays = spot_arrays, multiline_cols = multiline_cols)
 
-    # Write output images to destination directories
+    # Write output images to destination directoriesassign_data
     output_dirs = declare_output_dirs()
     write_images(output_dirs = output_dirs, spot_arrays = spot_arrays)
 
@@ -171,6 +177,9 @@ def main(verbose = True):
     data_df.to_csv(os.path.join(output_dirs.get("output"), "preprocessed_data.csv"))
 
     print("Done!") if verbose else None
+
+    # Return dataframe, which can be optionally assigned when main() is invoked
+    return data_df
 
 if __name__ == "__main__":
     main()
