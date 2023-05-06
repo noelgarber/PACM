@@ -39,15 +39,35 @@ def load_spot_arrays(filenames_list, image_directory, spot_grid_dimensions, pixe
     return spot_arrays
 
 # Declare output directories and ensure that they exist
-def declare_output_dirs():
+def declare_output_dirs(parent_directory = None):
+    '''
+    Function for declaring output directories for preprocessed data and image files
+
+    Args:
+        parent_directory (str): folder into which subfolders containing output data should be placed
+
+    Returns:
+        output_dirs (dict): dictionary of output directories for "output" (quantified data),
+                            "rlt_output" (linear grayscale images), and "outlined_output" (outlined images)
+    '''
+
+    # If no parent directory was given, declare parent directory as current working directory
+    if parent_directory is None:
+        # Warning: if this script is run for multiple datasets, data will be overwritten when no parent_directory is given
+        parent_directory = os.getcwd()
+
+    # Declare output directories
     output_dirs = {
         "output": os.path.join(os.getcwd(), "image_prep_output"),
         "rlt_output": os.path.join(os.getcwd(), "image_prep_output", "reverse_log_transformed_images"),
         "outlined_output": os.path.join(os.getcwd(), "image_prep_output", "outlined_spot_images")
     }
+
+    # Check if the directories exist, and if not, make them
     for name, path in output_dirs.items():
         if not os.path.exists(path):
             os.makedirs(path)
+
     return output_dirs
 
 def assign_data_values(data_df, spot_arrays, multiline_cols = True):
@@ -142,7 +162,7 @@ def add_peptide_names(data_df):
             pep_name = names_dict.get(i)
             data_df.at[i, "Peptide_Name"] = pep_name
 
-def main(multiline_cols = True, verbose = True):
+def main_preprocessing(multiline_cols = True, verbose = True):
     spot_grid_dimensions = get_grid_dimensions(verbose = verbose)
     image_directory = input("Enter the full directory where TIFF images are stored: ")
     filenames_list = os.listdir(image_directory)
@@ -158,7 +178,8 @@ def main(multiline_cols = True, verbose = True):
     uas_cols_dict, bas_cols_dict, ei_cols_dict, new_cols_dict = assign_data_values(data_df = data_df, spot_arrays = spot_arrays, multiline_cols = multiline_cols)
 
     # Write output images to destination directoriesassign_data
-    output_dirs = declare_output_dirs()
+    parent_dir = input("Please enter the directory where outlined images for this dataset should be deposited: ")
+    output_dirs = declare_output_dirs(parent_directory = parent_dir)
     write_images(output_dirs = output_dirs, spot_arrays = spot_arrays)
 
     # Declare probe order for sorting dataframe columns
@@ -182,4 +203,4 @@ def main(multiline_cols = True, verbose = True):
     return data_df
 
 if __name__ == "__main__":
-    main()
+    main_preprocessing()
