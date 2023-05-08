@@ -72,3 +72,41 @@ def dict_value_append(input_dict, key, element_to_append):
         value_list = input_dict.get(key)
         value_list.append(element_to_append)
         input_dict[key] = value_list
+
+def list_inputter(item_prompt):
+    '''
+    Simple function to sequentially input elements into a list
+
+    Args:
+        item_prompt (str): the prompt to display for adding each list item
+
+    Returns:
+        output_list (list): a list containing all the inputted values
+    '''
+    no_more_items = False
+    output_list = []
+    while not no_more_items:
+        item = input(item_prompt)
+        if item != "":
+            output_list.append(item)
+        else:
+            no_more_items = True
+    return output_list
+
+def mean_at_index(df, row_index, col_names):
+    '''
+    Simple function to find the mean of values in a dataframe row across a specified set of columns by name
+
+    Args:
+        df (pd.DataFrame):  the dataframe to use for lookup
+        row_index (int):    the index of the row to find the mean at
+        col_names (list):   list of column names for calculating a mean value
+
+    Returns:
+        mean_value (float): the mean value at row_index in df for cols defined in col_names
+    '''
+    values = np.empty(0)
+    for col in col_names:
+        values = np.append(values, df.at[row_index, col])
+    mean_value = values.mean()
+    return mean_value
