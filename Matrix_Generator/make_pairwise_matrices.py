@@ -202,29 +202,46 @@ def get_thresholds(percentiles_dict = None, use_percentiles = True, show_guidanc
 
 	return thres_tuple, points_tuple
 
-#Construction of weighted matrices that are position-aware
+def make_weighted_matrices(slim_length, aa_charac_dict):
+	'''
+	Function for generating weighted matrices corresponding to each type/position rule (e.g. position #1 = Acidic)
 
-print("Constructing position-aware weighted matrices.")
-print("----------------")
+	Args:
+		slim_length (int): the length of the motif being studied
+		aa_charac_dict (dict): the dictionary of amino acid characteristics and their constituent amino acids
 
-dictionary_of_matrices = {}
+	Returns:
+		dictionary_of_matrices (dict): a dictionary of standardized matrices
+	'''
+	# Declare dict where keys are position-type rules (e.g. "#1=Acidic") and values are corresponding weighted matrices
+	dictionary_of_matrices = {}
 
-for col_num in range(1, slim_length + 1): 
-	for charac, mem_list in aa_charac_dict.items(): 
+	# Iterate over columns for the weighted matrix (position numbers)
+	for col_num in range(1, slim_length + 1):
+		# Iterate over dict of chemical characteristic --> list of member amino acids (e.g. "Acidic" --> ["D","E"]
+		for charac, mem_list in aa_charac_dict.items():
+			# Generate the weighted matrix
+			weighted_matrix_containing_charac = weighted_matrix("Significant", slim_length, dens_df, minimum_members, list_aa, thres_extreme, thres_high, thres_mid, points_extreme, points_high, points_mid, points_low, position_for_filtering = col_num, residues_included_at_filter_position = mem_list)
 
-		weighted_matrix_containing_charac = weighted_matrix("Significant", slim_length, dens_df, minimum_members, list_aa, thres_extreme, thres_high, thres_mid, points_extreme, points_high, points_mid, points_low, position_for_filtering = col_num, residues_included_at_filter_position = mem_list)
-		
-		for n in np.arange(1, slim_length + 1): 
-			col_name = "#" + str(n)
-			max_value = weighted_matrix_containing_charac[col_name].max()
-			if max_value == 0: 
-				max_value = 1
-			for i, row in weighted_matrix_containing_charac.iterrows(): 
-				weighted_matrix_containing_charac.at[i, col_name] = weighted_matrix_containing_charac.at[i, col_name] / max_value
+			# Standardize the weighted matrix so that the max value is 1
+			for n in np.arange(1, slim_length + 1):
+				# Declare the column name index
+				col_name = "#" + str(n)
 
-		dict_key_name = "#" + str(col_num) + "=" + charac
+				# Find the max value in the weighted matrix, expressed in number of assigned points
+				max_value = weighted_matrix_containing_charac[col_name].max()
+				if max_value == 0:
+					max_value = 1 # required to avoid divide-by-zero error
 
-		dictionary_of_matrices[dict_key_name] = weighted_matrix_containing_charac
+				# Iterate over the rows of the weighted matrix and standardize each value to be relative to the max value
+				for i, row in weighted_matrix_containing_charac.iterrows():
+					weighted_matrix_containing_charac.at[i, col_name] = weighted_matrix_containing_charac.at[i, col_name] / max_value
+
+			# Assign the weighted matrix to the dictionary
+			dict_key_name = "#" + str(col_num) + "=" + charac
+			dictionary_of_matrices[dict_key_name] = weighted_matrix_containing_charac
+
+	return dictionary_of_matrices
 
 #Substitution for always-permitted residues with optional user input
 
