@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import os
 import pickle
+from general_utils.general_utils import input_number
 
 # Declare the sorted list of amino acids
 list_aa_no_phos = ["D", "E", "R", "H", "K", "S", "T", "N", "Q", "C", "G", "P", "A", "V", "I", "L", "M", "F", "Y", "W"]
@@ -23,53 +24,89 @@ aa_charac_dict = {
 	"Special_Cases": ["P", "G"]
 }
 
-#--------------------------------------------------------------------------
+def get_min_cat_members(display_message = True):
+	'''
+	Simple function to prompt the user to provide the minimum number of member peptides for a given category
 
-#Set minimum members in a category
+	Args:
+		None
 
-print("Weighted matrices are calculated relative to a reference position being in a particular chemical class (e.g. acidic, basic, hydrophobic, etc.).")
-print("    --> They are based on studying all the peptides following this position-type rule. ")
-print("    --> We advise setting a minimum number of peptides here to prevent overfitting.")
-print("How many peptides are required before a matrix defaults to using the total list rather than the type-position rule-following subset?")
-minimum_members_str = input("Input an integer: ")
-minimum_members = int(minimum_members_str)
-print("----------------")
+	Returns:
+		minimum_members (int): an integer representing the minimum number of peptides in a given group that must be
+							   present before it is used for matrix-building
+	'''
+	if display_message:
+		print("Weighted matrices are calculated relative to a reference position being in a particular chemical class (e.g. acidic, basic, hydrophobic, etc.).",
+			  "\n    --> They are based on studying all the peptides following this position-type rule. ",
+			  "\n    --> We advise setting a minimum number of peptides here to prevent overfitting.",
+			  "\nHow many peptides are required before a matrix defaults to using the total list rather than the type-position rule-following subset?")
+		minimum_members = input_number(prompt = "Input an integer: ", mode = "int")
+	else:
+		minimum_members = input_number(prompt = "Please enter the minimum peptide count for a given group to be included in matrix-building: ", mode = "int")
 
-#--------------------------------------------------------------------------
+	return minimum_members
 
 #DEFINE GENERALIZED MATRIX FUNCTION
 
-def WeightedMatrix(bait, motif_length, source_dataframe, min_members, amino_acid_list, extreme_thres, high_thres, mid_thres, 
-	points_for_extreme, points_for_high, points_for_mid, points_for_low, position_for_filtering = None, residues_included_at_filter_position = ["D", "E", "R", "H", "K", "S", "T", "N", "Q", "C", "G", "P", "A", "V", "I", "L", "M", "F", "Y", "W", "B", "J", "O"]): 
+def weighted_matrix(bait, motif_length, source_dataframe, min_members, amino_acid_list, extreme_thres, high_thres, mid_thres,
+					points_for_extreme, points_for_high, points_for_mid, points_for_low, position_for_filtering = None, residues_included_at_filter_position = ["D", "E", "R", "H", "K", "S", "T", "N", "Q", "C", "G", "P", "A", "V", "I", "L", "M", "F", "Y", "W", "B", "J", "O"],
+					bjo_seq_col = "BJO_sequence"):
+	'''
+	Generalized weighted matrix function
 
-	list_pos = [] #creates list to contain numbered positions across the motif length, to use as column headers in weighted matrices
+	Args:
+		bait (str):
+		motif_length (int): 						the length of the motif being assessed
+		source_dataframe ():
+		min_members ():
+		amino_acid_list ():
+		extreme_thres ():
+		high_thres ():
+		mid_thres ():
+		points_for_extreme ():
+		points_for_high ():
+		points_for_mid ():
+		points_for_low ():
+		position_for_filtering ():
+		residues_included_at_filter_position ():
+		bjo_seq_col (str): 							the name of the column in source_dataframe that contains the sequence with pS=B, pT=J, pY=O
+
+	Returns:
+		generic_matrix_df (pd.DataFrame):
+	'''
+
+	# Create a list to contain numbered positions across the motif length, to use as column headers in weighted matrices
+	list_pos = []
 	for i in range(1, int(motif_length) + 1): 
 		list_pos.append("#" + str(i))
 
+	# Initialize a dataframe where the index is the list of amino acids and the columns are the positions (e.g. #1)
 	generic_matrix_df = pd.DataFrame(index = amino_acid_list, columns = list_pos)
 	generic_matrix_df = generic_matrix_df.fillna(0)
 
+	# Delete any position indices that are declared as being filtered out
 	position_indices = np.arange(0, motif_length)
 	if position_for_filtering != None: 
 		position_indices_filtered = np.delete(position_indices, position_for_filtering - 1)
+	else:
+		position_indices_filtered = position_indices
 
-	#Default to no filtering if the number of members is below the minimum.
-
+	# Default to no filtering if the number of members is below the minimum.
 	num_qualifying_entries = 0
 	for i in np.arange(len(source_dataframe)): 
-		seq = source_dataframe.at[i, "BJO_Sequence"]
-		seq = list(seq) #converts to aa list
+		seq = source_dataframe.at[i, bjo_seq_col]
+		seq = list(seq) # converts to aa list
 		if seq[position_for_filtering - 1] in residues_included_at_filter_position: 
 			num_qualifying_entries += 1
 	if num_qualifying_entries < min_members: 
 		residues_included_at_filter_position = amino_acid_list
 
-	#Calculate the points and assign to the matrix.
-
+	# Calculate the points and assign to the matrix.
 	for i in np.arange(len(source_dataframe)): 
 		seq = source_dataframe.at[i, "BJO_Sequence"]
 		seq = list(seq) #converts to aa list
 
+		# Check if the current bait passes as a positive result for the given peptide sequence
 		if bait == "Significant": 
 			passes = source_dataframe.at[i, "Significant"]
 		elif source_dataframe.at[i, bait + "_Total_Pass"] == "Pass": 
@@ -110,46 +147,51 @@ def WeightedMatrix(bait, motif_length, source_dataframe, min_members, amino_acid
 
 	return generic_matrix_df
 
-#--------------------------------------------------------------------------
+def get_thresholds(percentiles_dict = None, use_percentiles = True, verbose = True):
+	'''
+	Simple function to define thresholds and corresponding points for the point assignment system
 
-#Begin position-aware analysis
+	Args:
+		percentiles_dict (): 	dictionary of percentile numbers --> signal values
+		use_percentiles (bool): whether to display percentiles from a dict and use percentiles for setting thresholds
+		verbose (bool): 		whether to display guidance for setting thresholds
 
-slim_length = int(input("Enter the length of your SLiM of interest as an integer (e.g. 15):  ")) #This is the length of the motif being analyzed
-print("----------------")
+	Returns:
+		thres_tuple (tuple): 	tuple of 3 thresholds for extreme, high, and mid-level signal values
+		points_tuple (tuple): 	tuple of 4 point values corresponding to extreme, high, mid-level, and below-threshold signal values
+	'''
 
-#Set the thresholds for the point assignment system
+	print("Setting thresholds for scoring.",
+		  "\n\tUse more points for HIGH signal hits to produce a model that correlates strongly with signal intensity.",
+		  "\n\tUse more points for LOW signal hits to produce a model that is better at finding weak positives.",
+		  "\nWe suggest the 90th, 80th, and 70th percentiles as thresholds, but this may vary depending on the number of hits expected.",
+		  "\n---") if verbose else None
 
-with open(os.path.join(os.getcwd(), "temp", "percentiles_dict.ob"), "rb") as f:
-	percentiles_dict = pickle.load(f)
+	# Set threshold values
+	if use_percentiles:
+		thres_extreme = int(input("Enter the upper percentile threshold (1 of 3):  "))
+		thres_extreme = percentiles_dict.get(thres_extreme)
 
-print("Setting thresholds for scoring.")
-print("Guidance:")
-print("\tUse more points for HIGH signal hits to produce a model that correlates strongly with signal intensity.")
-print("\tUse more points for LOW signal hits to produce a model that is better at finding weak positives.")
-print("We suggest the 90th, 80th, and 70th percentiles as thresholds, but this may vary depending on the number of hits expected.")
+		thres_high = int(input("Enter the upper-middle percentile threshold (2 of 3):  "))
+		thres_high = percentiles_dict.get(thres_high)
 
-print("---")
+		thres_mid = int(input("Enter the lower-middle percentile threshold (3 of 3):  "))
+		thres_mid = percentiles_dict.get(thres_mid)
+	else:
+		thres_extreme = int(input("Enter the upper signal threshold (1 of 3):  "))
+		thres_high = int(input("Enter the upper-middle signal threshold (2 of 3):  "))
+		thres_mid = int(input("Enter the lower-middle signal threshold (3 of 3):  "))
 
-use_percentiles = input("Would you like to use percentiles? If not, manually inputted numbers will be used. (Y/N)  ")
+	thres_tuple = (thres_extreme, thres_high, thres_mid)
 
-if use_percentiles == "Y": 
-	thres_extreme = int(input("Enter the upper percentile threshold (1 of 3):  "))
-	thres_extreme = percentiles_dict.get(thres_extreme)
-	thres_high = int(input("Enter the upper-middle percentile threshold (2 of 3):  "))
-	thres_high = percentiles_dict.get(thres_high)
-	thres_mid = int(input("Enter the lower-middle percentile threshold (3 of 3):  "))
-	thres_mid = percentiles_dict.get(thres_mid)
-else: 
-	thres_extreme = int(input("Enter the upper signal threshold (1 of 3):  "))
-	thres_high = int(input("Enter the upper-middle signal threshold (2 of 3):  "))
-	thres_mid = int(input("Enter the lower-middle signal threshold (3 of 3):  "))
+	# Set number of points for each threshold
+	points_extreme = float(input("How many points for values greater than " + str(thres_extreme) + "? Input:  "))
+	points_high = float(input("How many points for values greater than " + str(thres_high) + "? Input:  "))
+	points_mid = float(input("How many points for values greater than " + str(thres_mid) + "? Input:  "))
+	points_low = float(input("Some hits are marked significant but fall below the signal threshold. How many points for these lower hits? Input:  "))
+	points_tuple = (points_extreme, points_high, points_mid, points_low)
 
-#Set number of points
-
-points_extreme = float(input("How many points for values greater than " + str(thres_extreme) + "? Input:  "))
-points_high = float(input("How many points for values greater than " + str(thres_high) + "? Input:  "))
-points_mid = float(input("How many points for values greater than " + str(thres_mid) + "? Input:  "))
-points_low = float(input("Some hits are marked significant but fall below the signal threshold. How many points for these lower hits? Input:  "))
+	return thres_tuple, points_tuple
 
 print("----------------")
 
@@ -170,7 +212,7 @@ dictionary_of_matrices = {}
 for col_num in range(1, slim_length + 1): 
 	for charac, mem_list in aa_charac_dict.items(): 
 
-		weighted_matrix_containing_charac = WeightedMatrix("Significant", slim_length, dens_df, minimum_members, list_aa, thres_extreme, thres_high, thres_mid, points_extreme, points_high, points_mid, points_low, position_for_filtering = col_num, residues_included_at_filter_position = mem_list)
+		weighted_matrix_containing_charac = weighted_matrix("Significant", slim_length, dens_df, minimum_members, list_aa, thres_extreme, thres_high, thres_mid, points_extreme, points_high, points_mid, points_low, position_for_filtering = col_num, residues_included_at_filter_position = mem_list)
 		
 		for n in np.arange(1, slim_length + 1): 
 			col_name = "#" + str(n)
@@ -409,18 +451,31 @@ print("-------------------")
 
 
 
-def make_pairwise_matrices(dens_df, list_of_baits, control_bait_name):
+def make_pairwise_matrices(dens_df, list_of_baits, control_bait_name, percentiles_dict = None, slim_length = None, minimum_members = None):
 	'''
 	Main function for making pairwise position-weighted matrices
 
 	Args:
-		dens_df (pd.DataFrame): the dataframe containing densitometry values for the peptides being analyzed
-		list_of_baits (list): the list of bait proteins, not including the control bait
-		control_bait_name (str): the name of the control bait (e.g. "Secondary-only")
+		dens_df (pd.DataFrame): 	the dataframe containing densitometry values for the peptides being analyzed
+		list_of_baits (list): 		the list of bait proteins, not including the control bait
+		control_bait_name (str): 	the name of the control bait (e.g. "Secondary-only")
+		percentiles_dict (dict): 	dictionary of percentile --> mean signal value, for use in thesholding
+		slim_length (int): 			the length of the motif being studied
+		minimum_members (int): 		the minimum number ofo peptides that must belong to a chemically classified group
+									in order for them to be used in pairwise matrix-building
 
 	Returns:
 
 	'''
 
+	# Get the minimum number of peptides that must belong to a classified group for them to be used in matrix-building
+	if minimum_members is None:
+		minimum_members = get_min_cat_members()
 
+	# Define the length of the short linear motif (SLiM) being studied
+	if slim_length is None:
+		slim_length = int(input("Enter the length of your SLiM of interest as an integer (e.g. 15):  "))
+
+	# Get threshold and point values
+	thres_tuple, points_tuple = get_thresholds(percentiles_dict = percentiles_dict)
 
