@@ -3,9 +3,9 @@
 import numpy as np
 import pandas as pd
 import math
-from general_utils.general_utils import dict_value_append, list_inputter, input_number
+from general_utils.general_utils import input_number
 
-def standardize_dataframe(df, controls_list, bait_cols_dict):
+def standardize_dataframe(df, controls_list, bait_cols_dict, probe_control_name = None):
     '''
     Define a function that standardizes dataframes according to a list of controls, across a set of columns
 
@@ -13,10 +13,14 @@ def standardize_dataframe(df, controls_list, bait_cols_dict):
         df (pd.DataFrame): the dataframe to standardize
         controls_list (list): list containing the control peptide names
         bait_cols_dict (dict): a dictionary where each key-value pair is a bait name and a list of columns pointing to background-adjusted values for that bait
+        probe_control_name (str): the name of the control probe, which will be omitted when standardizing
 
     Returns:
         standardized_df (pd.DataFrame): a new dataframe that has been standardized according to the controls
     '''
+    if probe_control_name is None:
+        probe_control_name = input("Please enter the name of the probe control to omit from the standardization algorithm (e.g. Secondary-only): ")
+
     output_df = df.copy()
 
     # Make a dict where control_name => corresponding row index in the dataframe
@@ -29,29 +33,40 @@ def standardize_dataframe(df, controls_list, bait_cols_dict):
     # Make a dict where bait_name => mean of controls in all corresponding columns
     bait_controls_means = {}
     for bait, cols in bait_cols_dict.items():
-        bait_controls_values = []
-        for control_index in controls_indices.values():
-            bait_control_values = [output_df.at[control_index, col] for col in cols]
-            bait_controls_values.extend(bait_control_values)
-        bait_control_mean = np.array(bait_controls_values).mean()
-        bait_controls_means[bait] = bait_control_mean
+        if bait != probe_control_name:
+            bait_controls_values = []
+            for control_index in controls_indices.values():
+                bait_control_values = [output_df.at[control_index, col] for col in cols]
+                bait_controls_values.extend(bait_control_values)
+            bait_control_mean = np.array(bait_controls_values).mean()
+            bait_controls_means[bait] = bait_control_mean
 
-    # Get mean of controls for all baits
-    controls_supermean = np.array(list(bait_controls_means.values())).mean()
+    # Get mean of controls for all baits, excluding the control bait
+    peptide_controls_supermean = np.array(list(bait_controls_means.values())).mean()
 
     # Standardize dataframe
     for bait, cols in bait_cols_dict.items():
-        for col in cols:
-            control_values = []
-            for control_index in controls_indices.values():
-                control_value = output_df.at[control_index, col]
-                control_values.append(control_value)
-            control_values = np.array(control_values)
-            controls_mean_in_col = control_values.mean()
-            multiplier = controls_supermean / controls_mean_in_col
-            output_df[col] = output_df[col] * multiplier
+        # Check that the bait is an actual bait and not the control bait
+        if bait != probe_control_name:
+            # Iterate over the columns belonging to the current bait and standardize each one
+            for col in cols:
+                # Define the control values for this column
+                peptide_control_values = []
+                for control_index in controls_indices.values():
+                    peptide_control_value = output_df.at[control_index, col]
+                    peptide_control_values.append(peptide_control_value)
+                peptide_control_values = np.array(peptide_control_values)
 
-    return output_df, controls_supermean
+                # Find the mean of the control values in the column
+                peptide_controls_mean_in_col = peptide_control_values.mean()
+
+                # Calculate the multiplier to standardize, which will result in the control value equalling the control supermean
+                multiplier = peptide_controls_supermean / peptide_controls_mean_in_col
+
+                # Apply the standardization using the multiplier
+                output_df[col] = output_df[col] * multiplier
+
+    return output_df, peptide_controls_supermean
 
 def log2fc(val1, val2, increment_avoid_inf = 0.01):
     '''
@@ -65,6 +80,12 @@ def log2fc(val1, val2, increment_avoid_inf = 0.01):
     Returns:
         value (float): the log2fc value
     '''
+    # Handle cases where input values are negative
+    if val1 < 0:
+        val1 = 0
+    if val2 < 0:
+        val2 = 0
+
     value = math.log2(val1 + increment_avoid_inf) - math.log2(val2 + increment_avoid_inf)
     return value
 
@@ -104,15 +125,14 @@ def conditional_log2fc(input_df, bait_pair, control_signal_cols, bait1_signal_co
                                    bait2_signal_means > control_multiplier * control_signal_means)
 
     # Calculate the log2fc values
-    log2fc_value = log2fc(bait1_signal_means, bait2_signal_means)
+    log2fc_vals = bait1_signal_means.combine(bait2_signal_means, log2fc)
 
     # Use a boolean mask that requires that at least 1 bait to pass the ellipsoid_index test, and also that at least 1 bait passes control
-    pass_cols_list = [pass_cols.get(bait_pair[0]), pass_cols.get(bait_pair[1])]
-    mask = ((output_df[pass_cols[0]] == "Pass") | (output_df[pass_cols[1]] == "Pass")) & passes_control
+    pass_cols_pair = [pass_cols.get(bait_pair[0]), pass_cols.get(bait_pair[1])]
+    mask = ((output_df[pass_cols_pair[0]] == "Pass") | (output_df[pass_cols_pair[1]] == "Pass")) & passes_control
 
     # Apply the log2fc values conditionally using the mask
-    output_df.loc[mask, log2fc_col] = log2fc_value
-    output_df.loc[~mask, log2fc_col] = "NaN"
+    output_df.loc[mask, log2fc_col] = log2fc_vals
 
     return output_df
 
@@ -148,7 +168,8 @@ def one_passes(input_df, bait_cols_dict, bait_pass_cols, control_probe_name, con
     # Determine if at least one of the baits exceeds the control by the required multiplier for each entry, and whether they pass ellipsoid_index tests
     bait_signal_means_list = list(bait_signal_means_dict.values())
     bait_signal_means_stacked = np.vstack(bait_signal_means_list)
-    passes_control = np.any(bait_signal_means_stacked > control_multiplier * control_signal_means, axis=0)
+    control_signal_means_stacked = np.vstack([control_signal_means] * bait_signal_means_stacked.shape[0])
+    passes_control = np.any(bait_signal_means_stacked > control_multiplier * control_signal_means_stacked, axis=0)
 
     # Use a boolean mask that requires that at least 1 bait to pass the ellipsoid_index test
     pass_conditions = []
@@ -226,20 +247,26 @@ def get_bait_pairs(list_of_baits):
 
     return bait_pairs
 
-def apply_log2fc(data_df, bait_cols_dict, bait_pass_cols, control_probe_name):
+def apply_log2fc(data_df, bait_cols_dict, bait_pass_cols, control_probe_name, control_multiplier = None):
     '''
     Function for applying the conditional_log2fc() function to a dataframe
 
     Args:
-         data_df (pd.DataFrame): the dataframe to apply log2fc to
-         bait_cols_dict (dict): a dictionary where each key-value pair is a bait name and a list of columns pointing to background-adjusted values for that bait
-         bait_pass_cols (dict): a dictionary where bait name --> bait_pass_col, the name of the column holding the significance calls col for each bait
-         control_probe_name (str): the name of the control probe)
+         data_df (pd.DataFrame):     the dataframe to apply log2fc to
+         bait_cols_dict (dict):      a dictionary where each key-value pair is a bait name and a list of columns
+                                     pointing to background-adjusted values for that bait
+         bait_pass_cols (dict):      a dictionary where bait name --> bait_pass_col, the name of the column holding the
+                                     significance calls col for each bait
+         control_probe_name (str):   the name of the control probe)
+         control_multiplier (float): optional, but recommended when this script will be run on multiple datasets; it is
+                                     the multiplier for testing if hits are above this multiple of the control values
 
     Returns:
         data_df (pd.DataFrame): a dataframe with the log2fc columns added for comparing each bait-bait pair
     '''
-    control_multiplier = input_number(prompt = "Enter a control multiplier for testing if hits are above this multiple (recommended between 2 and 5):  ", mode = "float")
+    if control_multiplier is None:
+        control_multiplier = input_number(prompt = "\tEnter a control multiplier for testing if hits are above this multiple (recommended between 2 and 5):  ", mode = "float")
+
     bait_pairs = get_bait_pairs(list_of_baits = list(bait_cols_dict.keys()))
     for bait_pair in bait_pairs:
         control_signal_cols = bait_cols_dict.get(control_probe_name)
@@ -249,7 +276,7 @@ def apply_log2fc(data_df, bait_cols_dict, bait_pass_cols, control_probe_name):
                                      pass_cols = bait_pass_cols, control_multiplier = control_multiplier)
     return data_df, control_multiplier
 
-def main_processing(data_df, controls_list, bait_cols_dict, bait_pass_cols, control_probe_name, df_standardization = True):
+def main_processing(data_df, controls_list, bait_cols_dict, bait_pass_cols, control_probe_name, control_multiplier = None, df_standardization = True):
     '''
     Main function for processing array data
 
@@ -268,11 +295,12 @@ def main_processing(data_df, controls_list, bait_cols_dict, bait_pass_cols, cont
 
     # Standardize the input dataframe
     if df_standardization:
-        output_df, _ = standardize_dataframe(df = output_df, controls_list = controls_list, bait_cols_dict = bait_cols_dict)
+        output_df, _ = standardize_dataframe(df = output_df, controls_list = controls_list, bait_cols_dict = bait_cols_dict, probe_control_name = control_probe_name)
 
     # Calculate log2fc conditionally for each pair of baits, if at least one bait passes the ellipsoid_index test and exceeds the control
-    output_df, control_multiplier = apply_log2fc(data_df = output_df, bait_cols_dict = bait_cols_dict,
-                                                 bait_pass_cols = bait_pass_cols, control_probe_name = control_probe_name)
+    if control_multiplier is None:
+        output_df, control_multiplier = apply_log2fc(data_df = output_df, bait_cols_dict = bait_cols_dict,
+                                                     bait_pass_cols = bait_pass_cols, control_probe_name = control_probe_name)
 
     # Check if each hit passes significance for at least one bait
     output_df = one_passes(input_df = output_df, bait_cols_dict = bait_cols_dict, bait_pass_cols = bait_pass_cols,
