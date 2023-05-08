@@ -167,9 +167,7 @@ def standardize_by_control(df_list):
 
             df_control_values = np.array(df_control_values)
             df_mean_control = df_control_values.mean()
-            print("df mean control:", df_mean_control)
             control_means[i] = df_mean_control
-        print("Checkpoint")
         # Get the mean of mean control values and enforce it across dataframes
         control_means_values = np.array(list(control_means.values()))
         control_super_mean = control_means_values.mean()
