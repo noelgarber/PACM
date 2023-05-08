@@ -1,23 +1,17 @@
-#This script conducts residue-residue pairwise analysis
+# This script conducts residue-residue pairwise analysis to generate position-aware SLiM matrices and back-calculated scores.
 
 #Import required functions and packages
 
 import numpy as np
 import pandas as pd
-import math
 import os
 import pickle
 
-print("----------------")
-print("Script 2: ")
-print("This script conducts residue-residue pairwise analysis to generate position-aware SLiM matrices and back-calculated scores.")
-print("----------------")
-
-#Declare general variables
-
+# Declare the sorted list of amino acids
 list_aa_no_phos = ["D", "E", "R", "H", "K", "S", "T", "N", "Q", "C", "G", "P", "A", "V", "I", "L", "M", "F", "Y", "W"]
 list_aa = ["D", "E", "R", "H", "K", "S", "T", "N", "Q", "C", "G", "P", "A", "V", "I", "L", "M", "F", "Y", "W", "B", "J", "O"] # B=pSer, J=pThr, Y=pTyr
 
+# Declare the amino acid chemical characteristics dictionary
 aa_charac_dict = {
 	"Acidic": ["D", "E"],
 	"Basic": ["K", "R", "H"],
@@ -28,24 +22,6 @@ aa_charac_dict = {
 	"Polar_Uncharged": ["N", "Q", "C"],
 	"Special_Cases": ["P", "G"]
 }
-
-#Load data
-
-dens_df = pd.read_csv(os.path.join("Array_Output", "processed_array_data.csv"), index_col = 0)
-
-temp_directory = os.path.join(os.getcwd(), "temp")
-with open(os.path.join(temp_directory, "list_of_baits.ob"), "rb") as lob:
-	list_of_baits = pickle.load(lob)
-
-print("The list of baits to use for matrix generation was unpickled from Step1_Array_Analyzer results as:  list_of_baits =", list_of_baits)
-
-use_default = input("Use this list? (Y/N)  ")
-if use_default != "Y": 
-	number_of_baits = int(input("Enter the number of baits to use for generating matrices:  "))
-	list_of_baits = []
-	for i in np.arange(1, number_of_baits + 1): 
-		bait = input("Bait " + str(i) + " name:  ")
-		list_of_baits.append(bait)
 
 #--------------------------------------------------------------------------
 
@@ -430,3 +406,21 @@ with open(os.path.join(os.getcwd(), "temp", "pairwise_results_filename.ob"), "wb
 
 print("Saved! Filename:", output_file_path)
 print("-------------------")
+
+
+
+def make_pairwise_matrices(dens_df, list_of_baits, control_bait_name):
+	'''
+	Main function for making pairwise position-weighted matrices
+
+	Args:
+		dens_df (pd.DataFrame): the dataframe containing densitometry values for the peptides being analyzed
+		list_of_baits (list): the list of bait proteins, not including the control bait
+		control_bait_name (str): the name of the control bait (e.g. "Secondary-only")
+
+	Returns:
+
+	'''
+
+
+
