@@ -58,9 +58,9 @@ def declare_output_dirs(parent_directory = None):
 
     # Declare output directories
     output_dirs = {
-        "output": os.path.join(os.getcwd(), "image_prep_output"),
-        "rlt_output": os.path.join(os.getcwd(), "image_prep_output", "reverse_log_transformed_images"),
-        "outlined_output": os.path.join(os.getcwd(), "image_prep_output", "outlined_spot_images")
+        "output": parent_directory,
+        "rlt_output": os.path.join(parent_directory, "linear_images"),
+        "outlined_output": os.path.join(parent_directory, "outlined_spot_images")
     }
 
     # Check if the directories exist, and if not, make them
@@ -108,8 +108,11 @@ def assign_data_values(data_df, spot_arrays, multiline_cols = True):
 def write_images(output_dirs, spot_arrays):
     for spot_array in spot_arrays:
         #Save modified image
-        imwrite(os.path.join(output_dirs.get("rlt_output"), "Copy" + str(spot_array.copy_number) + "_Scan" + str(spot_array.scan_number) + "_" + spot_array.probe_name + "_linear.tif"), spot_array.linear_array)
-        imwrite(os.path.join(output_dirs.get("outlined_output"), "Copy" + str(spot_array.copy_number) + "_Scan" + str(spot_array.scan_number) + "_" + spot_array.probe_name + "_outlined.tif"), spot_array.outlined_image)
+        linear_directory = os.path.join(output_dirs.get("rlt_output"), "Copy" + str(spot_array.copy_number) + "_" + spot_array.probe_name + "_linear.tif")
+        imwrite(linear_directory, spot_array.linear_array)
+
+        outlined_directory = os.path.join(output_dirs.get("outlined_output"), "Copy" + str(spot_array.copy_number) + "_" + spot_array.probe_name + "_outlined.tif")
+        imwrite(outlined_directory, spot_array.outlined_image)
 
 def get_probe_order(probes_list):
     probes_ordered = []
@@ -146,25 +149,28 @@ def prepare_sorted_cols(data_df, probes_ordered, cols_dict):
     data_df = data_df[sorted_cols]
     return data_df
 
-def significance_testing(data_df, ei_cols_dict, probes_ordered):
-    ei_sig_thres = input_number(prompt = "Enter the ellipsoid index threshold above which a hit is considered significant:  ", mode = "float")
+def significance_testing(data_df, ei_cols_dict, probes_ordered, ei_sig_thres = None):
+    if ei_sig_thres is None:
+        ei_sig_thres = input_number(prompt = "Enter the ellipsoid index threshold above which a hit is considered significant:  ", mode = "float")
+
     for current_probe in probes_ordered:
         call_col = current_probe + "_call"
         ei_cols = ei_cols_dict.get(current_probe)
         data_df[call_col] = data_df.apply(lambda x: "Pass" if (x[ei_cols] > ei_sig_thres).all() else "", axis = 1)
 
-def add_peptide_names(data_df):
-    add_names = input("Add peptide names from CSV file mapping coordinates to names? (Y/N)  ")
-    if add_names == "Y":
+def add_peptide_names(data_df, names_path = None):
+    if names_path is None:
         names_path = input("\tEnter the path containing the CSV with coordinate-name pairs:  ")
-        names_dict = csv_to_dict(names_path)
-        for i, row in data_df.iterrows():
-            pep_name = names_dict.get(i)
-            data_df.at[i, "Peptide_Name"] = pep_name
+    names_dict = csv_to_dict(names_path)
+    for i, row in data_df.iterrows():
+        pep_name = names_dict.get(i)
+        data_df.at[i, "Peptide_Name"] = pep_name
 
-def main_preprocessing(multiline_cols = True, verbose = True):
-    spot_grid_dimensions = get_grid_dimensions(verbose = verbose)
-    image_directory = input("Enter the full directory where TIFF images are stored: ")
+def main_preprocessing(image_directory = None, spot_grid_dimensions = None, output_dirs = None, peptide_names_path = None, ellipsoid_index_thres = None, probes_ordered = None, multiline_cols = True, verbose = True):
+    if spot_grid_dimensions is None:
+        spot_grid_dimensions = get_grid_dimensions(verbose = verbose)
+    if image_directory is None:
+        image_directory = input("Enter the full directory where TIFF images are stored: ")
     filenames_list = os.listdir(image_directory)
 
     # Load images as SpotArray objects
@@ -177,22 +183,32 @@ def main_preprocessing(multiline_cols = True, verbose = True):
     data_df = pd.DataFrame()
     uas_cols_dict, bas_cols_dict, ei_cols_dict, new_cols_dict = assign_data_values(data_df = data_df, spot_arrays = spot_arrays, multiline_cols = multiline_cols)
 
-    # Write output images to destination directoriesassign_data
-    parent_dir = input("Please enter the directory where outlined images for this dataset should be deposited: ")
-    output_dirs = declare_output_dirs(parent_directory = parent_dir)
+    # Write output images to destination directories
+    if output_dirs is None:
+        parent_dir = input("Please enter the directory where outlined images for this dataset should be deposited: ")
+        output_dirs = declare_output_dirs(parent_directory = parent_dir)
     write_images(output_dirs = output_dirs, spot_arrays = spot_arrays)
 
     # Declare probe order for sorting dataframe columns
-    probes_list = list(ei_cols_dict.keys())
-    probes_ordered = get_probe_order(probes_list = probes_list)
+    if probes_ordered is None:
+        probes_list = list(ei_cols_dict.keys())
+        probes_ordered = get_probe_order(probes_list = probes_list)
 
     #Sorting dataframe and testing significance of hits
     print("Organizing dataframe and testing hit significance...") if verbose else None
     data_df = prepare_sorted_cols(data_df = data_df, probes_ordered = probes_ordered, cols_dict = new_cols_dict)
-    significance_testing(data_df = data_df, ei_cols_dict = ei_cols_dict, probes_ordered = probes_ordered)
+    if ellipsoid_index_thres is None:
+        significance_testing(data_df = data_df, ei_cols_dict = ei_cols_dict, probes_ordered = probes_ordered)
+    else:
+        significance_testing(data_df = data_df, ei_cols_dict = ei_cols_dict, probes_ordered = probes_ordered, ei_sig_thres = ellipsoid_index_thres)
 
     # Add peptide names
-    add_peptide_names(data_df)
+    if peptide_names_path is None:
+        add_names = input("Add peptide names from CSV file mapping coordinates to names? (Y/N)  ")
+        if add_names == "Y" or add_names == "y":
+            add_peptide_names(data_df = data_df)
+    else:
+        add_peptide_names(data_df = data_df, names_path = peptide_names_path)
 
     # Save completed dataframe
     data_df.to_csv(os.path.join(output_dirs.get("output"), "preprocessed_data.csv"))
