@@ -147,25 +147,25 @@ def weighted_matrix(bait, motif_length, source_dataframe, min_members, amino_aci
 
 	return generic_matrix_df
 
-def get_thresholds(percentiles_dict = None, use_percentiles = True, verbose = True):
+def get_thresholds(percentiles_dict = None, use_percentiles = True, show_guidance = True, display_points_system = False):
 	'''
 	Simple function to define thresholds and corresponding points for the point assignment system
 
 	Args:
 		percentiles_dict (): 	dictionary of percentile numbers --> signal values
 		use_percentiles (bool): whether to display percentiles from a dict and use percentiles for setting thresholds
-		verbose (bool): 		whether to display guidance for setting thresholds
+		show_guidance (bool): 	whether to display guidance for setting thresholds
 
 	Returns:
 		thres_tuple (tuple): 	tuple of 3 thresholds for extreme, high, and mid-level signal values
 		points_tuple (tuple): 	tuple of 4 point values corresponding to extreme, high, mid-level, and below-threshold signal values
 	'''
-
-	print("Setting thresholds for scoring.",
-		  "\n\tUse more points for HIGH signal hits to produce a model that correlates strongly with signal intensity.",
-		  "\n\tUse more points for LOW signal hits to produce a model that is better at finding weak positives.",
-		  "\nWe suggest the 90th, 80th, and 70th percentiles as thresholds, but this may vary depending on the number of hits expected.",
-		  "\n---") if verbose else None
+	if show_guidance:
+		print("Setting thresholds for scoring.",
+			  "\n\tUse more points for HIGH signal hits to produce a model that correlates strongly with signal intensity.",
+			  "\n\tUse more points for LOW signal hits to produce a model that is better at finding weak positives.",
+			  "\nWe suggest the 90th, 80th, and 70th percentiles as thresholds, but this may vary depending on the number of hits expected.",
+			  "\n---")
 
 	# Set threshold values
 	if use_percentiles:
@@ -191,16 +191,16 @@ def get_thresholds(percentiles_dict = None, use_percentiles = True, verbose = Tr
 	points_low = float(input("Some hits are marked significant but fall below the signal threshold. How many points for these lower hits? Input:  "))
 	points_tuple = (points_extreme, points_high, points_mid, points_low)
 
+	if display_points_system:
+		print("----------------------",
+			  "\nInputted point System: ",
+			  "\nIf max_bait >", thres_extreme, "and passes, points =", points_extreme,
+			  "\nIf max_bait >", thres_high, "and passes, points =", points_high,
+			  "\nIf max_bait >", thres_mid, "and passes, points =", points_mid,
+			  "\nIf max_bait > 0 and passes, points =", points_low,
+			  "\n----------------------")
+
 	return thres_tuple, points_tuple
-
-print("----------------")
-
-print("Inputted point System: ")
-print("If max_bait >", thres_extreme, "and passes, points =", points_extreme)
-print("If max_bait >", thres_high, "and passes, points =", points_high)
-print("If max_bait >", thres_mid, "and passes, points =", points_mid)
-print("If max_bait > 0 and passes, points =", points_low)
-print("----------------")
 
 #Construction of weighted matrices that are position-aware
 
