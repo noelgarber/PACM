@@ -136,25 +136,27 @@ def conditional_log2fc(input_df, bait_pair, control_signal_cols, bait1_signal_co
 
     return output_df
 
-def one_passes(input_df, bait_cols_dict, bait_pass_cols, control_probe_name, control_multiplier):
+def one_passes(input_df, bait_cols_dict, bait_pass_cols, control_probe_name, control_multiplier, calculate_individual_passes = True):
     '''
     Function for evaluating whether each hit passes significance tests for at least one bait
 
     Args:
-        input_df (pd.DataFrame): the input dataframe to test
-        bait_col_dict (dict): a dictionary where each key-value pair is a bait name and a list of columns pointing to background-adjusted values for that bait
-        bait_pass_cols (dict): dictionary where bait name --> column name holding significance calls based on ellipsoid_index
-        control_probe_name (str): the name of the control probe)
-        control_multiplier (float): the multiple of the control value that a hit must exceed to be considered significant
+        input_df (pd.DataFrame):            the input dataframe to test
+        bait_col_dict (dict):               a dictionary where each key-value pair is a bait name and a list of columns pointing to background-adjusted values for that bait
+        bait_pass_cols (dict):              dictionary where bait name --> column name holding significance calls based on ellipsoid_index
+        control_probe_name (str):           the name of the control probe)
+        control_multiplier (float):         the multiple of the control value that a hit must exceed to be considered significant
+        calculate_individual_passes (bool): whether to also calculate individual pass cols for each bait
 
     Returns:
         output_df (pd.DataFrame): the dataframe with a "One_Passes" column added
     '''
+    # Make a copy of the input dataframe to perform operations on
     output_df = input_df.copy()
 
-    # Get signal means
+    # Get signal means as a dictionary where bait_name --> pd.Series of signal mean values
     bait_signal_means_dict = {}
-    control_signal_means = None
+    control_signal_means = None # control bait probe is popped out and handled separately from the dict of baits
     for bait, signal_cols in bait_cols_dict.items():
         signal_means = output_df[signal_cols].mean(axis=1)
         if bait == control_probe_name:
@@ -162,8 +164,11 @@ def one_passes(input_df, bait_cols_dict, bait_pass_cols, control_probe_name, con
         else:
             bait_signal_means_dict[bait] = signal_means
 
+    # Check that the control was found in the bait_cols_dict
     if control_signal_means is None:
         raise Exception(f"one_passes error: the control probe name ({control_probe_name}) was not found in the specified bait_cols_dict, but it is required for signficance testing/comparison.")
+
+    # -------------------------------------- Determine & Assign One_Passes Column --------------------------------------
 
     # Determine if at least one of the baits exceeds the control by the required multiplier for each entry, and whether they pass ellipsoid_index tests
     bait_signal_means_list = list(bait_signal_means_dict.values())
@@ -183,6 +188,24 @@ def one_passes(input_df, bait_cols_dict, bait_pass_cols, control_probe_name, con
     # Apply the log2fc values conditionally using the mask
     output_df.loc[mask, "One_Passes"] = "Yes"
     output_df.loc[~mask, "One_Passes"] = ""
+
+    # ----------------------------------- Determine & Assign Individual Pass Columns -----------------------------------
+    if calculate_individual_passes:
+        for bait, bait_signal_means in bait_signal_means_dict.items():
+            # Test if bait signal mean values pass the bait probe control by a sufficient margin
+            passes_control = np.any(bait_signal_means > control_multiplier * control_signal_means)
+
+            # Test if the bait passes the ellipsoid index test
+            bait_pass_col = bait_pass_cols.get(bait)
+            ellipsoid_index_mask = output_df[bait_pass_col] == "Pass"
+
+            # Combine the testing conditions and apply
+            mask = np.logical_and(passes_control, ellipsoid_index_mask)
+            sig_col = bait + "_Passes"
+            col_idx = output_df.columns.get_loc(bait_pass_col) + 1  # Get the index of the column after bait_pass_col
+            output_df.insert(col_idx, sig_col, "")  # Insert the new column after bait_pass_col
+            output_df.loc[mask, sig_col] = "Yes"
+            output_df.loc[mask, sig_col] = ""
 
     return output_df
 
