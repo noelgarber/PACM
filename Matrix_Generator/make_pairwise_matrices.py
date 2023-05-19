@@ -419,8 +419,20 @@ def aa_chemical_class(amino_acid, dict_of_aa_characs = aa_charac_dict):
 
 	return charac_result
 
-def score_aa_seq(index, sequence):
-	# TODO Make the variables in here not refer to global variables
+def score_aa_seq(sequence, weighted_matrices, dens_df = None, df_row_index = None, add_residue_cols = False):
+	'''
+	Function to score amino acid sequences based on the dictionary of context-aware weighted matrices
+
+	Args:
+		sequence (str): 		  the amino acid sequence; must be the same length as the motif described by the weighted matrices
+		weighted_matrices (dict): dictionary of type-position rule --> position-weighted matrix
+		dens_df (pd.DataFrame):   if add_residue_cols is True, must be the dataframe to add residue col values to
+		df_row_index (int):       if add_residue_cols is True, must be the row of the dataframe to assign residue col values
+		add_residue_cols (bool):  whether to add columns containing individual residue letters, for sorting, in a df
+
+	Returns:
+		output_total_score (float): the total motif score for the input sequence
+	'''
 	output_total_score = 0
 	for j in np.arange(1, slim_length + 1): 
 		res = sequence[j-1:j]
@@ -444,10 +456,14 @@ def score_aa_seq(index, sequence):
 		res_previous_weighted_matrix_key = "#" + str(res_previous_position) + "=" + res_previous_charac
 		res_subsequent_weighted_matrix_key = "#" + str(res_subsequent_position) + "=" + res_subsequent_charac
 
-		res_previous_weighted_matrix = dictionary_of_weighted_matrices.get(res_previous_weighted_matrix_key)
-		res_subsequent_weighted_matrix = dictionary_of_weighted_matrices.get(res_subsequent_weighted_matrix_key)
+		res_previous_weighted_matrix = weighted_matrices.get(res_previous_weighted_matrix_key)
+		res_subsequent_weighted_matrix = weighted_matrices.get(res_subsequent_weighted_matrix_key)
 
-		dens_scored_df.at[index, "No_Phos_Res_" + str(j)] = res
+		if add_residue_cols:
+			if not isinstance(dens_df, pd.DataFrame):
+				raise ValueError(f"score_aa_seq error: dens_df is {type(dens_df)}, but pd.DataFrame was expected.")
+			else:
+				dens_df.at[df_row_index, "No_Phos_Res_" + str(j)] = res
 
 		score_previous = res_previous_weighted_matrix.at[res, "#" + str(j)]
 		score_subsequent = res_subsequent_weighted_matrix.at[res, "#" + str(j)]
@@ -458,26 +474,61 @@ def score_aa_seq(index, sequence):
 
 	return output_total_score
 
-for i in np.arange(len(dens_scored_df)): 
-	seq = dens_scored_df.at[i, "No_Phos_Sequence"]
-	total_score = score_aa_seq(i, seq)
-	dens_scored_df.at[i, "SLiM_Score"] = total_score
+def apply_motif_scores(dens_df, weighted_matrices, seq_col = "No_Phos_Sequence", score_col = "SLiM_Score", add_residue_cols = False)
+	'''
+	Function to apply the score_aa_seq() function to all sequences in the source dataframe
+	
+	Args: 
+		dens_df (pd.DataFrame):   dataframe containing the motif sequences to back-apply motif scores onto, that were originally used to generate the scoring system
+		weighted_matrices (dict): dictionary of type-position rule --> position-weighted matrix
+		seq_col (str): 			  the column in dens_df that contains the peptide sequence to score (unphosphorylated, if model phospho-residues were collapsed to non-phospho during building)
+		score_col (str): 		  the column in dens_df that will contain the score values
+		add_residue_cols (bool):  whether to add columns containing individual residue letters, for sorting, in a df
+		
+	Returns: 
+		output_df (pd.DataFrame): dens_df with scores added
+	'''
+	output_df = dens_df.copy()
+	for i in np.arange(len(output_df)):
+		seq = dens_scored_df.at[i, seq_col]
+		total_score = score_aa_seq(sequence = seq, weighted_matrices = weighted_matrices,
+								   dens_df = output_df, df_row_index = i, add_residue_cols = add_residue_cols)
+		output_df.at[i, score_col] = total_score
 
-print("Produced edited densitometry data file containing scores for each peptide.")
+	return output_df
 
-#--------------------------------------------------------------------------
+def divide_inf(numerator, denominator, infinity_value = 999):
+	'''
+	Simple division function that substitutes a specified infinity value when divide-by-zero errors are encountered
 
-#User selection of threshold for calling hits as TP/FP/TN/FN
+	Args:
+		numerator (float): 		the numerator for division
+		denominator (float): 	the denominator for division
+		infinity_value (float): the code value to substitute when divide-by-zero errors are encountered; default is 999
 
-#Define function that divides numbers and returns a code value for divide_by_zero errors
-def divide_inf(numerator, denominator, infinity_value = 999): 
+	Returns:
+		value (float): 			the result of the division
+	'''
 	if denominator == 0: 
 		value = inf_value
 	else: 
 		value = numerator / denominator
+
 	return value
 
-def diagnostic_value(score_threshold, dataframe, significance_col = "Significant", score_col = "SLiM_Score"): 
+def diagnostic_value(score_threshold, dataframe, significance_col = "One_Passes", score_col = "SLiM_Score"):
+	'''
+	Function to produce sensitivity, specificity, and positive and negative predictive values for a given score cutoff
+
+	Args:
+		score_threshold (float):  the score cutoff to use
+		dataframe (pd.DataFrame): the dataframe containing peptide information
+		significance_col (str):   the column containing significance information
+		score_col (str):          the column containing the back-calculated motif score for the peptides
+
+	Returns:
+		pred_val_dict (dict):     dictionary with values for keys of "Sensitivity", "Specificity", "PPV", and "NPV"
+	'''
 	pred_val_dict = {
 		"TP": 0,
 		"FP": 0,
@@ -509,58 +560,79 @@ def diagnostic_value(score_threshold, dataframe, significance_col = "Significant
 
 	return pred_val_dict
 
-min_score = dens_scored_df["SLiM_Score"].min()
-max_score = dens_scored_df["SLiM_Score"].max()
-score_range_series = np.linspace(min_score, max_score, num = 100)
+def apply_threshold(input_df, sig_col = "One_Passes", score_col = "SLiM_Score", range_count = 100):
+	'''
+	Function to declare and apply the motif score threshold based on predictive values
 
-threshold_selection_dict = {}
+	Args:
+		input_df (pd.DataFrame):   the dataframe containing peptides and scores
+		sig_col (str): 			  the df column containing significance information (Yes/No)
+		score_col (str): 		  the df column containing the peptide scores
 
-for i in score_range_series: 
-	i_rounded = round(i, 1)
-	pv_dict = diagnostic_value(i, dens_scored_df)
-	ppv_npv_list = [pv_dict.get("PPV"), pv_dict.get("NPV")]
-	threshold_selection_dict[i_rounded] = ppv_npv_list
+	Returns:
+		output_df (pd.DataFrame):              dens_df with a new column containing calls based on the selected score
+		selected_threshold (float):            the selected score threshold
+	'''
+	output_df = input_df.copy()
 
-print("Threshold selection information:")
+	# Make a range of SLiM scores between the minimum and maximum score values from the dataframe
+	min_score = output_df[score_col].min()
+	max_score = output_df[score_col].max()
+	score_range_series = np.linspace(min_score, max_score, num = range_count)
 
-for key, value in threshold_selection_dict.items(): 
-	print(key, ":", "PPV =", value[0], "\tNPV =", value[1], "\tFDR =", round(1 - value[0], 3), "\tFOR =", round(1 - value[1], 3))
+	# Assemble a dictionary of score --> [positive predictive value, negative predictive value]
+	threshold_selection_dict = {}
+	for i in score_range_series:
+		i_rounded = round(i, 1)
+		pv_dict = diagnostic_value(score_threshold = i, dataframe = output_df,
+								   significance_col = "One_Passes", score_col = score_col)
+		ppv_npv_list = [pv_dict.get("PPV"), pv_dict.get("NPV")]
+		threshold_selection_dict[i_rounded] = ppv_npv_list
 
-print("-------------------")
+	# Print the dictionary to aid in the user selecting an appropriate score cutoff for significance to be declared
+	print("Threshold selection information:", "\n---")
+	for key, value in threshold_selection_dict.items():
+		print(key, ":", "PPV =", value[0], "\tNPV =", value[1], "\tFDR =", round(1 - value[0], 3), "\tFOR =", round(1 - value[1], 3))
+	print("---")
 
-selected_threshold = float(input("Input your selected threshold for calling hits:  "))
+	# Prompt the user to input the selected threshold that a SLiM score must exceed to be considered significant
+	selected_threshold = input_number("Input your selected threshold for calling hits:  ", "float")
 
-for i in np.arange(len(dens_scored_df)): 
-	current_score = dens_scored_df.at[i, "SLiM_Score"]
-	sig_y_n = dens_scored_df.at[i, "Significant"]
-	if current_score >= selected_threshold: 
-		dens_scored_df.at[i, "Call"] = "Positive"
-		if sig_y_n == "Yes":
-			call_type = "TP"
-		else: 
-			call_type = "FP"
-	else: 
-		dens_scored_df.at[i, "Call"] = "-"
-		if sig_y_n == "Yes": 
-			call_type = "FN"
-		else: 
-			call_type = "TN"
-	dens_scored_df.at[i, "Call_Type"] = call_type
+	# Apply the selected threshold to the dataframe to call hits
+	for i in np.arange(len(output_df)):
+		# Get score and pass info for current row
+		current_score = output_df.at[i, "SLiM_Score"]
+		spot_passes = output_df.at[i, sig_col]
 
-print("Applied hit calls based on threshold.")
+		# Make calls on true/false positives/negatives
+		if current_score >= selected_threshold:
+			output_df.at[i, "Call"] = "Positive"
+			if spot_passes == "Yes":
+				call_type = "TP"
+			else:
+				call_type = "FP"
+		else:
+			output_df.at[i, "Call"] = "-"
+			if spot_passes == "Yes":
+				call_type = "FN"
+			else:
+				call_type = "TN"
 
-#Save to output folder
+		# Apply the call to the dataframe at the specified row
+		output_df.at[i, "Call_Type"] = call_type
 
-output_filename = "pairwise_scored_data" + "_thres" + str(selected_threshold) + ".csv"
-output_file_path = os.path.join(os.getcwd(), "Array_Output", output_filename)
-dens_scored_df.to_csv(output_file_path)
+	print("Applied hit calls based on threshold.")
 
-with open(os.path.join(os.getcwd(), "temp", "pairwise_results_filename.ob"), "wb") as f:
-	pickle.dump(output_file_path, f)
+	return output_df, selected_threshold
 
-print("Saved! Filename:", output_file_path)
-print("-------------------")
+def save_scored_data(selected_threshold, output_directory, verbose = True):
+	output_filename = "pairwise_scored_data" + "_thres" + str(selected_threshold) + ".csv"
+	output_file_path = os.path.join(output_directory, "Array_Output", output_filename)
+	dens_scored_df.to_csv(output_file_path)
 
+	print("Saved! Filename:", output_file_path) if verbose else None
+
+	return output_file_path
 
 
 def make_pairwise_matrices(dens_df, list_of_baits, control_bait_name, percentiles_dict = None, slim_length = None,
