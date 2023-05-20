@@ -9,8 +9,8 @@ import pickle
 from general_utils.general_utils import input_number
 
 # Declare the sorted list of amino acids
-list_aa_no_phos = ("D", "E", "R", "H", "K", "S", "T", "N", "Q", "C", "G", "P", "A", "V", "I", "L", "M", "F", "Y", "W")
-list_aa = ("D", "E", "R", "H", "K", "S", "T", "N", "Q", "C", "G", "P", "A", "V", "I", "L", "M", "F", "Y", "W", "B", "J", "O") # B=pSer, J=pThr, Y=pTyr
+amino_acids = ("D", "E", "R", "H", "K", "S", "T", "N", "Q", "C", "G", "P", "A", "V", "I", "L", "M", "F", "Y", "W")
+amino_acids_phos = ("D", "E", "R", "H", "K", "S", "T", "N", "Q", "C", "G", "P", "A", "V", "I", "L", "M", "F", "Y", "W", "B", "J", "O") # B=pSer, J=pThr, Y=pTyr
 
 # Declare the amino acid chemical characteristics dictionary
 aa_charac_dict = {
@@ -49,7 +49,7 @@ def get_min_cat_members(display_message = True):
 #DEFINE GENERALIZED MATRIX FUNCTION
 
 def weighted_matrix(bait, motif_length, source_dataframe, min_members, amino_acid_list, thres_tuple, points_tuple,
-					position_for_filtering = None, residues_included_at_filter_position = list_aa,
+					position_for_filtering = None, residues_included_at_filter_position = amino_acids_phos,
 					bjo_seq_col = "BJO_sequence", signal_col_suffix = "Background-Adjusted_Standardized_Signal"):
 	'''
 	Generalized weighted matrix function
@@ -221,7 +221,7 @@ def make_weighted_matrices(slim_length, aa_charac_dict, dens_df, minimum_members
 		aa_charac_dict (dict): 	the dictionary of amino acid characteristics and their constituent amino acids
 		dens_df (pd.DataFrame): the dataframe containing peptide spot intensity data
 		minimum_members (int): 	the minimum number of peptides that must be present in a group to be used for matrix generation
-		list_aa (tuple):			the list of amino acids to use for weighted matrix rows
+		list_aa (tuple):		the list of amino acids to use for weighted matrix rows
 		thres_tuple (tuple):	a tuple of (thres_extreme, thres_high, thres_mid)
 		points_tuple (tuple):	a tuple of (points_extreme, points_high, points_mid, points_low)
 
@@ -354,7 +354,7 @@ def get_position_weights(slim_length):
 
 	return position_weights
 
-def add_matrix_weights(matrices_dict, position_weights, amino_acids = list_aa_no_phos):
+def add_matrix_weights(matrices_dict, position_weights, amino_acids = amino_acids):
 	'''
 	Function to apply the matrix weights by position to the generated matrices
 
@@ -419,13 +419,14 @@ def aa_chemical_class(amino_acid, dict_of_aa_characs = aa_charac_dict):
 
 	return charac_result
 
-def score_aa_seq(sequence, weighted_matrices, dens_df = None, df_row_index = None, add_residue_cols = False):
+def score_aa_seq(sequence, weighted_matrices, slim_length, dens_df = None, df_row_index = None, add_residue_cols = False):
 	'''
 	Function to score amino acid sequences based on the dictionary of context-aware weighted matrices
 
 	Args:
 		sequence (str): 		  the amino acid sequence; must be the same length as the motif described by the weighted matrices
 		weighted_matrices (dict): dictionary of type-position rule --> position-weighted matrix
+		slim_length (int): 		  the length of the motif being studied
 		dens_df (pd.DataFrame):   if add_residue_cols is True, must be the dataframe to add residue col values to
 		df_row_index (int):       if add_residue_cols is True, must be the row of the dataframe to assign residue col values
 		add_residue_cols (bool):  whether to add columns containing individual residue letters, for sorting, in a df
@@ -442,11 +443,11 @@ def score_aa_seq(sequence, weighted_matrices, dens_df = None, df_row_index = Non
 		res_previous_position = j - 1
 		res_subsequent_position = j + 1
 
-		if res_previous not in list_aa_no_phos: 
+		if res_previous not in amino_acids:
 			res_previous = res_subsequent #If there is no previous residue (i.e. start of seq), use the subsequent residue twice
 			res_previous_position = j + 1
 
-		if res_subsequent not in list_aa_no_phos: 
+		if res_subsequent not in amino_acids:
 			res_subsequent = res_previous #If there is no subsequent residue (i.e. end of seq), use the preevious residue twice
 			res_subsequent_position = j - 1
 
@@ -460,10 +461,7 @@ def score_aa_seq(sequence, weighted_matrices, dens_df = None, df_row_index = Non
 		res_subsequent_weighted_matrix = weighted_matrices.get(res_subsequent_weighted_matrix_key)
 
 		if add_residue_cols:
-			if not isinstance(dens_df, pd.DataFrame):
-				raise ValueError(f"score_aa_seq error: dens_df is {type(dens_df)}, but pd.DataFrame was expected.")
-			else:
-				dens_df.at[df_row_index, "No_Phos_Res_" + str(j)] = res
+			dens_df.at[df_row_index, "Residue_" + str(j)] = res
 
 		score_previous = res_previous_weighted_matrix.at[res, "#" + str(j)]
 		score_subsequent = res_subsequent_weighted_matrix.at[res, "#" + str(j)]
@@ -474,13 +472,14 @@ def score_aa_seq(sequence, weighted_matrices, dens_df = None, df_row_index = Non
 
 	return output_total_score
 
-def apply_motif_scores(dens_df, weighted_matrices, seq_col = "No_Phos_Sequence", score_col = "SLiM_Score", add_residue_cols = False)
+def apply_motif_scores(dens_df, weighted_matrices, slim_length, seq_col = "No_Phos_Sequence", score_col = "SLiM_Score", add_residue_cols = False):
 	'''
 	Function to apply the score_aa_seq() function to all sequences in the source dataframe
 	
 	Args: 
 		dens_df (pd.DataFrame):   dataframe containing the motif sequences to back-apply motif scores onto, that were originally used to generate the scoring system
 		weighted_matrices (dict): dictionary of type-position rule --> position-weighted matrix
+		slim_length (int): 		  the length of the motif being studied
 		seq_col (str): 			  the column in dens_df that contains the peptide sequence to score (unphosphorylated, if model phospho-residues were collapsed to non-phospho during building)
 		score_col (str): 		  the column in dens_df that will contain the score values
 		add_residue_cols (bool):  whether to add columns containing individual residue letters, for sorting, in a df
@@ -491,9 +490,26 @@ def apply_motif_scores(dens_df, weighted_matrices, seq_col = "No_Phos_Sequence",
 	output_df = dens_df.copy()
 	for i in np.arange(len(output_df)):
 		seq = dens_scored_df.at[i, seq_col]
-		total_score = score_aa_seq(sequence = seq, weighted_matrices = weighted_matrices,
+		total_score = score_aa_seq(sequence = seq, weighted_matrices = weighted_matrices, slim_length = slim_length,
 								   dens_df = output_df, df_row_index = i, add_residue_cols = add_residue_cols)
 		output_df.at[i, score_col] = total_score
+
+	# Organize residue cols
+	if add_residue_cols:
+		cols_to_move = []
+		for i in np.arange(1, slim_length + 1):
+			current_col = "Residue_" + str(i)
+			cols_to_move.append(current_col)
+
+		columns = output_df.columns.tolist()
+		for col in cols_to_move:
+			columns.remove(col)
+
+		insert_index = columns.index(seq_col) + 1
+		for col in cols_to_move[::-1]:
+			columns.insert(insert_index, col)
+
+		output_df = output_df[columns]
 
 	return output_df
 
@@ -510,7 +526,7 @@ def divide_inf(numerator, denominator, infinity_value = 999):
 		value (float): 			the result of the division
 	'''
 	if denominator == 0: 
-		value = inf_value
+		value = infinity_value
 	else: 
 		value = numerator / denominator
 
@@ -635,20 +651,26 @@ def save_scored_data(selected_threshold, output_directory, verbose = True):
 	return output_file_path
 
 
-def make_pairwise_matrices(dens_df, list_of_baits, control_bait_name, percentiles_dict = None, slim_length = None,
-						   minimum_members = None, thres_tuple = None, points_tuple = None, always_allowed_dict = None,
-						   position_weights = None):
+def make_pairwise_matrices(dens_df, percentiles_dict = None, slim_length = None, minimum_members = None,
+						   thres_tuple = None, points_tuple = None, always_allowed_dict = None, position_weights = None,
+						   output_folder = None, sequence_col = "No_Phos_Sequence", significance_col = "One_Passes"):
 	'''
 	Main function for making pairwise position-weighted matrices
 
 	Args:
 		dens_df (pd.DataFrame): 	the dataframe containing densitometry values for the peptides being analyzed
-		list_of_baits (list): 		the list of bait proteins, not including the control bait
-		control_bait_name (str): 	the name of the control bait (e.g. "Secondary-only")
 		percentiles_dict (dict): 	dictionary of percentile --> mean signal value, for use in thesholding
 		slim_length (int): 			the length of the motif being studied
 		minimum_members (int): 		the minimum number ofo peptides that must belong to a chemically classified group
 									in order for them to be used in pairwise matrix-building
+		thres_tuple (tuple): 		tuple of (thres_extreme, thres_high, thres_mid) signal thres
+		points_tuple (tuple): 		tuple of (points_extreme, points_high, points_mid, points_low)
+									representing points associated with peptides above thresholds
+		always_allowed_dict (dict): a dictionary of position number (int) --> always-permitted residues at that position (list)
+		position_weights (dict): 	a dictionary of position number (int) --> weight value (int or float)
+		output_folder (str): 		the path to the folder where the output data should be saved
+		sequence_col (str): 		the column in the dataframe that contains unphosphorylated peptide sequences
+		significance_col (str): 	the column in the dataframe that contains significance calls (Yes/No)
 
 	Returns:
 
@@ -669,7 +691,7 @@ def make_pairwise_matrices(dens_df, list_of_baits, control_bait_name, percentile
 
 	# Make the dictionary of weighted matrices based on amino acid composition across positions
 	matrices_dict = make_weighted_matrices(slim_length = slim_length, aa_charac_dict = aa_charac_dict,
-										   dens_df = dens_df, minimum_members = minimum_members, list_aa = list_aa,
+										   dens_df = dens_df, minimum_members = minimum_members, list_aa = amino_acids_phos,
 										   thres_tuple = thres_tuple, points_tuple = points_tuple,
 										   sequence_col = "BJO_sequence",
 										   signal_col_suffix = "Background-Adjusted_Standardized_Signal")
@@ -687,6 +709,23 @@ def make_pairwise_matrices(dens_df, list_of_baits, control_bait_name, percentile
 	if position_weights is None:
 		position_weights = get_position_weights(slim_length = slim_length)
 
+	# Apply weights and save the weighted matrices
+	weighted_matrices_dict = add_matrix_weights(matrices_dict = matrices_dict, position_weights = position_weights,
+												amino_acids = amino_acids)
+	if output_folder is None:
+		output_folder = os.getcwd()
+	matrix_output_folder = os.path.join(output_folder, "Pairwise_Matrices")
+	save_weighted_matrices(weighted_matrices_dict = weighted_matrices_dict, matrix_directory = matrix_output_folder)
 
+	# Apply the motif scoring algorithm back onto the peptide sequences
+	dens_df = apply_motif_scores(dens_df = dens_df, weighted_matrices = weighted_matrices_dict,
+								 slim_length = slim_length, seq_col = sequence_col, score_col = "SLiM_Score",
+					   			 add_residue_cols = True)
 
+	# Use thresholding to declare true/false positives/negatives in the peptide sequences
+	dens_df, selected_threshold = apply_threshold(dens_df, sig_col = significance_col, score_col = "SLiM_Score")
 
+	# Save the results
+	save_scored_data(selected_threshold = selected_threshold, output_directory = output_folder)
+
+	return dens_df
