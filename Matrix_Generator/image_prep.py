@@ -164,9 +164,9 @@ def add_peptide_names(data_df, names_path = None, include_seqs = False, cols_lis
 
     Args:
         data_df (pd.DataFrame): the input dataframe with peptide coords
-        names_path (str): the path to the CSV file containing coordinate-->value pairs
-        include_seqs (bool): whether to also assign sequence values
-        cols_list (list): the list of columns corresponding to values after the key value, if include_seqs is True
+        names_path (str):       the path to the CSV file containing coordinate-->value pairs
+        include_seqs (bool):    whether to also assign sequence values
+        cols_list (list):       if inlcude_seqs is True, then this is the list of sequence cols starting from column C
     '''
     if names_path is None:
         names_path = input("\tEnter the path containing the CSV with coordinate-name pairs:  ")
@@ -183,7 +183,7 @@ def add_peptide_names(data_df, names_path = None, include_seqs = False, cols_lis
             pep_name = names_dict.get(i)
             data_df.at[i, "Peptide_Name"] = pep_name
 
-def main_preprocessing(image_directory = None, spot_grid_dimensions = None, output_dirs = None, peptide_names_path = None, ellipsoid_index_thres = None, probes_ordered = None, multiline_cols = True, verbose = True):
+def main_preprocessing(image_directory = None, spot_grid_dimensions = None, output_dirs = None, peptide_names_path = None, ellipsoid_index_thres = None, probes_ordered = None, multiline_cols = True, add_peptide_seqs = False, peptide_seq_cols = None, verbose = True):
     if spot_grid_dimensions is None:
         spot_grid_dimensions = get_grid_dimensions(verbose = verbose)
     if image_directory is None:
@@ -219,13 +219,14 @@ def main_preprocessing(image_directory = None, spot_grid_dimensions = None, outp
     else:
         significance_testing(data_df = data_df, ei_cols_dict = ei_cols_dict, probes_ordered = probes_ordered, ei_sig_thres = ellipsoid_index_thres)
 
-    # Add peptide names
+    # Add peptide names/sequences
     if peptide_names_path is None:
         add_names = input("Add peptide names from CSV file mapping coordinates to names? (Y/N)  ")
-        if add_names == "Y" or add_names == "y":
-            add_peptide_names(data_df = data_df)
     else:
-        add_peptide_names(data_df = data_df, names_path = peptide_names_path)
+        add_names = "Y"
+
+    if add_names == "Y":
+        add_peptide_names(data_df = data_df, names_path = peptide_names_path, include_seqs = add_peptide_seqs)
 
     # Save completed dataframe
     data_df.to_csv(os.path.join(output_dirs.get("output"), "preprocessed_data.csv"))
