@@ -56,7 +56,9 @@ class SpotArray:
         draw_crosshairs:     function to draw crosshairs on the true peak points for each spot in the unsliced image
     '''
 
-    def __init__(self, tiff_path, spot_dimensions, metadata = (None, None, None), show_sliced_image = False, show_outlined_image = False, suppress_warnings = False, pixel_log_base = 1, ending_coord = None, arbitrary_coords_to_drop = None, verbose = False):
+    def __init__(self, tiff_path, spot_dimensions, metadata = (None, None, None), show_sliced_image = False,
+                 show_outlined_image = False, suppress_warnings = False, pixel_log_base = 1,
+                 ending_coord = None, arbitrary_coords_to_drop = None, verbose = False):
         '''
         Initialization function invoked when a new instance of the SpotArray class is created
 
@@ -185,7 +187,7 @@ class SpotArray:
             ending_letter_idx = string.ascii_uppercase.index(ending_letter)
             ending_number = int(ending_coord[1:])
 
-            for key in updated_spot_dict.keys():
+            for key in spot_info_dict.keys():
                 key_letter = key[0]
                 key_letter_idx = string.ascii_uppercase.index(key_letter)
                 key_number = int(key[1:])
