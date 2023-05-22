@@ -21,7 +21,24 @@ def get_grid_dimensions(verbose = True):
     print("-----------------------") if verbose else None
     return spot_grid_dimensions
 
-def load_spot_arrays(filenames_list, image_directory, spot_grid_dimensions, pixel_log_base = 1, verbose = True):
+def load_spot_arrays(filenames_list, image_directory, spot_grid_dimensions, pixel_log_base = 1, ending_coord = None,
+                     arbitrary_coords_to_drop = None, verbose = True):
+    '''
+    Function to load a set of SpotArray objects and return them as a list
+
+    Args:
+        filenames_list (list):           list of filenames containing spot array images
+        image_directory (str):           the directory where the filenames are stored
+        spot_grid_dimensions (tuple):    the tuple of (number of spots wide, number of spots tall)
+        pixel_log_base (int):            the base for linearizing the pixel encoding, if a logarithmic encoding was used
+        ending_coord (str):              the last alphanumeric coordinate that represents a sample peptide,
+                                         if trailing ones are blank
+        arbitrary_coords_to_drop (list): if given, it is the list of coords to be dropped from the loaded spot data
+        verbose (bool):                  whether to display separator lines
+
+    Returns:
+        spot_arrays (list): a list of SpotArray objects
+    '''
     spot_arrays = []
     for filename in filenames_list:
         print("\tLoading", filename) if verbose else None
@@ -33,7 +50,8 @@ def load_spot_arrays(filenames_list, image_directory, spot_grid_dimensions, pixe
 
         spot_array = SpotArray(tiff_path = file_path, spot_dimensions = spot_grid_dimensions, metadata = metadata_tuple,
                                show_sliced_image = False, show_outlined_image = False, suppress_warnings = False,
-                               pixel_log_base = pixel_log_base, verbose = verbose)
+                               pixel_log_base = pixel_log_base, ending_coord = ending_coord,
+                               arbitrary_coords_to_drop = arbitrary_coords_to_drop, verbose = verbose)
         spot_arrays.append(spot_array)
     print("-----------------------") if verbose else None
     return spot_arrays
@@ -183,7 +201,10 @@ def add_peptide_names(data_df, names_path = None, include_seqs = False, cols_lis
             pep_name = names_dict.get(i)
             data_df.at[i, "Peptide_Name"] = pep_name
 
-def main_preprocessing(image_directory = None, spot_grid_dimensions = None, output_dirs = None, peptide_names_path = None, ellipsoid_index_thres = None, probes_ordered = None, multiline_cols = True, add_peptide_seqs = False, peptide_seq_cols = None, verbose = True):
+def main_preprocessing(image_directory = None, spot_grid_dimensions = None, output_dirs = None,
+                       peptide_names_path = None, ellipsoid_index_thres = None, probes_ordered = None,
+                       multiline_cols = True, add_peptide_seqs = False, peptide_seq_cols = None,
+                       ending_coord = None, arbitrary_coords_to_drop = None, verbose = True):
     if spot_grid_dimensions is None:
         spot_grid_dimensions = get_grid_dimensions(verbose = verbose)
     if image_directory is None:
@@ -193,7 +214,9 @@ def main_preprocessing(image_directory = None, spot_grid_dimensions = None, outp
     # Load images as SpotArray objects
     print("Loading and processing files as SpotArray objects...") if verbose else None
     spot_arrays = load_spot_arrays(filenames_list = filenames_list, image_directory = image_directory,
-                                   spot_grid_dimensions = spot_grid_dimensions, pixel_log_base = 1, verbose = verbose)
+                                   spot_grid_dimensions = spot_grid_dimensions, pixel_log_base = 1,
+                                   ending_coord = ending_coord, arbitrary_coords_to_drop = arbitrary_coords_to_drop,
+                                   verbose = verbose)
 
     # Assemble a dataframe containing results values
     print("Assembling dataframe and saving images...") if verbose else None
@@ -211,7 +234,7 @@ def main_preprocessing(image_directory = None, spot_grid_dimensions = None, outp
         probes_list = list(ei_cols_dict.keys())
         probes_ordered = get_probe_order(probes_list = probes_list)
 
-    #Sorting dataframe and testing significance of hits
+    # Sorting dataframe and testing significance of hits
     print("Organizing dataframe and testing hit significance...") if verbose else None
     data_df = prepare_sorted_cols(data_df = data_df, probes_ordered = probes_ordered, cols_dict = new_cols_dict)
     if ellipsoid_index_thres is None:
