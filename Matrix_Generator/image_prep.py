@@ -226,7 +226,7 @@ def main_preprocessing(image_directory = None, spot_grid_dimensions = None, outp
         add_names = "Y"
 
     if add_names == "Y":
-        add_peptide_names(data_df = data_df, names_path = peptide_names_path, include_seqs = add_peptide_seqs)
+        add_peptide_names(data_df = data_df, names_path = peptide_names_path, include_seqs = add_peptide_seqs, cols_list = peptide_seq_cols)
 
     # Save completed dataframe
     data_df.to_csv(os.path.join(output_dirs.get("output"), "preprocessed_data.csv"))
