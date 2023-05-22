@@ -192,7 +192,9 @@ class SpotArray:
                 key_letter_idx = string.ascii_uppercase.index(key_letter)
                 key_number = int(key[1:])
 
-                if key_letter_idx > ending_letter_idx or key_number > ending_number:
+                if key_letter_idx > ending_letter_idx:
+                    updated_spot_dict.pop(key)
+                elif key_letter_idx == ending_letter_idx and key_number > ending_number:
                     updated_spot_dict.pop(key)
 
         # Remove entries that are in the arbitrary list of coordinates to drop
