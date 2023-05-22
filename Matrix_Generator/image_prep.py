@@ -158,13 +158,30 @@ def significance_testing(data_df, ei_cols_dict, probes_ordered, ei_sig_thres = N
         ei_cols = ei_cols_dict.get(current_probe)
         data_df[call_col] = data_df.apply(lambda x: "Pass" if (x[ei_cols] > ei_sig_thres).all() else "", axis = 1)
 
-def add_peptide_names(data_df, names_path = None):
+def add_peptide_names(data_df, names_path = None, include_seqs = False, cols_list = None):
+    '''
+    Function for adding peptide names and, optionally, their sequences to the dataframe
+
+    Args:
+        data_df (pd.DataFrame): the input dataframe with peptide coords
+        names_path (str): the path to the CSV file containing coordinate-->value pairs
+        include_seqs (bool): whether to also assign sequence values
+        cols_list (list): the list of columns corresponding to values after the key value, if include_seqs is True
+    '''
     if names_path is None:
         names_path = input("\tEnter the path containing the CSV with coordinate-name pairs:  ")
-    names_dict = csv_to_dict(names_path)
-    for i, row in data_df.iterrows():
-        pep_name = names_dict.get(i)
-        data_df.at[i, "Peptide_Name"] = pep_name
+
+    names_dict = csv_to_dict(names_path, list_mode = include_seqs)
+    if include_seqs:
+        for i, row in data_df.iterrows():
+            values_list = names_dict.get(i)
+            data_df.at[i, "Peptide_Name"] = values_list[0]
+            for j, col in enumerate(cols_list):
+                data_df.at[i, col] = values_list[j+1]
+    else:
+        for i, row in data_df.iterrows():
+            pep_name = names_dict.get(i)
+            data_df.at[i, "Peptide_Name"] = pep_name
 
 def main_preprocessing(image_directory = None, spot_grid_dimensions = None, output_dirs = None, peptide_names_path = None, ellipsoid_index_thres = None, probes_ordered = None, multiline_cols = True, verbose = True):
     if spot_grid_dimensions is None:
