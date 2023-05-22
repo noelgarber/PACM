@@ -56,7 +56,7 @@ class SpotArray:
         draw_crosshairs:     function to draw crosshairs on the true peak points for each spot in the unsliced image
     '''
 
-    def __init__(self, tiff_path, spot_dimensions, metadata = (None, None, None), show_sliced_image = False, show_outlined_image = False, suppress_warnings = False, pixel_log_base = 1, verbose = False):
+    def __init__(self, tiff_path, spot_dimensions, metadata = (None, None, None), show_sliced_image = False, show_outlined_image = False, suppress_warnings = False, pixel_log_base = 1, ending_coord = None, arbitrary_coords_to_drop = None, verbose = False):
         '''
         Initialization function invoked when a new instance of the SpotArray class is created
 
@@ -93,25 +93,31 @@ class SpotArray:
         self.linear_array = reverse_log_transform(img, base = pixel_log_base) # Ensures that pixel values linearly correlate with luminance
 
         # Analyze the array automatically with the default variables
-        self.analyze_array(show_sliced_image = show_sliced_image, show_outlined_image = show_outlined_image, verbose = verbose)
+        self.analyze_array(ellipsoid_dilation_factor = 1, show_sliced_image = show_sliced_image,
+                           show_outlined_image = show_outlined_image, show_individual_spot_images = False,
+                           center_spots_mode = "iterative", ending_coord = ending_coord,
+                           arbitrary_coords_to_drop = arbitrary_coords_to_drop, verbose = verbose)
 
     def analyze_array(self, ellipsoid_dilation_factor = 1, show_sliced_image = False, show_outlined_image = False,
-                      show_individual_spot_images = False, center_spots_mode = "iterative", verbose = False):
+                      show_individual_spot_images = False, center_spots_mode = "iterative",
+                      ending_coord = None, arbitrary_coords_to_drop = None, verbose = False):
         '''
         Main function to analyze and quantify grids of spots
 
         Args:
-            ellipsoid_dilation_factor (float): multiplier that dilates identified spot borders
-            show_sliced_image (Boolean): whether to display the source image with gridlines after spot borders are found
-            show_outlined_image (Boolean): whether to display the image with detected spots circled in green
-            show_individual_spot_images (Boolean): whether to consecutively display individual spots for debugging
-            center_spots_mode (Boolean): whether to assume that the center of an identified spot equals the center
-                                         of the sliced spot image
-            verbose (Boolean): whether to display progress information for debugging
+            ellipsoid_dilation_factor (float):  multiplier that dilates identified spot borders
+            show_sliced_image (bool):           whether to display the source image with gridlines after spot borders are found
+            show_outlined_image (bool):         whether to display the image with detected spots circled in green
+            show_individual_spot_images (bool): whether to consecutively display individual spots for debugging
+            center_spots_mode (str):            the mode for centering spots within their respective sliced squares
+            ending_coord (str):                 the last coord after which coords should be dropped;
+                                                e.g. if set to D5, all coords from D6 onwards will be deleted
+            arbitrary_coords_to_drop (list):    list of coords to drop if desired
+            verbose (Boolean):                  whether to display progress information for debugging
 
         Returns:
-            analyzed_array_tuple (tuple): (copy_number, scan_number, probe_name, linear_array, spot_info_dict,
-                                           outlined_image)
+            analyzed_array_tuple (tuple):       (copy_number, scan_number, probe_name, linear_array, spot_info_dict,
+                                                outlined_image)
         '''
         if verbose:
             print("\tProcessing: Copy", self.copy_number, " - Scan", self.scan_number, "- Probe", self.probe_name)
@@ -132,9 +138,15 @@ class SpotArray:
             imshow(self.sliced_image / self.sliced_image.max())
             plt.show()
 
-        # Make a dictionary holding alphanumeric spot coordinates as keys, storing tuples of (unadjusted_signal, background_adjusted_signal, ellipsoid_index, peak_intersect, top_left_corner)
+        # Make a dictionary holding alphanumeric spot coordinates as keys --> tuples of
+        # (unadjusted_signal, background_adjusted_signal, ellipsoid_index, peak_intersect, top_left_corner)
         print("\t\tcomputing background-adjusted signal and ellipsoid_index...") if verbose else None
-        self.outlined_image, self.spot_info_dict = self.ellipsoid_constrain(spot_images = image_slices, dilation_factor = ellipsoid_dilation_factor, centering_mode = center_spots_mode, verbose = verbose)
+        self.outlined_image, self.spot_info_dict = self.ellipsoid_constrain(spot_images = image_slices, dilation_factor = ellipsoid_dilation_factor,
+                                                                            centering_mode = center_spots_mode, verbose = verbose)
+
+        # Remove specified coords
+        self.spot_info_dict = self.drop_specified_coords(self.spot_info_dict, ending_coord = ending_coord,
+                                                         arbitrary_coords_to_drop = arbitrary_coords_to_drop)
 
         # Display popup of sliced image with drawn crosshairs if prompted
         if show_outlined_image:
@@ -150,6 +162,45 @@ class SpotArray:
     The following are backend functions used by analyze_array(); they generally should not be used on their own.
     ------------------------------------------------------------------------------------------------------------
     '''
+
+    def drop_specified_coords(self, spot_info_dict, ending_coord = None, arbitrary_coords_to_drop = None):
+        '''
+        Simple function to delete entries for spot coordinates that are blank or otherwise specified to be excluded
+
+        Please note that this function does not currently support coords with more than one letter.
+
+        Args:
+            spot_info_dict (dict):           the dictionary of spots
+            ending_coord (str):              if given, it is the last coord after which subsequent coords will be deleted
+            arbitrary_coords_to_drop (list): if given, it is the list of alphanumeric spot coordinates to remove
+
+        Returns:
+            updated_spot_dict (dict):        a new dictionary of spots excluding those to be dropped
+        '''
+        updated_spot_dict = spot_info_dict.copy()
+
+        # Remove entries after the ending coordinate
+        if ending_coord is not None:
+            ending_letter = ending_coord[0]
+            ending_letter_idx = string.ascii_uppercase.index(ending_letter)
+            ending_number = int(ending_coord[1:])
+
+            for key in updated_spot_dict.keys():
+                key_letter = key[0]
+                key_letter_idx = string.ascii_uppercase.index(key_letter)
+                key_number = int(key[1:])
+
+                if key_letter_idx > ending_letter_idx or key_number > ending_number:
+                    updated_spot_dict.pop(key)
+
+        # Remove entries that are in the arbitrary list of coordinates to drop
+        if arbitrary_coords_to_drop is not None:
+            for key in updated_spot_dict.keys():
+                if key in arbitrary_coords_to_drop:
+                    updated_spot_dict.pop(key)
+
+        return updated_spot_dict
+
 
     def grid_peak_finder(self, show_line_sums = False, verbose = False):
         '''
