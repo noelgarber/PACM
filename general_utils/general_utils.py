@@ -35,12 +35,13 @@ def input_number(prompt, mode = "float"):
 
     return output_value
 
-def csv_to_dict(filepath):
+def csv_to_dict(filepath, list_mode = False):
     '''
     Simple function for converting a 2-column CSV file into a dictionary.
 
     Args:
         filepath (str): the path to the CSV file, which must contain 2 columns without titles; keys go in first column
+        list_mode (bool): whether to read additional cols as a list, e.g. col1 --> [col2, col3, col4, ...]
 
     Returns:
         result (dict): a dictionary of keys (from the first column) matching values (from the second column)
@@ -50,7 +51,10 @@ def csv_to_dict(filepath):
         reader = csv.reader(csvfile)
         for row in reader:
             key = row[0]
-            value = row[1]
+            if list_mode:
+                value = row[1:]
+            else:
+                value = row[1]
             result[key] = value
     return result
 
