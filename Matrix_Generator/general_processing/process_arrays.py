@@ -111,28 +111,40 @@ def conditional_log2fc(input_df, bait_pair, control_signal_cols, bait1_signal_co
     if bait_pair[0] == bait_pair[1]:
         return input_df
 
+    print(f"conditional_log2fc() is comparing the pair {bait_pair}")
+
     # Copy the input dataframe and name the log2fc column
     output_df = input_df.copy()
     log2fc_col = bait_pair[0] + "_" + bait_pair[1] + "_log2fc"
+    print(f"\tthe log2fc column name will be {log2fc_col}")
 
     # Get signal means and ellipsoid index values
     control_signal_means = output_df[control_signal_cols].mean(axis=1)
+    print("control signal means: ", control_signal_means)
     bait1_signal_means = output_df[bait1_signal_cols].mean(axis=1)
+    print("bait #1 signal means: ", bait1_signal_means)
     bait2_signal_means = output_df[bait2_signal_cols].mean(axis=1)
+    print("bait #2 signal means: ", bait2_signal_means)
 
     # Determine if at least one of the baits exceeds the control by the required multiplier for each entry, and whether they pass ellipsoid_index tests
     passes_control = np.logical_or(bait1_signal_means > control_multiplier * control_signal_means,
                                    bait2_signal_means > control_multiplier * control_signal_means)
+    print("passes_control =", passes_control)
 
     # Calculate the log2fc values
     log2fc_vals = bait1_signal_means.combine(bait2_signal_means, log2fc)
+    print("log2fc_vals:", log2fc_vals)
 
     # Use a boolean mask that requires that at least 1 bait to pass the ellipsoid_index test, and also that at least 1 bait passes control
     pass_cols_pair = [pass_cols.get(bait_pair[0]), pass_cols.get(bait_pair[1])]
+    print("pass_cols_pair =", pass_cols_pair)
     mask = ((output_df[pass_cols_pair[0]] == "Pass") | (output_df[pass_cols_pair[1]] == "Pass")) & passes_control
+    print("mask:", mask)
 
     # Apply the log2fc values conditionally using the mask
     output_df.loc[mask, log2fc_col] = log2fc_vals
+
+    print("output_df[log2fc_col]: ", output_df[log2fc_col])
 
     return output_df
 
@@ -291,7 +303,12 @@ def apply_log2fc(data_df, bait_cols_dict, bait_pass_cols, control_probe_name, co
     if control_multiplier is None:
         control_multiplier = input_number(prompt = "\tEnter a control multiplier for testing if hits are above this multiple (recommended between 2 and 5):  ", mode = "float")
 
-    bait_pairs = get_bait_pairs(list_of_baits = list(bait_cols_dict.keys()))
+    list_of_baits = []
+    for key in bait_cols_dict.keys():
+        if key != control_probe_name:
+            list_of_baits.append(key)
+
+    bait_pairs = get_bait_pairs(list_of_baits = list_of_baits)
     for bait_pair in bait_pairs:
         control_signal_cols = bait_cols_dict.get(control_probe_name)
         bait1_signal_cols, bait2_signal_cols = bait_cols_dict.get(bait_pair[0]), bait_cols_dict.get(bait_pair[1])
@@ -322,9 +339,9 @@ def main_processing(data_df, controls_list, bait_cols_dict, bait_pass_cols, cont
         output_df, _ = standardize_dataframe(df = output_df, controls_list = controls_list, bait_cols_dict = bait_cols_dict, probe_control_name = control_probe_name)
 
     # Calculate log2fc conditionally for each pair of baits, if at least one bait passes the ellipsoid_index test and exceeds the control
-    if control_multiplier is None:
-        output_df, control_multiplier = apply_log2fc(data_df = output_df, bait_cols_dict = bait_cols_dict,
-                                                     bait_pass_cols = bait_pass_cols, control_probe_name = control_probe_name)
+    output_df, control_multiplier = apply_log2fc(data_df = output_df, bait_cols_dict = bait_cols_dict,
+                                                 bait_pass_cols = bait_pass_cols, control_probe_name = control_probe_name,
+                                                 control_multiplier = control_multiplier)
 
     # Check if each hit passes significance for at least one bait
     output_df = one_passes(input_df = output_df, bait_cols_dict = bait_cols_dict, bait_pass_cols = bait_pass_cols,
