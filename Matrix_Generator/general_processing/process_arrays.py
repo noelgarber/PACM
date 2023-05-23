@@ -111,40 +111,28 @@ def conditional_log2fc(input_df, bait_pair, control_signal_cols, bait1_signal_co
     if bait_pair[0] == bait_pair[1]:
         return input_df
 
-    print(f"conditional_log2fc() is comparing the pair {bait_pair}")
-
     # Copy the input dataframe and name the log2fc column
     output_df = input_df.copy()
     log2fc_col = bait_pair[0] + "_" + bait_pair[1] + "_log2fc"
-    print(f"\tthe log2fc column name will be {log2fc_col}")
 
     # Get signal means and ellipsoid index values
     control_signal_means = output_df[control_signal_cols].mean(axis=1)
-    print("control signal means: ", control_signal_means)
     bait1_signal_means = output_df[bait1_signal_cols].mean(axis=1)
-    print("bait #1 signal means: ", bait1_signal_means)
     bait2_signal_means = output_df[bait2_signal_cols].mean(axis=1)
-    print("bait #2 signal means: ", bait2_signal_means)
 
     # Determine if at least one of the baits exceeds the control by the required multiplier for each entry, and whether they pass ellipsoid_index tests
     passes_control = np.logical_or(bait1_signal_means > control_multiplier * control_signal_means,
                                    bait2_signal_means > control_multiplier * control_signal_means)
-    print("passes_control =", passes_control)
 
     # Calculate the log2fc values
     log2fc_vals = bait1_signal_means.combine(bait2_signal_means, log2fc)
-    print("log2fc_vals:", log2fc_vals)
 
     # Use a boolean mask that requires that at least 1 bait to pass the ellipsoid_index test, and also that at least 1 bait passes control
     pass_cols_pair = [pass_cols.get(bait_pair[0]), pass_cols.get(bait_pair[1])]
-    print("pass_cols_pair =", pass_cols_pair)
     mask = ((output_df[pass_cols_pair[0]] == "Pass") | (output_df[pass_cols_pair[1]] == "Pass")) & passes_control
-    print("mask:", mask)
 
     # Apply the log2fc values conditionally using the mask
     output_df.loc[mask, log2fc_col] = log2fc_vals
-
-    print("output_df[log2fc_col]: ", output_df[log2fc_col])
 
     return output_df
 

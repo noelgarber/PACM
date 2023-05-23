@@ -528,25 +528,6 @@ def apply_motif_scores(dens_df, weighted_matrices, slim_length, seq_col = "No_Ph
 
 	return output_df
 
-def divide_inf(numerator, denominator, infinity_value = 999):
-	'''
-	Simple division function that substitutes a specified infinity value when divide-by-zero errors are encountered
-
-	Args:
-		numerator (float): 		the numerator for division
-		denominator (float): 	the denominator for division
-		infinity_value (float): the code value to substitute when divide-by-zero errors are encountered; default is 999
-
-	Returns:
-		value (float): 			the result of the division
-	'''
-	if denominator == 0: 
-		value = infinity_value
-	else: 
-		value = numerator / denominator
-
-	return value
-
 def diagnostic_value(score_threshold, dataframe, significance_col = "One_Passes", score_col = "SLiM_Score"):
 	'''
 	Function to produce sensitivity, specificity, and positive and negative predictive values for a given score cutoff
@@ -560,34 +541,69 @@ def diagnostic_value(score_threshold, dataframe, significance_col = "One_Passes"
 	Returns:
 		pred_val_dict (dict):     dictionary with values for keys of "Sensitivity", "Specificity", "PPV", and "NPV"
 	'''
-	pred_val_dict = {
-		"TP": 0,
-		"FP": 0,
-		"TN": 0,
-		"FN": 0,
-	}
+	pred_val_dict = {}
+	
+	TP_count = 0
+	FP_count = 0
+	TN_count = 0
+	FN_count = 0
 
 	for i in np.arange(len(dataframe)): 
 		sig_truth = dataframe.at[i, significance_col]
 		score = dataframe.at[i, score_col]
+		print(f"At row {i}, One_Passes is {sig_truth} and SLiM_Score is {score}")
+			  
 		if score >= score_threshold: 
-			score_over_n = "Yes"
+			score_above_thres = True
 		else: 
-			score_over_n = "No"
+			score_above_thres = False
+		
+		if sig_truth == "Yes": 
+			sig_truth = True
+		else: 
+			sig_truth = False
 
-		if score_over_n == "Yes" and sig_truth == "Yes": 
-			pred_val_dict["TP"] = pred_val_dict["TP"] + 1
-		elif score_over_n == "Yes" and sig_truth == "No": 
-			pred_val_dict["FP"] = pred_val_dict["FP"] + 1
-		elif score_over_n != "Yes" and sig_truth == "Yes": 
-			pred_val_dict["FN"] = pred_val_dict["FN"] + 1
-		elif score_over_n != "Yes" and sig_truth == "No": 
-			pred_val_dict["TN"] = pred_val_dict["TN"] + 1
+		if score_above_thres and sig_truth: 
+			print(f"\tSince One_Passes is {sig_truth} and score_above_thres is {score_above_thres}, row {i} is a True Positive")
+			TP_count += 1
+		if score_above_thres and not sig_truth: 
+			print(f"\tSince One_Passes is {sig_truth} and score_above_thres is {score_above_thres}, row {i} is a False Positive")
+			FP_count += 1
+		if sig_truth and not score_above_thres: 
+			print(f"\tSince One_Passes is {sig_truth} and score_above_thres is {score_above_thres}, row {i} is a False Negative")
+			FN_count += 1
+		if not sig_truth and not score_above_thres: 
+			print(f"\tSince One_Passes is {sig_truth} and score_above_thres is {score_above_thres}, row {i} is a True Negative")
+			TN_count += 1
+	
+	pred_val_dict["TP"] = TP_count
+	pred_val_dict["FP"] = FP_count
+	pred_val_dict["TN"] = TN_count
+	pred_val_dict["FN"] = FN_count
 
-	pred_val_dict["Sensitivity"] = round(divide_inf(numerator = pred_val_dict.get("TP"), denominator = pred_val_dict.get("TP") + pred_val_dict.get("FN")), 3)
-	pred_val_dict["Specificity"] = round(divide_inf(numerator = pred_val_dict.get("TN"), denominator = pred_val_dict.get("TN") + pred_val_dict.get("FP")), 3)
-	pred_val_dict["PPV"] = round(divide_inf(numerator = pred_val_dict.get("TP"), denominator = pred_val_dict.get("TP") + pred_val_dict.get("FP")), 3)
-	pred_val_dict["NPV"] = round(divide_inf(numerator = pred_val_dict.get("TN"), denominator = pred_val_dict.get("TN") + pred_val_dict.get("FN")), 3)
+	# Calculate the sensitivity, i.e. proportion of positives that are correctly called
+	if (pred_val_dict.get("TP") + pred_val_dict.get("FN")) > 0:
+		pred_val_dict["Sensitivity"] = round(pred_val_dict.get("TP") / (pred_val_dict.get("TP") + pred_val_dict.get("FN")), 3)
+	else:
+		pred_val_dict["Sensitivity"] = "NaN"
+
+	# Calculate the specificity, i.e. proportion of negatives that are correctly called
+	if (pred_val_dict.get("TN") + pred_val_dict.get("FP")) > 0:
+		pred_val_dict["Specificity"] = round(pred_val_dict.get("TN") / (pred_val_dict.get("TN") + pred_val_dict.get("FP")), 3)
+	else:
+		pred_val_dict["Specificity"] = "NaN"
+
+	# Calculate the positive predictive value, i.e. proportion of positive calls that are actually positive
+	if (pred_val_dict.get("TP") + pred_val_dict.get("FP")) > 0:
+		pred_val_dict["PPV"] = round(pred_val_dict.get("TP") / (pred_val_dict.get("TP") + pred_val_dict.get("FP")), 3)
+	else:
+		pred_val_dict["PPV"] = "NaN"
+
+	# Calculate the negative predictive value, i.e. proportion of negative calls that are actually negative
+	if (pred_val_dict.get("TN") + pred_val_dict.get("FN")) > 0:
+		pred_val_dict["NPV"] = round(pred_val_dict.get("TN") / (pred_val_dict.get("TN") + pred_val_dict.get("FN")), 3)
+	else:
+		pred_val_dict["NPV"] = "NaN"
 
 	return pred_val_dict
 
@@ -596,7 +612,7 @@ def apply_threshold(input_df, sig_col = "One_Passes", score_col = "SLiM_Score", 
 	Function to declare and apply the motif score threshold based on predictive values
 
 	Args:
-		input_df (pd.DataFrame):   the dataframe containing peptides and scores
+		input_df (pd.DataFrame):  the dataframe containing peptides and scores; must contain score values
 		sig_col (str): 			  the df column containing significance information (Yes/No)
 		score_col (str): 		  the df column containing the peptide scores
 
@@ -609,21 +625,41 @@ def apply_threshold(input_df, sig_col = "One_Passes", score_col = "SLiM_Score", 
 	# Make a range of SLiM scores between the minimum and maximum score values from the dataframe
 	min_score = output_df[score_col].min()
 	max_score = output_df[score_col].max()
+	print(f"max_score = {max_score} | min_score = {min_score}")
 	score_range_series = np.linspace(min_score, max_score, num = range_count)
 
-	# Assemble a dictionary of score --> [positive predictive value, negative predictive value]
-	threshold_selection_dict = {}
-	for i in score_range_series:
-		i_rounded = round(i, 1)
-		pv_dict = diagnostic_value(score_threshold = i, dataframe = output_df,
+	# Assemble a dataframe of score --> [positive predictive value, negative predictive value]
+	predictive_value_df = pd.DataFrame(columns = ["Score", "PPV", "NPV", "FDR", "FOR"])
+	predictive_value_df["Score"] = score_range_series
+	print("Iterating over scores to find predictive values...")
+	for i in np.arange(len(predictive_value_df)):
+		current_score = predictive_value_df.at[i, "Score"]
+		print(f"\tcurrent_score = {current_score}")
+		pv_dict = diagnostic_value(score_threshold = current_score, dataframe = output_df,
 								   significance_col = "One_Passes", score_col = score_col)
-		ppv_npv_list = [pv_dict.get("PPV"), pv_dict.get("NPV")]
-		threshold_selection_dict[i_rounded] = ppv_npv_list
 
-	# Print the dictionary to aid in the user selecting an appropriate score cutoff for significance to be declared
-	print("Threshold selection information:", "\n---")
-	for key, value in threshold_selection_dict.items():
-		print(key, ":", "PPV =", value[0], "\tNPV =", value[1], "\tFDR =", round(1 - value[0], 3), "\tFOR =", round(1 - value[1], 3))
+		# Retrieve and assign PPV and NPV values
+		predictive_value_df.at[i, "PPV"] = pv_dict.get("PPV")
+		predictive_value_df.at[i, "NPV"] = pv_dict.get("NPV")
+
+		# Calculate FDR and FOR only when PPV and NPV are numbers, respectively
+		try:
+			predictive_value_df.at[i, "FDR"] = 1.0 - pv_dict.get("PPV")
+		except:
+			predictive_value_df.at[i, "FDR"] = "NaN"
+
+		try:
+			predictive_value_df.at[i, "FOR"] = 1.0 - pv_dict.get("NPV")
+		except:
+			predictive_value_df.at[i, "FOR"] = "NaN"
+
+		print(pv_dict)
+
+	# Print the dataframe to aid in the user selecting an appropriate score cutoff for significance to be declared
+	print("Threshold selection information:",)
+	pd.set_option('display.max_rows', None)
+	pd.set_option('display.max_columns', None)
+	print(predictive_value_df)
 	print("---")
 
 	# Prompt the user to input the selected threshold that a SLiM score must exceed to be considered significant
@@ -656,10 +692,12 @@ def apply_threshold(input_df, sig_col = "One_Passes", score_col = "SLiM_Score", 
 
 	return output_df, selected_threshold
 
-def save_scored_data(selected_threshold, output_directory, verbose = True):
+def save_scored_data(scored_df, selected_threshold, output_directory, verbose = True):
 	output_filename = "pairwise_scored_data" + "_thres" + str(selected_threshold) + ".csv"
 	output_file_path = os.path.join(output_directory, "Array_Output", output_filename)
-	dens_scored_df.to_csv(output_file_path)
+	if not os.path.exists(output_file_path):
+		os.makedirs(output_file_path)
+	scored_df.to_csv(output_file_path)
 
 	print("Saved! Filename:", output_file_path) if verbose else None
 
@@ -741,6 +779,6 @@ def make_pairwise_matrices(dens_df, percentiles_dict = None, slim_length = None,
 	dens_df, selected_threshold = apply_threshold(dens_df, sig_col = significance_col, score_col = "SLiM_Score")
 
 	# Save the results
-	save_scored_data(selected_threshold = selected_threshold, output_directory = output_folder)
+	save_scored_data(scored_df = dens_df, selected_threshold = selected_threshold, output_directory = output_folder)
 
 	return dens_df
