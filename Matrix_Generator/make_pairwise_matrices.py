@@ -50,7 +50,7 @@ def get_min_cat_members(display_message = True):
 
 def weighted_matrix(bait, motif_length, source_dataframe, min_members, amino_acid_list, thres_tuple, points_tuple,
 					position_for_filtering = None, residues_included_at_filter_position = amino_acids_phos,
-					bjo_seq_col = "BJO_sequence", signal_col_suffix = "Background-Adjusted_Standardized_Signal"):
+					bjo_seq_col = "BJO_Sequence", signal_col_suffix = "Background-Adjusted_Standardized_Signal"):
 	'''
 	Generalized weighted matrix function
 
@@ -75,6 +75,8 @@ def weighted_matrix(bait, motif_length, source_dataframe, min_members, amino_aci
 	Returns:
 		generic_matrix_df (pd.DataFrame):			standardized matrix for the given type-position rule
 	'''
+	index_for_filtering = position_for_filtering - 1
+
 	# Declare thresholds and point values
 	thres_extreme, thres_high, thres_mid = thres_tuple
 	points_extreme, points_high, points_mid, points_low = points_tuple
@@ -99,15 +101,18 @@ def weighted_matrix(bait, motif_length, source_dataframe, min_members, amino_aci
 	num_qualifying_entries = 0
 	for i in np.arange(len(source_dataframe)): 
 		seq = source_dataframe.at[i, bjo_seq_col]
-		seq = list(seq) # converts to aa list
-		if seq[position_for_filtering - 1] in residues_included_at_filter_position: 
-			num_qualifying_entries += 1
+		if position_for_filtering > len(seq):
+			raise IndexError(f"Position {position_for_filtering} (index {index_for_filtering}) is out of bounds for sequence {seq}")
+		else:
+			aa_at_filter_index = seq[index_for_filtering]
+			if aa_at_filter_index in residues_included_at_filter_position:
+				num_qualifying_entries += 1
 	if num_qualifying_entries < min_members: 
 		residues_included_at_filter_position = amino_acid_list
 
 	# Calculate the points and assign to the matrix.
 	for i in np.arange(len(source_dataframe)): 
-		seq = source_dataframe.at[i, "BJO_Sequence"]
+		seq = source_dataframe.at[i, bjo_seq_col]
 		seq = list(seq) #converts to aa list
 
 		# Check if the current bait passes as a positive result for the given peptide sequence
@@ -133,10 +138,11 @@ def weighted_matrix(bait, motif_length, source_dataframe, min_members, amino_aci
 		# Check if the residue at the filter position belongs to the residues list for the chemical class of interest
 		if seq[position_for_filtering - 1] in residues_included_at_filter_position:
 			# Iterate over the filtered position indices to apply points to the matrix dataframe
-			for n in position_indices_filtered: 
+			for n in position_indices_filtered:
 				m = n + 1 # value for column number
-				for aa in amino_acid_list: 
-					if aa == seq[n]: 
+				seq_at_position = seq[n]
+				for aa in amino_acid_list:
+					if aa == seq_at_position:
 						# Calculation of points:
 						if value > thres_extreme:
 							points = points_extreme
@@ -212,7 +218,7 @@ def get_thresholds(percentiles_dict = None, use_percentiles = True, show_guidanc
 	return thres_tuple, points_tuple
 
 def make_weighted_matrices(slim_length, aa_charac_dict, dens_df, minimum_members, list_aa, thres_tuple, points_tuple,
-						   sequence_col = "BJO_sequence", signal_col_suffix = "Background-Adjusted_Standardized_Signal"):
+						   sequence_col = "BJO_Sequence", signal_col_suffix = "Background-Adjusted_Standardized_Signal"):
 	'''
 	Function for generating weighted matrices corresponding to each type/position rule (e.g. position #1 = Acidic)
 
@@ -262,12 +268,12 @@ def make_weighted_matrices(slim_length, aa_charac_dict, dens_df, minimum_members
 
 	return dictionary_of_matrices
 
-def get_always_allowed():
+def get_always_allowed(slim_length):
 	'''
 	Simple function to get a user-inputted dict of position # --> list of residues that are always permitted at that position
 
 	Args:
-		None
+		slim_length (int): the length of the motif being studied
 
 	Returns:
 		always_allowed_dict (dict): a dictionary of position number (int) --> always-permitted residues at that position (list)
@@ -354,7 +360,7 @@ def get_position_weights(slim_length):
 
 	return position_weights
 
-def add_matrix_weights(matrices_dict, position_weights, amino_acids = amino_acids):
+def add_matrix_weights(slim_length, matrices_dict, position_weights, amino_acids = amino_acids):
 	'''
 	Function to apply the matrix weights by position to the generated matrices
 
@@ -388,7 +394,7 @@ def save_weighted_matrices(weighted_matrices_dict, matrix_directory = None):
 	Returns:
 		None
 	'''
-	if matrix_directory = None:
+	if matrix_directory is None:
 		matrix_directory = os.path.join(os.getcwd(), "Pairwise_Matrices")
 
 	# If the matrix directory does not exist, make it
@@ -653,7 +659,7 @@ def save_scored_data(selected_threshold, output_directory, verbose = True):
 
 def make_pairwise_matrices(dens_df, percentiles_dict = None, slim_length = None, minimum_members = None,
 						   thres_tuple = None, points_tuple = None, always_allowed_dict = None, position_weights = None,
-						   output_folder = None, sequence_col = "No_Phos_Sequence", significance_col = "One_Passes"):
+						   output_folder = None, sequence_col = "BJO_Sequence", significance_col = "One_Passes"):
 	'''
 	Main function for making pairwise position-weighted matrices
 
@@ -693,12 +699,12 @@ def make_pairwise_matrices(dens_df, percentiles_dict = None, slim_length = None,
 	matrices_dict = make_weighted_matrices(slim_length = slim_length, aa_charac_dict = aa_charac_dict,
 										   dens_df = dens_df, minimum_members = minimum_members, list_aa = amino_acids_phos,
 										   thres_tuple = thres_tuple, points_tuple = points_tuple,
-										   sequence_col = "BJO_sequence",
+										   sequence_col = sequence_col,
 										   signal_col_suffix = "Background-Adjusted_Standardized_Signal")
 
 	# Get list of always-allowed residues (overrides algorithm for those positions)
 	if always_allowed_dict is None:
-		always_allowed_dict = get_always_allowed()
+		always_allowed_dict = get_always_allowed(slim_length = slim_length)
 
 	# Collapse phospho-residues into non-phospho counterparts and apply always-allowed residues
 	matrices_dict = collapse_phospho(matrices_dict = matrices_dict, slim_length = slim_length)
@@ -710,8 +716,8 @@ def make_pairwise_matrices(dens_df, percentiles_dict = None, slim_length = None,
 		position_weights = get_position_weights(slim_length = slim_length)
 
 	# Apply weights and save the weighted matrices
-	weighted_matrices_dict = add_matrix_weights(matrices_dict = matrices_dict, position_weights = position_weights,
-												amino_acids = amino_acids)
+	weighted_matrices_dict = add_matrix_weights(slim_length = slim_length, matrices_dict = matrices_dict,
+												position_weights = position_weights, amino_acids = amino_acids)
 	if output_folder is None:
 		output_folder = os.getcwd()
 	matrix_output_folder = os.path.join(output_folder, "Pairwise_Matrices")
