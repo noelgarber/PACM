@@ -220,9 +220,9 @@ def main_workflow(predefined_batch = True, add_peptide_seqs = False, peptide_seq
     concatenated_df = pd.concat(standardized_df_list, axis=0)
     
     # Find the percentiles of the concatenated df
-    concatenated_df, concatenated_percentiles_dict = find_max_bait_signal(input_df = concatenated_df, bait_cols_dict = bait_cols_dict,
-                                                                          control_probe_name = control_probe_name, max_bait_mean_col = "Max_Bait_Standardized_Mean",
-                                                                          return_percentiles_dict = True)
+    _, concatenated_percentiles_dict = find_max_bait_signal(input_df = concatenated_df, bait_cols_dict = bait_cols_dict,
+                                                            control_probe_name = control_probe_name, max_bait_mean_col = "Max_Bait_Standardized_Mean",
+                                                            return_percentiles_dict = True)
 
     return concatenated_df, concatenated_percentiles_dict
 

@@ -445,6 +445,14 @@ def score_aa_seq(sequence, weighted_matrices, slim_length, dens_df = None, df_ro
 		res = sequence[j-1:j]
 		res_previous = sequence[j-2:j-1]
 		res_subsequent = sequence[j:j+1]
+
+		# Treat X (blank) as G (no side chain)
+		if res == "X":
+			res = "G"
+		if res_previous == "X":
+			res_previous = "G"
+		if res_subsequent == "X":
+			res_subsequent = "G"
 		
 		res_previous_position = j - 1
 		res_subsequent_position = j + 1
@@ -494,8 +502,9 @@ def apply_motif_scores(dens_df, weighted_matrices, slim_length, seq_col = "No_Ph
 		output_df (pd.DataFrame): dens_df with scores added
 	'''
 	output_df = dens_df.copy()
+
 	for i in np.arange(len(output_df)):
-		seq = dens_scored_df.at[i, seq_col]
+		seq = output_df.at[i, seq_col]
 		total_score = score_aa_seq(sequence = seq, weighted_matrices = weighted_matrices, slim_length = slim_length,
 								   dens_df = output_df, df_row_index = i, add_residue_cols = add_residue_cols)
 		output_df.at[i, score_col] = total_score

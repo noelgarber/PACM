@@ -191,6 +191,12 @@ def add_peptide_names(data_df, names_path = None, include_seqs = False, cols_lis
 
     names_dict = csv_to_dict(names_path, list_mode = include_seqs)
     if include_seqs:
+        # Make cols for sequences to reside in
+        peptide_col_index = data_df.columns.get_loc("Peptide_Name")
+        for i, col in enumerate(cols_list):
+            data_df.insert(peptide_col_index + i + 1, col, "")
+
+        # Add sequence elements
         for i, row in data_df.iterrows():
             values_list = names_dict.get(i)
             data_df.at[i, "Peptide_Name"] = values_list[0]
