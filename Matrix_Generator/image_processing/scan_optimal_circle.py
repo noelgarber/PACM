@@ -81,7 +81,7 @@ def spot_circle_scan(image_snippet, source_image, midpoint_coords, enforced_radi
     max_variance = int(radius_variance_multiplier * spot_radius)
 
     # Begin the cycle for scanning around the given coordinates to find optimal coordinates
-    maximized_value = 0
+    maximized_value = -1000
     y_midpoint, x_midpoint = midpoint_coords  # coordinates refer to source_image, not image snippet
     final_midpoint, results_dict = None, None
 
@@ -96,6 +96,8 @@ def spot_circle_scan(image_snippet, source_image, midpoint_coords, enforced_radi
 
             # Calculate pixel value sum and count inside the defined circle
             inside_sum = np.sum(source_image[mask == 255])
+            if inside_sum < 0:
+                inside_sum = 0
             inside_count = len(source_image[mask == 255])
 
             # Find image snippet borders in source image
@@ -118,12 +120,19 @@ def spot_circle_scan(image_snippet, source_image, midpoint_coords, enforced_radi
             square_around_spot = source_image[y_top:y_bottom, x_left:x_right]
             square_mask_segment = mask[y_top:y_bottom, x_left:x_right]
             outside_sum = np.sum(square_around_spot[square_mask_segment == 0])
+            if outside_sum < 0:
+                outside_sum = 0
             outside_count = len(square_around_spot[square_mask_segment == 0])
 
             # Calculate the mean pixel value inside and outside the defined circle, and an index ratio of them
             mean_inside = inside_sum / inside_count
             mean_outside = outside_sum / outside_count
-            ellipsoid_index = mean_inside / mean_outside
+            if mean_inside != 0 and mean_outside != 0:
+                ellipsoid_index = mean_inside / mean_outside
+            elif mean_inside != 0 and mean_outside == 0:
+                ellipsoid_index = 999
+            else:
+                ellipsoid_index = 0
 
             # Set the testing value based on the user-defined mode
             if value_to_maximize == "inside_sum":
@@ -136,7 +145,7 @@ def spot_circle_scan(image_snippet, source_image, midpoint_coords, enforced_radi
                 raise ValueError(f"spot_circle_scan error: value_to_maximize is set to {value_to_maximize}, but must be one of [\"inside_sum\", \"mean_inside\", \"ellipsoid_index\"]")
 
             # If the testing value is better than the last iteration, set the results dict
-            if testing_value > maximized_value:
+            if testing_value >= maximized_value:
                 maximized_value = testing_value
                 final_midpoint = current_midpoint
                 results_dict = {
