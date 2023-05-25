@@ -139,7 +139,17 @@ def reverse_log_transform(array, base = 1):
     if base == "e":
         from math import e
         base = e
-    if array.max() > 1:
-        raise Exception("reverse_log_transform error: image array values out of range (expected: float between 0 and 1)")
+
+    # Substitute negative values with 0
+    if array.min() < 0:
+        array = np.where(array < 0, 0, array)
+
+    if array.max() > 1 and array.max() < 2:
+        print(f"reverse_log_transform warning: array max was {array.max()} and will be normalized to 1.0")
+        array = array / array.max()
+    elif array.max() >= 2:
+        raise Exception("reverse_log_transform error: image array values out of range (greater than 2, but floats between 0 and 1 are expected)")
+
     array_out = np.power(array, base)
+
     return array_out
