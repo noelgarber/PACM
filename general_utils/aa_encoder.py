@@ -3,6 +3,9 @@ This is a set of dictionaries of amino acids, by single-letter code, describing 
 purposes of encoding and exposing to neural networks
 '''
 
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+
 '''
 Kyte-Doolittle hydrophobicity scale
     --> Positive values are hydrophobic, and negative values are hydrophilic
@@ -33,11 +36,13 @@ Side chain charges, including partial values for residues where two species exis
     --> Source of side chain pKa values: https://www.vanderbilt.edu/AnS/Chemistry/Rizzo/stuff/AA/AminoAcids.html
     --> Cys has a side chain pKa of ~8.37, so at pH 7.4, ~9.68% is deprotonated as a negatively charged thiolate
     --> His has a side chain pKa of about ~6.04, so at pH 7.4, ~4.18% will be protonated (positive)
+    --> Phosphate has pKa values of about 1.2 and 6.5, so at pH 7.4, ~100% will have the first oxygen charged, 
+        and ~88.8% will have the second oxygen also charged
     --> Sec (selenocysteine) has a side chain pKa of about ~5.43, so at pH 7.4, ~98.9% is deprotonated (negative)
 '''
 charge_dict = {"D": -1.0, "E": -1.0, "C": -0.0968,
                "K": 1.0, "R": 1.0, "H": 0.0418,
-               "B": -1.0, "J": -1.0, "O": -1.0,
+               "B": -1.8882, "J": -1.8882, "O": -1.8882,
                "A": 0.0, "F": 0.0, "G": 0.0, "I": 0.0, "L": 0.0, "M": 0.0, "N": 0.0,
                "P": 0.0, "Q": 0.0, "S": 0.0, "T": 0.0, "V": 0.0, "W": 0.0, "Y": 0.0}
 
@@ -103,6 +108,31 @@ aromatic_ring_count = {"F": 1, "Y": 1, "W": 1, "O": 1,
                        "R": 0, "H": 0, "K": 0, "D": 0, "E": 0, "S": 0, "T": 0, "N": 0, "Q": 0, "G": 0,
                        "P": 0, "C": 0, "A": 0, "V": 0, "I": 0, "L": 0, "M": 0, "B": 0, "J": 0}
 
+# Perform scaling and construct a dictionary of dictionaries
+chemical_characteristics = {"kyte-doolittle": kyte_doolittle_dict,
+                            "huang_nau": huang_nau_dict,
+                            "charges": charge_dict,
+                            "mol_weights": mol_weight_dict,
+                            "stacking_scores": stacking_dict,
+                            "chain_lengths": chain_length_dict,
+                            "phosphate_groups": phosphate_groups,
+                            "alkyl_groups": alkyl_groups,
+                            "alkyl_branches": alkyl_branches,
+                            "longest_chain": longest_chain,
+                            "carbon_count": carbon_count,
+                            "nitrogen_count": nitrogen_count,
+                            "oxygen_count": oxygen_count,
+                            "sulfur_count": sulfur_count,
+                            "nitrogen_ring_count": nitrogen_ring_count,
+                            "aromatic_ring_count": aromatic_ring_count}
+
+encoded_list_min = [-4.5, 0.1, -1.8882, 1.007825, 0.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+encoded_list_max = [4.5, 39.0, 1.0, 187.016022, 1.0, 4, 1, 4, 1, 8, 9, 3, 4, 1, 1, 1]
+fitting_data = [encoded_list_min, encoded_list_max]
+
+scaler = StandardScaler()
+scaler.fit(fitting_data)
+
 def encode_aa(amino_acid):
     '''
     Simple function that returns a tuple of encoded values representing an amino acid's chemical characteristics
@@ -112,48 +142,53 @@ def encode_aa(amino_acid):
                           plus B=pSer, J=pThr, O=pTyr
 
     Returns:
-        encoded_tuple (tuple):
+        encoded_list (list): a list of values, according to the following indices:
+                                0:  Kyte-Doolittle hydrophobicity score
+                                1:  Huang-Nau conformational flexibility scale
+                                2:  Charge
+                                3:  Molecular weight
+                                4:  Stacking score
+                                5:  Chain length
+                                6:  Phosphate group count
+                                7:  Alkyl carbon count (CH, CH2, CH3)
+                                8:  Alkyl branch count
+                                9:  Longest chain length
+                                10: Carbon count
+                                11: Nitrogen count
+                                12: Oxygen count
+                                13: Sulfur count
+                                14: Nitrogen-containing ring count
+                                15: Aromatic ring count
     '''
 
-    kyte_doolittle_value = kyte_doolittle_dict.get(amino_acid)
-    huang_nau_value = huang_nau_dict.get(amino_acid)
-    charge_value = charge_dict.get(amino_acid)
-    mol_weight_value = mol_weight_dict.get(amino_acid)
-    stacking_value = stacking_dict.get(amino_acid)
-    chain_length_value = chain_length_dict.get(amino_acid)
-    phosphate_group_count = phosphate_groups.get(amino_acid)
-    alkyl_group_count = alkyl_groups.get(amino_acid)
-    alkyl_branch_count = alkyl_branches.get(amino_acid)
-    longest_chain_value = longest_chain.get(amino_acid)
-    carbon_count_value = carbon_count.get(amino_acid)
-    nitrogen_count_value = nitrogen_count.get(amino_acid)
-    oxygen_count_value = oxygen_count.get(amino_acid)
-    sulfur_count_value = sulfur_count.get(amino_acid)
-    nitrogen_rings_value = nitrogen_ring_count.get(amino_acid)
-    aromatic_rings_value = aromatic_ring_count.get(amino_acid)
+    encoded_list = []
+    for lookup_dict in chemical_characteristics.values():
+        value = lookup_dict.get(amino_acid)
+        encoded_list.append(value)
 
-    encoded_tuple = (kyte_doolittle_value, huang_nau_value, charge_value, mol_weight_value, stacking_value,
-                     chain_length_value, phosphate_group_count, alkyl_group_count, alkyl_branch_count,
-                     longest_chain_value, carbon_count_value, nitrogen_count_value, oxygen_count_value,
-                     sulfur_count_value, nitrogen_rings_value, aromatic_rings_value)
+    return encoded_list
 
-    return encoded_tuple
-
-def encode_seq(sequence):
+def encode_seq(sequence, scaling = True):
     '''
     General function for returning a list of encoded tuples representing amino acids in the inputted sequence
 
     Args:
         sequence (str): the amino acid sequence as a string of single-letter codes
+        scaling (bool): whether to use StandardScaler
 
     Returns:
-        encoded_list (list): list of tuples of encoded values for each amino acid in the sequence; equal in length to
-                             the inputted sequence string
+        encoded_seq (np.ndarray):  2D array of encoded values for each amino acid in the sequence; equal in length to
+                                   the inputted sequence string
     '''
 
-    encoded_list = []
+    encoded_seq = []
     for amino_acid in sequence:
-        encoded_tuple = encode_aa(amino_acid = amino_acid)
-        encoded_list.append(encoded_tuple)
+        encoded_list = encode_aa(amino_acid = amino_acid)
+        encoded_seq.append(encoded_list)
 
-    return encoded_list
+    if scaling:
+        scaled_encoded_seq = scaler.transform(encoded_seq)
+        return scaled_encoded_seq
+    else:
+        encoded_seq = np.array(encoded_seq)
+        return encoded_seq
