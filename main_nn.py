@@ -1,4 +1,4 @@
-# This workflow processes SPOT images and uses them to build a convolutional neural network to predict FFATs in novel sequences
+# This workflow processes SPOT images and uses them to build a neural network to predict FFATs in novel sequences
 
 # Import standard packages
 import numpy as np
@@ -8,154 +8,133 @@ import os
 # Import functions for SPOT image analysis and data standardization
 from Matrix_Generator.standardize_and_concatenate import main_workflow as standardized_concatenate
 
+# Import the sequence encoder
+from general_utils.aa_encoder import encode_seq
+
 # Import functions for training the convolutional neural network
 import tensorflow as tf
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Conv1D, Conv2D, MaxPooling2D, MaxPooling1D, Flatten, Dense, Dropout
+from sklearn.preprocessing import StandardScaler
 
-# Define dictionaries for amino acid side chain characteristics
-charge_dict = {'A': 0.0, 'C': 0.0, 'D': -1.0, 'E': -1.0, 'F': 0.0, 'G': 0.0, 'H': 0.0, 'I': 0.0,
-               'K': 1.0, 'L': 0.0, 'M': 0.0, 'N': 0.0, 'P': 0.0, 'Q': 0.0, 'R': 1.0, 'S': 0.0,
-               'T': 0.0, 'V': 0.0, 'W': 0.0, 'Y': 0.0, 'B': -2.0, 'J': -2.0, 'O': -2.0}
-
-mol_weight_dict = {'A': 71.08, 'C': 103.14, 'D': 115.09, 'E': 129.12, 'F': 147.18, 'G': 57.05, 'H': 137.14,
-                   'I': 113.16, 'K': 128.17, 'L': 113.16, 'M': 131.20, 'N': 114.11, 'P': 97.12, 'Q': 128.13,
-                   'R': 156.19, 'S': 87.08, 'T': 101.11, 'V': 99.13, 'W': 186.22, 'Y': 163.18, 'B': 181.04,
-                   'J': 195.07, 'O': 257.14}
-
-hydrophobicity_dict = {'A': 0.62, 'C': 0.29, 'D': -0.9, 'E': -0.74, 'F': 1.19, 'G': 0.48, 'H': -0.4,
-                       'I': 1.38, 'K': -1.5, 'L': 1.06, 'M': 0.64, 'N': -0.78, 'P': 0.12, 'Q': -0.85,
-                       'R': -2.53, 'S': -0.18, 'T': -0.05, 'V': 1.08, 'W': 0.81, 'Y': 0.26, 'B': -0.8,
-                       'J': -0.7, 'O': -1.3}
-
-aromaticity_dict = {'A': 0.0, 'C': 0.0, 'D': 0.0, 'E': 0.0, 'F': 1.0, 'G': 0.0, 'H': 0.25, 'I': 0.0,
-                    'K': 0.0, 'L': 0.0, 'M': 0.0, 'N': 0.0, 'P': 0.0, 'Q': 0.0, 'R': 0.0, 'S': 0.0,
-                    'T': 0.0, 'V': 0.0, 'W': 0.5, 'Y': 0.75, 'B': 0.0, 'J': 0.0, 'O': 0.0}
-
-def encode_data(data_df, seq_col = "BJO_Sequence", aa_alphabet = "ACDEFGHIKLMNPQRSTVWYBJO", test_size = 0.2,
-                only_use_characteristics = False):
+def infer_data(peptide_sequences):
     '''
-    Function to encode data for convolutional neural network training and testing
+    Function to infer chemical characteristics of residues in peptide sequences and construct a dataframe of them
+
+    Args:
+        peptide_sequences (list): the list of peptide sequences to infer data about
+
+    Returns:
+        peptide_data (pd.DataFrame): a dataframe containing characteristics as tuples of length equal to sequence length
+    '''
+
+    encoded_peptide_dict = {}
+    for sequence in peptide_sequences:
+        encoded_sequence = encode_seq(sequence)
+        encoded_peptide_dict[sequence] = encoded_sequence
+
+    for key, value in encoded_peptide_dict:
+        print(key, ":", value)
+
+    return encoded_peptide_dict
+
+def encode_data(data_df, seq_col = "BJO_Sequence", pass_col = "One_Passes", pass_str = "Yes", test_size = 0.2, empirical_scaling = True, return_feature_info = False):
+    '''
+    Function to encode data for neural network training and testing
 
     Args:
         data_df (pd.DataFrame):          a dataframe that must contain peptide sequences and Yes/No categorical calls
         seq_col (str):                   the column name for where sequences are stored
-        call_col (str):                  the column name for where calls are stored (Yes/No categories)
-        aa_alphabet (str):               a string with the alphabet of amino acids to use, which may also include extra letters
-        only_use_characteristics (bool): whether to only use amino acid characteristics and exclude the amino acid letters themselves
+        pass_col (str):                  the column name for where pass/fail calls are stored
+        pass_str (str):                  the string representing a positive call; e.g. "Yes" or "Pass"
+        test_size (float):               the proportion of the data to include in the test split
+        empirical_scaling (bool):        whether to apply StandardScaler based on empirical training data ranges,
+                                         rather than theoretical allowed ranges
 
     Returns:
         X_train, X_test, y_train, y_test: train/test split data
+        feature_info (tuple):             information about the encoded features (sequence length, number of features)
     '''
 
-    # Check length of sequences
+    # Check input data for required elements
     if data_df[seq_col].str.len().min() != data_df[seq_col].str.len().max():
+        # Raise an error if unequal sequence lengths are found
         raise ValueError(f"encode_data found variable sequence lengths in data_df[{seq_col}] ranging from {data_df[seq_col].str.len().min()} to {data_df[seq_col].str.len().max()}, but equal lengths were expected.")
 
-    # Convert the peptide sequences to arrays of letters, charges, mol_weights, and hydrophobicities
-    peptide_sequences = data_df[seq_col].values
-    sequence_length = len(peptide_sequences[0])
+    # Encode the sequences
+    sequences = data_df[seq_col].values.tolist()
+    encoded_sequences = []
+    for seq in sequences:
+        theoretical_scaling = not empirical_scaling
+        encoded_seq = encode_seq(seq, scaling = theoretical_scaling)
+        encoded_sequences.append(encoded_seq)
+    encoded_sequences = np.array(encoded_sequences)
 
-    # Create arrays to store the encoded data
-    charges = np.zeros((len(peptide_sequences), sequence_length), dtype=int)
-    mol_weights = np.zeros((len(peptide_sequences), sequence_length), dtype=int)
-    hydrophobicities = np.zeros((len(peptide_sequences), sequence_length), dtype=int)
-    aromaticities = np.zeros((len(peptide_sequences), sequence_length), dtype=int)
-    if not only_use_characteristics:
-        encoded_sequences = np.zeros((len(peptide_sequences), sequence_length), dtype=int)
+    if empirical_scaling:
+        scaler = StandardScaler()
 
-    # Fill the arrays with the encoded data
-    for i, seq in enumerate(peptide_sequences):
-        charges[i] = [charge_dict[aa] for aa in seq]
-        mol_weights[i] = [mol_weight_dict[aa] for aa in seq]
-        hydrophobicities[i] = [hydrophobicity_dict[aa]*100 for aa in seq]
-        aromaticities[i] = [aromaticity_dict[aa]*100 for aa in seq]
-        if not only_use_characteristics:
-            encoded_sequences[i] = [aa_alphabet.index(aa) for aa in seq]
+        '''Reshape the array of encoded sequence from (num_samples, sequence_length, chemical_features) 
+        to (num_samples * sequence_length, chemical_features), to preserve chemical features regardless of position'''
+        reshaped_encoded_sequences = encoded_sequences.reshape(-1, encoded_sequences.shape[-1])
+        reshaped_scaled_array = scaler.fit_transform(reshaped_encoded_sequences)
 
-    # One-hot encode the letter sequences
-    if not only_use_characteristics:
-        one_hot_sequences = tf.keras.utils.to_categorical(encoded_sequences, num_classes=len(aa_alphabet))
+        # Restore the original shape
+        encoded_sequences = reshaped_scaled_array.reshape(encoded_sequences.shape)
 
-    # Reshape the arrays to match the dimensions of one_hot_sequences
-    charges = np.expand_dims(charges, axis=2)
-    mol_weights = np.expand_dims(mol_weights, axis=2)
-    hydrophobicities = np.expand_dims(hydrophobicities, axis=2)
-    aromaticities = np.expand_dims(aromaticities, axis=2)
+    # Get the positive/negative call mappings for encoding calls in binary integers
+    mapping = {}
+    unique_call_values = data_df[pass_col].unique().tolist()
+    for unique_call in unique_call_values:
+        if unique_call == pass_str:
+            mapping[unique_call] = 1
+        else:
+            mapping[unique_call] = 0
 
-    # Combine the one-hot encoded sequences with the chemical information
-    if only_use_characteristics:
-        input_data = np.concatenate((charges, mol_weights, hydrophobicities, aromaticities), axis=2)
-    else:
-        input_data = np.concatenate((one_hot_sequences, charges, mol_weights, hydrophobicities, aromaticities), axis=2)
-
-    # Get the call categories ("Yes" is 1)
-    mapping = {"Yes": 1, "": 0}
-    mapped_calls = data_df['One_Passes'].map(mapping).fillna(0)
+    # Map the positive/negative calls
+    mapped_calls = data_df[pass_col].map(mapping).fillna(0)
 
     # Split the data into training and testing sets
-    X_train, X_test, y_train, y_test = train_test_split(input_data, mapped_calls, test_size=test_size, random_state=42)
-    X_train, X_test, y_train, y_test = X_train.astype(int), X_test.astype(int), y_train.astype(int), y_test.astype(int)
+    X_train, X_test, y_train, y_test = train_test_split(encoded_sequences, mapped_calls, test_size = test_size, random_state = 42)
     train_test_data = (X_train, X_test, y_train, y_test)
 
-    print(X_train)
-    print(y_train)
-
-    if only_use_characteristics:
-        num_features = 4
+    # Get info about number of features and length of sequences
+    if return_feature_info:
+        sequence_length = encoded_sequences[0].shape[0]
+        chemical_features = encoded_sequences[0].shape[1]
+        input_shape = (sequence_length, chemical_features)
+        total_features = sequence_length * chemical_features
+        feature_info = (input_shape, total_features)
+        return train_test_data, feature_info
     else:
-        num_features = len(aa_alphabet) + 4
+        return train_test_data
 
-    feature_info = (sequence_length, num_features)
-
-    return train_test_data, feature_info
-
-def train_cnn(data_df, seq_col = "BJO_Sequence", aa_alphabet = "ACDEFGHIKLMNPQRSTVWYBJO", test_size = 0.2,
-              only_use_characteristics = False, save_path = None):
+def train_bidirectional_rnn(train_test_data, verbose = True):
     '''
-    Function to train the convolutional neural network
+    Function to train a bidirectional recurrent neural network (RNN) based on encoded peptides
 
     Args:
-        data_df (pd.DataFrame):          a dataframe that must contain peptide sequences and Yes/No categorical calls
-        seq_col (str):                   the column name for where sequences are stored
-        call_col (str):                  the column name for where calls are stored (Yes/No categories)
-        aa_alphabet (str):               a string with the alphabet of amino acids to use, which may also include extra letters
-        only_use_characteristics (bool): whether to only use amino acid characteristics and exclude the amino acid letters themselves
-
-    Returns:
-        model (tensorflow.keras.models.Sequential): the trained neural network model
+        train_test_data (tuple): a tuple of (X_train, X_test, y_train, y_test), where:
+                                    X_train, X_test: arrays of shape (num_samples, sequence_length, chemical_features)
+                                    y_train, y_test: 1D arrays of shape (num_samples,)
+        verbose (bool):          whether to display debugging information
     '''
 
-    # Encode and split the data
-    train_test_data, feature_info = encode_data(data_df = data_df, seq_col = seq_col, aa_alphabet = aa_alphabet,
-                                                test_size = test_size, only_use_characteristics = only_use_characteristics)
+    # Unpack the train_test_data tuple
     X_train, X_test, y_train, y_test = train_test_data
-    print(f"X_train shape: {X_train.shape} | X_train dtype: {X_train.dtype}")
-    sequence_length, num_features = feature_info
+    datapoint_shape = X_train.shape[1:]
+    print(f"Training the bidirectional RNN using {X_train.shape[0]} datapoints of shape {datapoint_shape}...") if verbose else None
 
-    # Define the CNN model
-    model = Sequential()
-    model.add(Conv1D(32, 5, activation='relu', input_shape=(sequence_length, num_features)))
-    model.add(MaxPooling1D(pool_size=1))
-    model.add(Conv1D(64, 5, activation='relu'))
-    model.add(MaxPooling1D(pool_size=1))
-    model.add(Flatten())
-    model.add(Dense(64, activation='relu'))
-    model.add(Dropout(0.3))
-    model.add(Dense(1, activation='sigmoid'))
+    # Create the bidirectional RNN model
+    model = tf.keras.Sequential([
+        tf.keras.layers.Bidirectional(tf.keras.layers.GRU(64, return_sequences = True), input_shape = datapoint_shape),
+        tf.keras.layers.Bidirectional(tf.keras.layers.GRU(64)),
+        tf.keras.layers.Dense(1, activation='sigmoid')
+    ])
 
-    # Compile and train the model
-    print("Training the convolutional neural network...")
-    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
-    model.fit(X_train, y_train, epochs=20, batch_size=32, validation_data=(X_test, y_test))
+    # Compile the model
+    model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
 
-    print("Evaluating the model based on testing data: ")
-    model.evaluate(X_test, y_test)
-
-    if save_path is not None:
-        model.save(os.path.join(save_path, "model.h5"))
+    # Train the model
+    model.fit(X_train, y_train, validation_data=(X_test, y_test), epochs=20)
 
     return model
 
@@ -180,8 +159,9 @@ def get_data(output_folder = None, add_peptide_seqs = True,
     
     return reindexed_data_df
     
-def main(output_folder = None, add_peptide_seqs = True, seq_col = "BJO_Sequence", aa_alphabet = "ACDEFGHIKLMNPQRSTVWYBJO",
-         peptide_seq_cols = ["Phos_Sequence", "No_Phos_Sequence", "BJO_Sequence"], use_cached_data = False, verbose = False):
+def main(output_folder = None, add_peptide_seqs = True, seq_col = "BJO_Sequence", pass_col = "One_Passes",
+         pass_str = "Yes", peptide_seq_cols = ["Phos_Sequence", "No_Phos_Sequence", "BJO_Sequence"],
+         test_size = 0.3, empirical_scaling = True, use_cached_data = False, verbose = False):
 
     if use_cached_data:
         cached_data_path = input("Enter path to cached dataframe:  ")
@@ -190,9 +170,18 @@ def main(output_folder = None, add_peptide_seqs = True, seq_col = "BJO_Sequence"
         reindexed_data_df = get_data(output_folder = output_folder, add_peptide_seqs = add_peptide_seqs,
                                      peptide_seq_cols = peptide_seq_cols, verbose = verbose)
 
-    # Train the convolutional neural network
-    model = train_cnn(data_df = reindexed_data_df, seq_col = seq_col, aa_alphabet = aa_alphabet,
-                      test_size = 0.3, only_use_characteristics = True)
+    train_test_data = encode_data(data_df = reindexed_data_df, seq_col = seq_col, pass_col = pass_col,
+                                  pass_str = pass_str, test_size = test_size, empirical_scaling = empirical_scaling)
+
+    # Train the neural network
+    model = train_bidirectional_rnn(train_test_data = train_test_data)
+    save_model = input("Would you like to save the model? (Y/N)  ")
+    if save_model == "Y":
+        if output_folder is None:
+            output_folder = input("Enter the folder to save the model to: ")
+        model_path = os.path.join(output_folder, "RNN_model_output.h5")
+        model.save(model_path)
+        print(f"Saved model to {model_path}")
 
 # If the script is executed directly, invoke the main workflow
 if __name__ == "__main__":
