@@ -77,21 +77,24 @@ phosphate_groups = {"B": 1, "J": 1, "O": 1,
 alkyl_groups = {"A": 1, "V": 3, "I": 4, "L": 4, "M": 3,
                 "F": 1, "Y": 1, "W": 1,
                 "S": 1, "T": 2, "N": 1, "Q": 2, "C": 1, "P": 3, "G": 0,
-                "R": 3, "H": 1, "K": 4, "D": 1, "E": 2}
-alkyl_branches = {"V": 1, "I": 1, "L": 1, "T": 1,
-                  "A": 0, "M": 0, "F": 0, "Y": 0, "W": 0, "S": 0, "N": 0, "Q": 0,
-                  "C": 0, "G": 0, "P": 0, "R": 0, "H": 0, "K": 0, "D": 0, "E": 0}
+                "R": 3, "H": 1, "K": 4, "D": 1, "E": 2,
+                "B": 1, "J": 2, "O": 1}
+alkyl_branches = {"V": 1, "I": 1, "L": 1, "T": 1, "J": 1,
+                  "A": 0, "M": 0, "F": 0, "Y": 0, "W": 0, "S": 0, "N": 0, "Q": 0, "C": 0, "G": 0,
+                  "P": 0, "R": 0, "H": 0, "K": 0, "D": 0, "E": 0, "B": 0, "O": 0}
 longest_chain = {"A": 1, "V": 2, "I": 3, "L": 3, "M": 4, "F": 5, "Y": 6, "W": 7,
-                 "S": 2, "T": 2, "N": 3, "C": 2, "G": 0, "P": 3,
+                 "S": 2, "T": 2, "N": 3, "Q": 4, "C": 2, "G": 0, "P": 3,
                  "R": 6, "H": 4, "K": 5, "D": 2, "E": 3,
                  "B": 4, "J": 4, "O": 8}
 
 carbon_count = {"R": 4, "H": 4, "K": 4, "D": 2, "E": 3,
                 "S": 1, "T": 2, "N": 2, "Q": 3, "C": 1, "G": 0, "P": 3,
-                "A": 1, "V": 3, "I": 4, "L": 4, "M": 3, "F": 7, "Y": 7, "W": 9}
+                "A": 1, "V": 3, "I": 4, "L": 4, "M": 3, "F": 7, "Y": 7, "W": 9,
+                "B": 1, "J": 2, "O": 7}
 nitrogen_count = {"R": 3, "H": 2, "K": 1, "D": 0, "E": 0,
                   "S": 0, "T": 0, "N": 1, "Q": 1, "C": 0, "G": 0, "P": 0,
-                  "A": 0, "V": 0, "I": 0, "L": 0, "M": 0, "F": 0, "Y": 0, "W": 1}
+                  "A": 0, "V": 0, "I": 0, "L": 0, "M": 0, "F": 0, "Y": 0, "W": 1,
+                  "B": 0, "J": 0, "O": 0}
 oxygen_count = {"D": 2, "E": 2, "S": 1, "T": 1, "N": 1, "Q": 1, "Y": 1,
                 "R": 0, "H": 0, "K": 0, "C": 0, "G": 0, "P": 0, "A": 0,
                 "V": 0, "I": 0, "L": 0, "F": 0, "W": 0, "M": 0,
@@ -101,7 +104,7 @@ sulfur_count = {"M": 1, "C": 1,
                 "G": 0, "P": 0, "A": 0, "V": 0, "I": 0, "L": 0, "F": 0, "Y": 0, "W": 0,
                 "B": 0, "J": 0, "O": 0}
 nitrogen_ring_count = {"H": 1, "W": 1,
-                       "R": 0, "K": 0, "D": 0, "E": 0, "S": 0, "T": 0, "N": 0, "Q": 0,
+                       "R": 0, "K": 0, "D": 0, "E": 0, "S": 0, "T": 0, "N": 0, "Q": 0, "M": 0,
                        "G": 0, "C": 0, "P": 0, "A": 0, "V": 0, "I": 0, "L": 0, "F": 0, "Y": 0,
                        "B": 0, "J": 0, "O": 0}
 aromatic_ring_count = {"F": 1, "Y": 1, "W": 1, "O": 1,
@@ -162,8 +165,10 @@ def encode_aa(amino_acid):
     '''
 
     encoded_list = []
-    for lookup_dict in chemical_characteristics.values():
+    for dict_name, lookup_dict in chemical_characteristics.items():
         value = lookup_dict.get(amino_acid)
+        if value is None:
+            raise ValueError(f"encode_aa error: could not find {amino_acid} in {dict_name}")
         encoded_list.append(value)
 
     return encoded_list
