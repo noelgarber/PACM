@@ -126,7 +126,9 @@ def train_bidirectional_rnn(train_test_data, verbose = True):
     # Create the bidirectional RNN model
     model = tf.keras.Sequential([
         tf.keras.layers.Bidirectional(tf.keras.layers.GRU(64, return_sequences = True), input_shape = datapoint_shape),
+        tf.keras.layers.Dropout(0.5),
         tf.keras.layers.Bidirectional(tf.keras.layers.GRU(64)),
+        tf.keras.layers.Dropout(0.5),
         tf.keras.layers.Dense(1, activation='sigmoid')
     ])
 
@@ -134,7 +136,7 @@ def train_bidirectional_rnn(train_test_data, verbose = True):
     model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
 
     # Train the model
-    model.fit(X_train, y_train, validation_data=(X_test, y_test), epochs=20)
+    model.fit(X_train, y_train, validation_data=(X_test, y_test), epochs=50)
 
     return model
 
