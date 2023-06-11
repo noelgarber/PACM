@@ -129,20 +129,22 @@ chemical_characteristics = {"kyte-doolittle": kyte_doolittle_dict,
                             "nitrogen_ring_count": nitrogen_ring_count,
                             "aromatic_ring_count": aromatic_ring_count}
 
-encoded_list_min = [-4.5, 0.1, -1.8882, 1.007825, 0.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-encoded_list_max = [4.5, 39.0, 1.0, 187.016022, 1.0, 4, 1, 4, 1, 8, 9, 3, 4, 1, 1, 1]
-fitting_data = [encoded_list_min, encoded_list_max]
+# Scale the lookup dicts; this serves a similar function to StandardScaler
 
-scaler = StandardScaler()
-scaler.fit(fitting_data)
+scaled_chemical_characteristics = {}
+for characteristic, lookup_dict in chemical_characteristics.items():
+    max_abs_value = max(abs(value) for value in lookup_dict.values())
+    scaled_lookup_dict = {amino_acid: value / max_abs_value for amino_acid, value in lookup_dict.items()}
+    scaled_chemical_characteristics[characteristic] = scaled_lookup_dict
 
-def encode_aa(amino_acid):
+def encode_aa(amino_acid, use_scaled_values = True):
     '''
     Simple function that returns a tuple of encoded values representing an amino acid's chemical characteristics
 
     Args:
-        amino_acid (str): single-letter code representing the amino acid to be encoded; accepts standard 20 amino acids
-                          plus B=pSer, J=pThr, O=pTyr
+        amino_acid (str):         single-letter code representing the amino acid to be encoded; accepts standard 20 amino acids
+                                  plus B=pSer, J=pThr, O=pTyr
+        use_scaled_values (bool): whether to use scaled or original values
 
     Returns:
         encoded_list (list): a list of values, according to the following indices:
@@ -165,10 +167,16 @@ def encode_aa(amino_acid):
     '''
 
     encoded_list = []
-    for dict_name, lookup_dict in chemical_characteristics.items():
+    for dict_name in chemical_characteristics.keys():
+        if use_scaled_values:
+            lookup_dict = scaled_chemical_characteristics.get(dict_name)
+        else:
+            lookup_dict = chemical_characteristics.get(dict_name)
+
         value = lookup_dict.get(amino_acid)
         if value is None:
             raise ValueError(f"encode_aa error: could not find {amino_acid} in {dict_name}")
+
         encoded_list.append(value)
 
     return encoded_list
@@ -179,7 +187,7 @@ def encode_seq(sequence, scaling = True):
 
     Args:
         sequence (str): the amino acid sequence as a string of single-letter codes
-        scaling (bool): whether to use StandardScaler
+        scaling (bool): whether to perform scaling to ensure that all parameters have similar value ranges
 
     Returns:
         encoded_seq (np.ndarray):  2D array of encoded values for each amino acid in the sequence; equal in length to
@@ -188,12 +196,9 @@ def encode_seq(sequence, scaling = True):
 
     encoded_seq = []
     for amino_acid in sequence:
-        encoded_list = encode_aa(amino_acid = amino_acid)
+        encoded_list = encode_aa(amino_acid = amino_acid, use_scaled_values = scaling)
         encoded_seq.append(encoded_list)
 
-    if scaling:
-        scaled_encoded_seq = scaler.transform(encoded_seq)
-        return scaled_encoded_seq
-    else:
-        encoded_seq = np.array(encoded_seq)
-        return encoded_seq
+    encoded_seq = np.array(encoded_seq)
+
+    return encoded_seq
