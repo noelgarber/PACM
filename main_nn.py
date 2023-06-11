@@ -37,7 +37,7 @@ def infer_data(peptide_sequences):
 
     return encoded_peptide_dict
 
-def encode_data(data_df, seq_col = "BJO_Sequence", pass_col = "One_Passes", pass_str = "Yes", test_size = 0.2, empirical_scaling = True, return_feature_info = False):
+def encode_data(data_df, seq_col = "BJO_Sequence", pass_col = "One_Passes", pass_str = "Yes", test_size = 0.2, scaling = True, return_feature_info = False):
     '''
     Function to encode data for neural network training and testing
 
@@ -47,8 +47,7 @@ def encode_data(data_df, seq_col = "BJO_Sequence", pass_col = "One_Passes", pass
         pass_col (str):                  the column name for where pass/fail calls are stored
         pass_str (str):                  the string representing a positive call; e.g. "Yes" or "Pass"
         test_size (float):               the proportion of the data to include in the test split
-        empirical_scaling (bool):        whether to apply StandardScaler based on empirical training data ranges,
-                                         rather than theoretical allowed ranges
+        scaling (bool):                  whether to use scaling of features
 
     Returns:
         X_train, X_test, y_train, y_test: train/test split data
@@ -64,21 +63,9 @@ def encode_data(data_df, seq_col = "BJO_Sequence", pass_col = "One_Passes", pass
     sequences = data_df[seq_col].values.tolist()
     encoded_sequences = []
     for seq in sequences:
-        theoretical_scaling = not empirical_scaling
-        encoded_seq = encode_seq(seq, scaling = theoretical_scaling)
+        encoded_seq = encode_seq(seq, scaling = scaling)
         encoded_sequences.append(encoded_seq)
     encoded_sequences = np.array(encoded_sequences)
-
-    if empirical_scaling:
-        scaler = StandardScaler()
-
-        '''Reshape the array of encoded sequence from (num_samples, sequence_length, chemical_features) 
-        to (num_samples * sequence_length, chemical_features), to preserve chemical features regardless of position'''
-        reshaped_encoded_sequences = encoded_sequences.reshape(-1, encoded_sequences.shape[-1])
-        reshaped_scaled_array = scaler.fit_transform(reshaped_encoded_sequences)
-
-        # Restore the original shape
-        encoded_sequences = reshaped_scaled_array.reshape(encoded_sequences.shape)
 
     # Get the positive/negative call mappings for encoding calls in binary integers
     mapping = {}
@@ -107,9 +94,9 @@ def encode_data(data_df, seq_col = "BJO_Sequence", pass_col = "One_Passes", pass
     else:
         return train_test_data
 
-def train_bidirectional_rnn(train_test_data, verbose = True):
+def train_neural_network(train_test_data, verbose=True):
     '''
-    Function to train a bidirectional recurrent neural network (RNN) based on encoded peptides
+    Function to train a dense neural network based on encoded peptides
 
     Args:
         train_test_data (tuple): a tuple of (X_train, X_test, y_train, y_test), where:
@@ -121,14 +108,19 @@ def train_bidirectional_rnn(train_test_data, verbose = True):
     # Unpack the train_test_data tuple
     X_train, X_test, y_train, y_test = train_test_data
     datapoint_shape = X_train.shape[1:]
-    print(f"Training the bidirectional RNN using {X_train.shape[0]} datapoints of shape {datapoint_shape}...") if verbose else None
+    flat_shape = (datapoint_shape[0] * datapoint_shape[1],)  # Flatten the datapoints
 
-    # Create the bidirectional RNN model
+    print(f"Training the dense network using {X_train.shape[0]} datapoints of shape {flat_shape}...") if verbose else None
+
+    # Create the dense network model
     model = tf.keras.Sequential([
-        tf.keras.layers.Bidirectional(tf.keras.layers.GRU(64, return_sequences = True), input_shape = datapoint_shape),
-        tf.keras.layers.Dropout(0.5),
-        tf.keras.layers.Bidirectional(tf.keras.layers.GRU(64)),
-        tf.keras.layers.Dropout(0.5),
+        tf.keras.layers.Flatten(input_shape=datapoint_shape),  # Flatten the input datapoints
+        tf.keras.layers.Dense(256, activation='swish'),
+        tf.keras.layers.ActivityRegularization(l1=0.05, l2=0.005),
+        tf.keras.layers.Dropout(0.3),
+        tf.keras.layers.Dense(64, activation='swish'),
+        tf.keras.layers.ActivityRegularization(l1=0.05, l2=0.005),
+        tf.keras.layers.Dropout(0.3),
         tf.keras.layers.Dense(1, activation='sigmoid')
     ])
 
@@ -136,7 +128,7 @@ def train_bidirectional_rnn(train_test_data, verbose = True):
     model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
 
     # Train the model
-    model.fit(X_train, y_train, validation_data=(X_test, y_test), epochs=50)
+    model.fit(X_train, y_train, validation_data=(X_test, y_test), epochs=10, verbose=verbose)
 
     return model
 
@@ -163,7 +155,7 @@ def get_data(output_folder = None, add_peptide_seqs = True,
     
 def main(output_folder = None, add_peptide_seqs = True, seq_col = "BJO_Sequence", pass_col = "One_Passes",
          pass_str = "Yes", peptide_seq_cols = ["Phos_Sequence", "No_Phos_Sequence", "BJO_Sequence"],
-         test_size = 0.3, empirical_scaling = True, use_cached_data = False, verbose = False):
+         test_size = 0.3, scaling = True, use_cached_data = False, verbose = False):
 
     if use_cached_data:
         cached_data_path = input("Enter path to cached dataframe:  ")
@@ -173,10 +165,10 @@ def main(output_folder = None, add_peptide_seqs = True, seq_col = "BJO_Sequence"
                                      peptide_seq_cols = peptide_seq_cols, verbose = verbose)
 
     train_test_data = encode_data(data_df = reindexed_data_df, seq_col = seq_col, pass_col = pass_col,
-                                  pass_str = pass_str, test_size = test_size, empirical_scaling = empirical_scaling)
+                                  pass_str = pass_str, test_size = test_size, scaling = scaling)
 
     # Train the neural network
-    model = train_bidirectional_rnn(train_test_data = train_test_data)
+    model = train_neural_network(train_test_data = train_test_data)
     save_model = input("Would you like to save the model? (Y/N)  ")
     if save_model == "Y":
         if output_folder is None:
