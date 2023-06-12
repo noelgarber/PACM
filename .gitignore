@@ -6,6 +6,7 @@
 /Archive*
 /Matrix_Generator/image_prep_output*
 /Matrix_Generator/Preserved_Data*
+/Motif_Predictor/dictionary_of_weighted_matrices*
 
 #Ignore pycache
 __pycache__
