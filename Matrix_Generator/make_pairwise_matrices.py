@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import os
 import pickle
-from itertools import product
 from general_utils.general_utils import input_number
 
 # Declare the sorted list of amino acids
@@ -378,12 +377,9 @@ def add_matrix_weights(matrices_dict, position_weights):
     if isinstance(position_weights, dict):
         position_weights = list(position_weights.values())
 
-    for key, df in matrices_dict.items():
-        output_df = df.copy()
-        for i, weight in enumerate(position_weights):
-            position = "#" + str(i+1)
-            output_df[position] = output_df[position] * weight
-        weighted_matrices_dict[key] = output_df
+    for key, matrix in matrices_dict.items():
+        weighted_matrix = matrix.values * np.tile(position_weights, (matrix.shape[0], 1))
+        weighted_matrices_dict[key] = pd.DataFrame(weighted_matrix, index=matrix.index, columns=matrix.columns)
 
     return weighted_matrices_dict
 
@@ -532,10 +528,7 @@ def apply_motif_scores(dens_df, weighted_matrices, slim_length, seq_col = "No_Ph
     output_df = dens_df.copy()
 
     sequences = output_df[seq_col].values.tolist()
-    scores = []
-    for seq in sequences:
-        total_score = score_aa_seq(sequence = seq, weighted_matrices = weighted_matrices, slim_length = slim_length)
-        scores.append(total_score)
+    scores = [score_aa_seq(seq, weighted_matrices, slim_length) for seq in sequences]
 
     output_df[score_col] = scores
 
@@ -859,28 +852,23 @@ def make_pairwise_matrices(dens_df, percentiles_dict = None, slim_length = None,
         print("\tIterating over permutations of weights...") if verbose else None
         best_fdr, best_for, best_score_threshold = 9999, 9999, 0
         best_weights, best_weighted_matrices_dict, predictive_value_df = None, None, None
-        for weights_array in expanded_weights_array:
+        for i, weights_array in enumerate(expanded_weights_array):
             weights_list = weights_array.tolist()
-            print("\t\tCurrent weights:", weights_list) if verbose else None
+            #print(f"\t\tCurrent weights: {weights_list}")
 
             # Add the matrix weights
-            #print("\t\t---\n", f"\t\tApplying matrix weights ({weights_list}) to the matrices...") if verbose else None
+            # This took the majority of time, at about 0.24 seconds, before it was fixed:
             current_weighted_matrices_dict = add_matrix_weights(matrices_dict, weights_list)
 
             # Apply motif scoring back onto the original sequences
-            #print("\t\tBack-calculating SLiM scores on source data...")
-            # TODO There is an error here! Extremely high motif scores are being generated, and it doesn't really make sense. What's going on?
+            # This takes about 0.09 seconds:
             current_dens_df = apply_motif_scores(dens_df = dens_df, weighted_matrices = current_weighted_matrices_dict,
                                                  slim_length = slim_length, seq_col = sequence_col, score_col = "SLiM_Score",
                                                  add_residue_cols = False)
 
             # Obtain the optimal FDR, FOR, and corresponding SLiM Score
-            #print("\t\tComputing optimal balance of FDR and FOR where values are similar, and matching SLiM score...")
-            #print("---\nCurrent dataframe:")
-            #print(current_dens_df)
-            #print(matrices_dict.get("#1=Acidic"))
-            #print("---")
             score_range_series = np.linspace(current_dens_df["SLiM_Score"].min(), current_dens_df["SLiM_Score"].max(), num=100)
+            # This takess about 0.05 seconds:
             current_best_score, current_best_fdr, current_best_for = apply_threshold(current_dens_df, score_range_series = score_range_series,
                                                                                      sig_col = significance_col, score_col = "SLiM_Score",
                                                                                      return_optimized_fdr = True)
@@ -894,9 +882,7 @@ def make_pairwise_matrices(dens_df, percentiles_dict = None, slim_length = None,
                     best_weights = weights_list
                     best_weighted_matrices_dict = current_weighted_matrices_dict
                     best_dens_df = current_dens_df
-                    print(f"\t\t\tNew record set for FDR={best_fdr} and FOR={best_for}                 <------------------ ***") if verbose else None
-                else:
-                    print(f"\t\t\tCurrent valid inferior FDR={current_best_fdr} and FOR={current_best_for}")
+                    print(f"\t\t\tNew record set during round #{i} for FDR={best_fdr} and FOR={best_for}, using weights {weights_list}") if verbose else None
 
         if best_weights is not None:
             print("\t---\n", f"\tOptimal weights for pairwise matrices: {best_weights}")
