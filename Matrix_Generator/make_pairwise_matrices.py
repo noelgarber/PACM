@@ -7,6 +7,7 @@ import pandas as pd
 import os
 import pickle
 import multiprocessing
+from tqdm import tqdm, trange
 from general_utils.general_utils import input_number
 
 # Declare the sorted list of amino acids
@@ -829,19 +830,17 @@ def make_unweighted_matrices(dens_df, percentiles_dict = None, slim_length = Non
 
 def process_weights_chunk(chunk, matrices_dict, slim_length, sequence_col, significance_col, output_df):
     '''
-    Helper function for parallelization of find_optimal_weights.
-    Processes a chunk of weight arrays.
+    Lower helper function for parallelization of position weight optimization; processes chunks of data
 
-    Args:
-        chunk (list):               a chunk of weight arrays
-        matrices_dict (dict):       the dictionary of position-type rules --> unweighted matrices
-        slim_length (int):          the length of the motif being studied
-        sequence_col (str):         the column in the dataframe that contains peptide sequences
-        significance_col (str):     the column in the dataframe that contains significance calls (Yes/No)
-        output_df (pd.DataFrame):   the dataframe containing densitometry values for the peptides being analyzed
+    chunk (pd.DataFrame):       the chunk of data currently being processed
+    matrices_dict (dict):       the dictionary of position-type rules --> unweighted matrices
+    slim_length (int):          the length of the motif being studied
+    sequence_col (str):         the name of the column in chunk where sequences are stored
+    significance_col (str):     the name of the column in chunk where significance information is found
+    output_df (pd.DataFrame):   the destination dataframe
 
     Returns:
-        result_list (list):         a list of results for each weight array in the chunk
+        results_list (list):    the list of results sets for a chunk of weights arrays
     '''
 
     result_list = []
@@ -849,86 +848,78 @@ def process_weights_chunk(chunk, matrices_dict, slim_length, sequence_col, signi
     for weights_array in chunk:
         weights_list = weights_array.tolist()
 
-        # Apply the weights to the matrices
         current_weighted_matrices_dict = add_matrix_weights(matrices_dict, weights_list)
 
-        # Apply motif scoring back onto the original sequences, as an in-place operation
-        apply_motif_scores(output_df, current_weighted_matrices_dict, slim_length = slim_length, seq_col = sequence_col,
-                           in_place = True)
+        apply_motif_scores(output_df, current_weighted_matrices_dict, slim_length=slim_length, seq_col=sequence_col,
+                           in_place=True)
 
-        # Obtain the optimal FDR, FOR, and corresponding SLiM Score
-        score_range_series = np.linspace(output_df["SLiM_Score"].min(), output_df["SLiM_Score"].max(), num = 100)
+        score_range_series = np.linspace(output_df["SLiM_Score"].min(), output_df["SLiM_Score"].max(), num=100)
         current_best_score, current_best_fdr, current_best_for = apply_threshold(output_df,
-                                                                                 score_range_series = score_range_series,
-                                                                                 sig_col = significance_col,
-                                                                                 score_col = "SLiM_Score",
-                                                                                 return_optimized_fdr = True)
+                                                                                 score_range_series=score_range_series,
+                                                                                 sig_col=significance_col,
+                                                                                 score_col="SLiM_Score",
+                                                                                 return_optimized_fdr=True)
 
         result_list.append((current_best_fdr, current_best_for, current_best_score, weights_list,
                             current_weighted_matrices_dict, output_df))
 
-    return result_list
 
+    return result_list
 
 def process_weights(weights_array_chunks, matrices_dict, slim_length, sequence_col, significance_col, output_df):
     '''
-    Helper function for parallelization of find_optimal_weights.
-    Processes weight arrays in chunks using multiprocessing.
+    Higher helper function for parallelization of position weight optimization; processes weights by chunking
 
-    Args:
-        weights_array_chunks (list): a list of chunks, where each chunk contains weight arrays
-        matrices_dict (dict):       the dictionary of position-type rules --> unweighted matrices
-        slim_length (int):          the length of the motif being studied
-        sequence_col (str):         the column in the dataframe that contains peptide sequences
-        significance_col (str):     the column in the dataframe that contains significance calls (Yes/No)
-        output_df (pd.DataFrame):   the dataframe containing densitometry values for the peptides being analyzed
+    weights_array_chunks (list): list of chunks as pd.DataFrame for feeding to process_weights_chunk
+    matrices_dict (dict):       the dictionary of position-type rules --> unweighted matrices
+    slim_length (int):          the length of the motif being studied
+    sequence_col (str):         the name of the column in chunk where sequences are stored
+    significance_col (str):     the name of the column in chunk where significance information is found
+    output_df (pd.DataFrame):   the destination dataframe
 
     Returns:
-        results_list (list):        a list of results for each weight array in the chunks
+        results_list (list):    the list of results sets for all the weights arrays
     '''
 
     pool = multiprocessing.Pool()
-    results = pool.starmap(process_weights_chunk,
-                           [(chunk, matrices_dict, slim_length, sequence_col, significance_col, output_df) for chunk in
-                            weights_array_chunks])
+    results = []
+
+    with trange(len(weights_array_chunks), desc="Processing weights") as pbar:
+        for chunk_results in pool.imap_unordered(process_weights_chunk,
+                                         [(chunk, matrices_dict, slim_length, sequence_col, significance_col, output_df)
+                                          for chunk in weights_array_chunks]):
+            results.extend(chunk_results)
+            pbar.update()
+
     pool.close()
     pool.join()
 
-    # Combine the results from different chunks into a single list
-    results_list = [result for chunk_results in results for result in chunk_results]
-
-    return results_list
-
+    return results
 
 def find_optimal_weights(dens_df, slim_length, position_copies, matrices_dict, sequence_col, significance_col,
-                         matrix_output_folder, output_folder, chunk_size = 1000):
+                         matrix_output_folder, output_folder, chunk_size = 100):
     '''
-    Function for iteratively determining the best combination of position weights to apply to weighted matrices
+    Parent function for finding optimal position weights to generate optimally weighted matrices
 
-    Args:
-        dens_df (pd.DataFrame):     the dataframe containing densitometry values for the peptides being analyzed
-        slim_length (int):          the length of the motif being studied
-        position_copies (dict):     dict of permuted_weight_index --> copy_number, where the sum of all the dict values
-                                    is equal to slim_length; only required when optimize_weights is set to True
-        matrices_dict (dict):       the dictionary of position-type rules --> unweighted matrices
-        sequence_col (str):         the column in the dataframe that contains peptide sequences
-        significance_col (str):     the column in the dataframe that contains significance calls (Yes/No)
-        matrix_output_folder (str): the path to the folder where final matrices should be saved
-        output_folder (str):        the path to the folder where the output data should be saved
-        chunk_size (int):           the number of weight arrays to process in each chunk
+    dens_df (pd.DataFrame):     input dataframe containing all of the sequences, values, and significances
+    slim_length (int):          length of the motif being studied
+    position_copies (dict):     integer-keyed dictionary where values must be integers whose sum is equal to slim_length
+    matrices_dict (dict):       dictionary of position-type rules --> unweighted matrices
+    sequence_col (str):         the name of the column in chunk where sequences are stored
+    significance_col (str):     the name of the column in chunk where significance information is found
+    matrix_output_folder (str): the path for saving weighted matrices
+    output_folder (str):        the path for saving the scored data
+    chunk_size (int):           the number of position weights to process at a time
 
     Returns:
-        results_tuple (tuple):      a tuple of (best_fdr, best_for, best_score_threshold, best_weights,
-                                    best_weighted_matrices_dict, best_dens_df)
+        results_tuple (tuple):  (best_fdr, best_for, best_score_threshold, best_weights, best_weighted_matrices_dict, best_dens_df)
     '''
 
     expanded_weights_array = permute_weights(slim_length, position_copies)
 
-    # Divide the weight arrays into chunks
     weights_array_chunks = [expanded_weights_array[i:i + chunk_size] for i in
                             range(0, len(expanded_weights_array), chunk_size)]
 
-    # Add each set of matrix weights and determine the optimal set
     best_fdr, best_for, best_score_threshold = 9999, 9999, 0
     best_weights, best_weighted_matrices_dict, best_dens_df = None, None, None
     output_df = dens_df.copy()
@@ -944,7 +935,6 @@ def find_optimal_weights(dens_df, slim_length, position_copies, matrices_dict, s
 
     print("\t---\n", f"\tOptimal weights of {best_weights} gave FDR = {best_fdr} and FOR = {best_for} at a SLiM score threshold > {best_score_threshold}")
 
-    # Save the weighted matrices and scored data
     save_weighted_matrices(weighted_matrices_dict = best_weighted_matrices_dict, matrix_directory = matrix_output_folder,
                            save_pickled_dict = True)
     save_scored_data(scored_df = best_dens_df, selected_threshold = best_score_threshold,
