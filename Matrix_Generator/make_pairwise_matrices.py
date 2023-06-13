@@ -771,10 +771,9 @@ def permute_weights(slim_length, position_copies):
 
     return expanded_weights_array
 
-def make_pairwise_matrices(dens_df, percentiles_dict = None, slim_length = None, minimum_members = None,
-                           thres_tuple = None, points_tuple = None, always_allowed_dict = None, position_weights = None,
-                           output_folder = None, sequence_col = "BJO_Sequence", significance_col = "One_Passes",
-                           make_calls = True, optimize_weights = False, position_copies = None, verbose = True):
+def make_unweighted_matrices(dens_df, percentiles_dict = None, slim_length = None, minimum_members = None,
+                             thres_tuple = None, points_tuple = None, always_allowed_dict = None,
+                             sequence_col = "BJO_Sequence", verbose = True):
     '''
     Main function for making pairwise position-weighted matrices
 
@@ -788,18 +787,11 @@ def make_pairwise_matrices(dens_df, percentiles_dict = None, slim_length = None,
         points_tuple (tuple): 		tuple of (points_extreme, points_high, points_mid, points_low)
                                     representing points associated with peptides above thresholds
         always_allowed_dict (dict): a dictionary of position number (int) --> always-permitted residues at that position (list)
-        position_weights (dict): 	a dictionary of position number (int) --> weight value (int or float)
-        output_folder (str): 		the path to the folder where the output data should be saved
         sequence_col (str): 		the column in the dataframe that contains unphosphorylated peptide sequences
-        significance_col (str): 	the column in the dataframe that contains significance calls (Yes/No)
-        make_calls (bool): 			whether to prompt the user to set a threshold for making positive/negative calls
-        optimize_weights (bool): 	whether to optimize position weights along the motif sequence to maximize FDR & FOR
-        position_copies (dict): 	dict of permuted_weight_index --> copy_number, where the sum of all the dict values
-                                    is equal to slim_length; only required when optimize_weights is set to True
         verbose (bool): 			whether to display user feedback and debugging information
 
     Returns:
-        dens_df (pd.DataFrame): 			the modified dataframe with scores applied
+        matrices_dict (dict): 		a dictionary of position-type rule keys --> unweighted matrix for that rule
         predictive_value_df (pd.DataFrame): a dataframe containing sensitivity/specificity/PPV/NPV values for different
                                             score thresholds
     '''
@@ -832,99 +824,177 @@ def make_pairwise_matrices(dens_df, percentiles_dict = None, slim_length = None,
     matrices_dict = collapse_phospho(matrices_dict, slim_length)
     matrices_dict = apply_always_allowed(matrices_dict, slim_length, always_allowed_dict)
 
+    return matrices_dict
+
+def find_optimal_weights(dens_df, slim_length, position_copies, matrices_dict, sequence_col, significance_col,
+                         matrix_output_folder, output_folder):
+    '''
+    Function for iteratively determining the best combination of position weights to apply to weighted matrices
+
+    Args:
+        dens_df (pd.DataFrame): 	the dataframe containing densitometry values for the peptides being analyzed
+        slim_length (int): 			the length of the motif being studied
+        position_copies (dict): 	dict of permuted_weight_index --> copy_number, where the sum of all the dict values
+                                    is equal to slim_length; only required when optimize_weights is set to True
+        matrices_dict (dict):       the dictionary of position-type rules --> unweighted matrices
+        sequence_col (str):         the column in the dataframe that contains peptide sequences
+        significance_col (str): 	the column in the dataframe that contains significance calls (Yes/No)
+        matrix_output_folder (str): the path to the folder where final matrices should be saved
+        output_folder (str): 		the path to the folder where the output data should be saved
+
+    Returns:
+        results_tuple (tuple):      a tuple of (best_fdr, best_for, best_score_threshold, best_weights,
+                                    best_weighted_matrices_dict, best_dens_df)
+    '''
+
+    # Get permutations of possible weights at each position, as an array of shape (permutations_count, slim_length)
+    expanded_weights_array = permute_weights(slim_length, position_copies)
+
+    # Add each set of matrix weights and determine the optimal set
+    best_fdr, best_for, best_score_threshold = 9999, 9999, 0
+    best_weights, best_weighted_matrices_dict, best_dens_df = None, None, None
+    output_df = dens_df.copy()
+
+    for i, weights_array in enumerate(expanded_weights_array):
+        weights_list = weights_array.tolist()
+
+        # Apply the weights to the matrices
+        current_weighted_matrices_dict = add_matrix_weights(matrices_dict, weights_list)
+
+        # Apply motif scoring back onto the original sequences, as an in-place operation
+        apply_motif_scores(output_df, current_weighted_matrices_dict, slim_length = slim_length, seq_col = sequence_col, in_place = True)
+
+        # Obtain the optimal FDR, FOR, and corresponding SLiM Score
+        score_range_series = np.linspace(output_df["SLiM_Score"].min(), output_df["SLiM_Score"].max(), num=100)
+        current_best_score, current_best_fdr, current_best_for = apply_threshold(output_df,
+                                                                                 score_range_series=score_range_series,
+                                                                                 sig_col=significance_col,
+                                                                                 score_col="SLiM_Score",
+                                                                                 return_optimized_fdr=True)
+
+        # If the current best FDR is better than the previous record, update the best FDR value and assign best_weights
+        if not np.isnan(current_best_fdr) and not np.isnan(current_best_for):
+            if current_best_fdr < best_fdr:
+                best_fdr, best_for, best_score_threshold = current_best_fdr, current_best_for, current_best_score
+                best_weights, best_weighted_matrices_dict = weights_list, current_weighted_matrices_dict
+                best_dens_df = output_df.copy()
+                print(f"\t\t\tNew record set during round #{i} for FDR={best_fdr} and FOR={best_for}, using weights {weights_list}")
+
+    print("\t---\n", f"\tOptimal weights of {best_weights} gave FDR={best_fdr} and FOR={best_for} at a SLiM score threshold > {best_score_threshold}")
+
+    # Save the weighted matrices and scored data
+    save_weighted_matrices(weighted_matrices_dict = best_weighted_matrices_dict, matrix_directory = matrix_output_folder,
+                           save_pickled_dict = True)
+    save_scored_data(scored_df = best_dens_df, selected_threshold = best_score_threshold, output_directory = output_folder)
+    print(f"Saved weighted matrices and scored data to {output_folder}")
+
+    results_tuple = (best_fdr, best_for, best_score_threshold, best_weights, best_weighted_matrices_dict, best_dens_df)
+
+    return results_tuple
+
+def apply_predefined_weights(dens_df, position_weights, matrices_dict, slim_length, sequence_col, significance_col,
+                             matrix_output_folder, output_folder, make_calls):
+    '''
+    Function that applies and assesses a given set of weights against matrices and source data
+
+    Args:
+        dens_df (pd.DataFrame): 	the dataframe containing densitometry values for the peptides being analyzed
+        position_weights (list):    list of position weights to use; length must be equal to slim_score
+        matrices_dict (dict):       the dictionary of position-type rules --> unweighted matrices
+        slim_length (int): 			the length of the motif being studied
+        sequence_col (str):         the column in the dataframe that contains peptide sequences
+        significance_col (str): 	the column in the dataframe that contains significance calls (Yes/No)
+        matrix_output_folder (str): the path to the folder where final matrices should be saved
+        output_folder (str): 		the path to the folder where the output data should be saved
+        make_calls (bool): 			whether to prompt the user to set a threshold for making positive/negative calls
+
+    Returns:
+        dens_df (pd.DataFrame): 			the modified dataframe with scores applied
+        predictive_value_df (pd.DataFrame): a dataframe containing sensitivity/specificity/PPV/NPV values for different
+                                            score thresholds
+    '''
+
+    # Get weights for positions along the motif sequence
+    if position_weights is None:
+        position_weights = get_position_weights(slim_length)
+
+    # Apply the weights to the matrices
+    weighted_matrices_dict = add_matrix_weights(matrices_dict, position_weights)
+
+    # Apply the motif scoring algorithm back onto the peptide sequences
+    dens_df = apply_motif_scores(dens_df, weighted_matrices_dict, slim_length = slim_length, seq_col = sequence_col,
+                                 score_col = "SLiM_Score", add_residue_cols = True, in_place = False)
+
+    # Use thresholding to declare true/false positives/negatives in the peptide sequences
+    if make_calls:
+        dens_df, selected_threshold, predictive_value_df = apply_threshold(dens_df, sig_col = significance_col,
+                                                                           score_col = "SLiM_Score")
+    else:
+        selected_threshold = None
+        predictive_value_df = apply_threshold(dens_df, sig_col = significance_col, score_col = "SLiM_Score",
+                                              return_pred_vals_only = True)
+
+    # Save the weighted matrices and scored data
+    save_weighted_matrices(weighted_matrices_dict = weighted_matrices_dict, matrix_directory = matrix_output_folder,
+                           save_pickled_dict = True)
+    save_scored_data(scored_df = dens_df, selected_threshold = selected_threshold, output_directory = output_folder)
+
+    return dens_df, predictive_value_df
+
+def make_pairwise_matrices(dens_df, percentiles_dict = None, slim_length = None, minimum_members = None,
+                           thres_tuple = None, points_tuple = None, always_allowed_dict = None, position_weights = None,
+                           output_folder = None, sequence_col = "BJO_Sequence", significance_col = "One_Passes",
+                           make_calls = True, optimize_weights = False, position_copies = None, verbose = True):
+    '''
+    Main function for making pairwise position-weighted matrices
+
+    Args:
+        dens_df (pd.DataFrame): 	the dataframe containing densitometry values for the peptides being analyzed
+        percentiles_dict (dict): 	dictionary of percentile --> mean signal value, for use in thesholding
+        slim_length (int): 			the length of the motif being studied
+        minimum_members (int): 		the minimum number ofo peptides that must belong to a chemically classified group
+                                    in order for them to be used in pairwise matrix-building
+        thres_tuple (tuple): 		tuple of (thres_extreme, thres_high, thres_mid) signal thres
+        points_tuple (tuple): 		tuple of (points_extreme, points_high, points_mid, points_low)
+                                    representing points associated with peptides above thresholds
+        always_allowed_dict (dict): a dictionary of position number (int) --> always-permitted residues at that position (list)
+        position_weights (list): 	a list of weight values (int or float)
+        output_folder (str): 		the path to the folder where the output data should be saved
+        sequence_col (str): 		the column in the dataframe that contains unphosphorylated peptide sequences
+        significance_col (str): 	the column in the dataframe that contains significance calls (Yes/No)
+        make_calls (bool): 			whether to prompt the user to set a threshold for making positive/negative calls
+        optimize_weights (bool): 	whether to optimize position weights along the motif sequence to maximize FDR & FOR
+        position_copies (dict): 	dict of permuted_weight_index --> copy_number, where the sum of all the dict values
+                                    is equal to slim_length; only required when optimize_weights is set to True
+        verbose (bool): 			whether to display user feedback and debugging information
+
+    Returns:
+        dens_df (pd.DataFrame): 			the modified dataframe with scores applied
+        predictive_value_df (pd.DataFrame): only returned if optimize_weights is set to False; it is a dataframe 
+                                            containing sensitivity/specificity/PPV/NPV values for different score thres
+    '''
+
     # Declare the output folder for saving pairwise weighted matrices
     if output_folder is None:
         output_folder = os.getcwd()
     matrix_output_folder = os.path.join(output_folder, "Pairwise_Matrices")
 
+    # Obtain the dictionary of matrices that have not yet been weighted
+    matrices_dict = make_unweighted_matrices(dens_df, percentiles_dict, slim_length, minimum_members,
+                                             thres_tuple, points_tuple, always_allowed_dict, sequence_col, verbose)
+
     # Apply weights to the generated matrices, or find optimal weights
     if optimize_weights:
-        print("Starting automatic position weight optimization...") if verbose else None
+        # Find the optimal weights that produce the lowest FDR/FOR pair
+        results_tuple = find_optimal_weights(dens_df, slim_length, position_copies, matrices_dict, sequence_col,
+                                             significance_col, matrix_output_folder, output_folder)
+        best_fdr, best_for, best_score_threshold, best_weights, best_weighted_matrices_dict, best_dens_df = results_tuple
 
-        # Get permutations of possible weights at each position, as an array of shape (permutations_count, slim_length)
-        print(f"\tComputing permutations of weights from 0 to 3 along {slim_length} positions...")
-        expanded_weights_array = permute_weights(slim_length, position_copies)
-
-        # Add each set of matrix weights and determine the optimal set
-        print("\tIterating over permutations of weights...") if verbose else None
-        best_fdr, best_for, best_score_threshold = 9999, 9999, 0
-        best_weights, best_weighted_matrices_dict, predictive_value_df, best_dens_df = None, None, None, None
-        output_df = dens_df.copy()
-        for i, weights_array in enumerate(expanded_weights_array):
-            weights_list = weights_array.tolist()
-            #print(f"\t\tCurrent weights: {weights_list}")
-
-            # Add the matrix weights
-            # This took the majority of time, at about 0.24 seconds, before it was fixed:
-            current_weighted_matrices_dict = add_matrix_weights(matrices_dict, weights_list)
-
-            # Apply motif scoring back onto the original sequences, as an in-place operation
-            apply_motif_scores(output_df, current_weighted_matrices_dict, slim_length = slim_length, seq_col = sequence_col, in_place = True)
-
-            # Obtain the optimal FDR, FOR, and corresponding SLiM Score
-            score_range_series = np.linspace(output_df["SLiM_Score"].min(), output_df["SLiM_Score"].max(), num=100)
-            current_best_score, current_best_fdr, current_best_for = apply_threshold(output_df, score_range_series = score_range_series,
-                                                                                     sig_col = significance_col, score_col = "SLiM_Score",
-                                                                                     return_optimized_fdr = True)
-
-            # If the current best FDR is better than the previous record, update the best FDR value and assign best_weights
-            if not np.isnan(current_best_fdr) and not np.isnan(current_best_for):
-                if current_best_fdr < best_fdr:
-                    best_fdr = current_best_fdr
-                    best_for = current_best_for
-                    best_score_threshold = current_best_score
-                    best_weights = weights_list
-                    best_weighted_matrices_dict = current_weighted_matrices_dict
-                    best_dens_df = output_df.copy()
-                    print(f"\t\t\tNew record set during round #{i} for FDR={best_fdr} and FOR={best_for}, using weights {weights_list}") if verbose else None
-
-        if best_weights is not None:
-            print("\t---\n", f"\tOptimal weights for pairwise matrices: {best_weights}")
-            print(f"\t\t--> corresponding optimal FDR={best_fdr} and FOR={best_for} at a SLiM score threshold > {best_score_threshold}")
-        else:
-            raise Exception("make_pairwise_matrices error: failed to define best_weights")
-
-        # Save the weighted matrices and scored data
-        print("\tSaving weighted matrices and scored data...")
-        save_weighted_matrices(weighted_matrices_dict = best_weighted_matrices_dict, matrix_directory = matrix_output_folder,
-                               save_pickled_dict = True)
-        save_scored_data(scored_df = dens_df, selected_threshold = best_score_threshold, output_directory = output_folder)
-
-        return best_dens_df, predictive_value_df
+        return best_dens_df, best_weights
 
     else:
-        print("Starting manual application of position weights...") if verbose else None
-
-        # Get weights for positions along the motif sequence
-        if position_weights is None:
-            position_weights = get_position_weights(slim_length = slim_length)
-
-        # Apply the weights to the matrices
-        print(f"\tApplying matrix weights of {position_weights}...") if verbose else None
-        weighted_matrices_dict = add_matrix_weights(matrices_dict = matrices_dict,
-                                                    position_weights = position_weights)
-
-        # Apply the motif scoring algorithm back onto the peptide sequences
-        print(f"\tBack-calculating SLiM scores on source data...")
-        dens_df = apply_motif_scores(dens_df = dens_df, weighted_matrices = weighted_matrices_dict,
-                                     slim_length = slim_length, seq_col = sequence_col, score_col = "SLiM_Score",
-                                     add_residue_cols = True)
-
-        # Use thresholding to declare true/false positives/negatives in the peptide sequences
-        if make_calls:
-            print(f"\tApplying thresholding and making positive/negative calls on source data...")
-            dens_df, selected_threshold, predictive_value_df = apply_threshold(dens_df, sig_col = significance_col,
-                                                                               score_col = "SLiM_Score")
-        else:
-            print(f"\tGetting predictive value dataframe for different score thresholds...")
-            selected_threshold = None
-            predictive_value_df = apply_threshold(dens_df, sig_col = significance_col, score_col = "SLiM_Score",
-                                                  return_pred_vals_only = True)
-
-        # Save the weighted matrices and scored data
-        print("Saving weighted matrices and scored data...")
-        save_weighted_matrices(weighted_matrices_dict = weighted_matrices_dict, matrix_directory = matrix_output_folder,
-                               save_pickled_dict = True)
-        save_scored_data(scored_df = dens_df, selected_threshold = selected_threshold, output_directory = output_folder)
-
+        # Apply predefined weights and calculate predictive values
+        dens_df, predictive_value_df = apply_predefined_weights(dens_df, position_weights, matrices_dict, slim_length,
+                                                                sequence_col, significance_col, matrix_output_folder,
+                                                                output_folder, make_calls)
         return dens_df, predictive_value_df
