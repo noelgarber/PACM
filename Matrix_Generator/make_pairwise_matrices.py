@@ -425,10 +425,8 @@ def aa_chemical_class(amino_acid, dict_of_aa_characs = aa_charac_dict):
     Returns:
         charac_result (str): the chemical class that the amino acid belongs to
     '''
-    charac_result = None
-    for charac, mem_list in dict_of_aa_characs.items():
-        if amino_acid in mem_list:
-            charac_result = charac
+
+    charac_result = next((charac for charac, mem_list in dict_of_aa_characs.items() if amino_acid in mem_list), None)
 
     return charac_result
 
@@ -510,30 +508,34 @@ def score_aa_seq(sequence, weighted_matrices, slim_length, dens_df = None, df_ro
 
     return output_total_score
 
-def apply_motif_scores(dens_df, weighted_matrices, slim_length, seq_col = "No_Phos_Sequence", score_col = "SLiM_Score", add_residue_cols = False):
+def apply_motif_scores(dens_df, weighted_matrices, slim_length = None, seq_col = "No_Phos_Sequence", score_col = "SLiM_Score", add_residue_cols = False, in_place = True):
     '''
     Function to apply the score_aa_seq() function to all sequences in the source dataframe
 
     Args:
         dens_df (pd.DataFrame):   dataframe containing the motif sequences to back-apply motif scores onto, that were originally used to generate the scoring system
         weighted_matrices (dict): dictionary of type-position rule --> position-weighted matrix
-        slim_length (int): 		  the length of the motif being studied
+        slim_length (int): 		  the length of the motif being studied; only required if add_residue_cols is True
         seq_col (str): 			  the column in dens_df that contains the peptide sequence to score (unphosphorylated, if model phospho-residues were collapsed to non-phospho during building)
         score_col (str): 		  the column in dens_df that will contain the score values
         add_residue_cols (bool):  whether to add columns containing individual residue letters, for sorting, in a df
+        in_place (bool):          whether to apply operations in-place; cannot be True if add_residue_cols is True
 
     Returns:
         output_df (pd.DataFrame): dens_df with scores added
     '''
-    output_df = dens_df.copy()
 
-    sequences = output_df[seq_col].values.tolist()
+    sequences = dens_df[seq_col].values.tolist()
     scores = [score_aa_seq(seq, weighted_matrices, slim_length) for seq in sequences]
 
-    output_df[score_col] = scores
-
-    # Organize residue cols
-    if add_residue_cols:
+    if in_place:
+        dens_df[score_col] = scores
+    elif not add_residue_cols:
+        output_df = dens_df.copy()
+        output_df[score_col] = scores
+        return output_df
+    else:
+        output_df = dens_df.copy()
         cols_to_move = []
         for i in np.arange(1, slim_length + 1):
             current_col = "Residue_" + str(i)
@@ -549,7 +551,7 @@ def apply_motif_scores(dens_df, weighted_matrices, slim_length, seq_col = "No_Ph
 
         output_df = output_df[columns]
 
-    return output_df
+        return output_df
 
 def diagnostic_value(score_threshold, dataframe, significance_col = "One_Passes", score_col = "SLiM_Score",
                      truth_value = "Yes", return_dict = True, return_fdr_for = False):
@@ -818,11 +820,8 @@ def make_pairwise_matrices(dens_df, percentiles_dict = None, slim_length = None,
 
     # Make the dictionary of weighted matrices based on amino acid composition across positions
     print("Generating matrices...")
-    matrices_dict = make_weighted_matrices(slim_length = slim_length, aa_charac_dict = aa_charac_dict,
-                                           dens_df = dens_df, minimum_members = minimum_members, list_aa = amino_acids_phos,
-                                           thres_tuple = thres_tuple, points_tuple = points_tuple,
-                                           sequence_col = sequence_col,
-                                           signal_col_suffix = "Background-Adjusted_Standardized_Signal")
+    matrices_dict = make_weighted_matrices(slim_length, aa_charac_dict, dens_df, minimum_members, amino_acids_phos,
+                                           thres_tuple, points_tuple, sequence_col, "Background-Adjusted_Standardized_Signal")
 
     # Get list of always-allowed residues (overrides algorithm for those positions)
     print("Collapsing phospho-residues to their non-phospho counterparts and applying always-allowed residues...") if verbose else None
@@ -830,13 +829,11 @@ def make_pairwise_matrices(dens_df, percentiles_dict = None, slim_length = None,
         always_allowed_dict = get_always_allowed(slim_length = slim_length)
 
     # Collapse phospho-residues into non-phospho counterparts and apply always-allowed residues
-    matrices_dict = collapse_phospho(matrices_dict = matrices_dict, slim_length = slim_length)
-    matrices_dict = apply_always_allowed(matrices_dict = matrices_dict, slim_length = slim_length,
-                                         always_allowed_dict = always_allowed_dict)
+    matrices_dict = collapse_phospho(matrices_dict, slim_length)
+    matrices_dict = apply_always_allowed(matrices_dict, slim_length, always_allowed_dict)
 
     # Declare the output folder for saving pairwise weighted matrices
     if output_folder is None:
-        output_folder = os.getcwd()
         output_folder = os.getcwd()
     matrix_output_folder = os.path.join(output_folder, "Pairwise_Matrices")
 
@@ -846,12 +843,13 @@ def make_pairwise_matrices(dens_df, percentiles_dict = None, slim_length = None,
 
         # Get permutations of possible weights at each position, as an array of shape (permutations_count, slim_length)
         print(f"\tComputing permutations of weights from 0 to 3 along {slim_length} positions...")
-        expanded_weights_array = permute_weights(slim_length = slim_length, position_copies = position_copies)
+        expanded_weights_array = permute_weights(slim_length, position_copies)
 
         # Add each set of matrix weights and determine the optimal set
         print("\tIterating over permutations of weights...") if verbose else None
         best_fdr, best_for, best_score_threshold = 9999, 9999, 0
-        best_weights, best_weighted_matrices_dict, predictive_value_df = None, None, None
+        best_weights, best_weighted_matrices_dict, predictive_value_df, best_dens_df = None, None, None, None
+        output_df = dens_df.copy()
         for i, weights_array in enumerate(expanded_weights_array):
             weights_list = weights_array.tolist()
             #print(f"\t\tCurrent weights: {weights_list}")
@@ -860,16 +858,12 @@ def make_pairwise_matrices(dens_df, percentiles_dict = None, slim_length = None,
             # This took the majority of time, at about 0.24 seconds, before it was fixed:
             current_weighted_matrices_dict = add_matrix_weights(matrices_dict, weights_list)
 
-            # Apply motif scoring back onto the original sequences
-            # This takes about 0.09 seconds:
-            current_dens_df = apply_motif_scores(dens_df = dens_df, weighted_matrices = current_weighted_matrices_dict,
-                                                 slim_length = slim_length, seq_col = sequence_col, score_col = "SLiM_Score",
-                                                 add_residue_cols = False)
+            # Apply motif scoring back onto the original sequences, as an in-place operation
+            apply_motif_scores(output_df, current_weighted_matrices_dict, slim_length = slim_length, seq_col = sequence_col, in_place = True)
 
             # Obtain the optimal FDR, FOR, and corresponding SLiM Score
-            score_range_series = np.linspace(current_dens_df["SLiM_Score"].min(), current_dens_df["SLiM_Score"].max(), num=100)
-            # This takess about 0.05 seconds:
-            current_best_score, current_best_fdr, current_best_for = apply_threshold(current_dens_df, score_range_series = score_range_series,
+            score_range_series = np.linspace(output_df["SLiM_Score"].min(), output_df["SLiM_Score"].max(), num=100)
+            current_best_score, current_best_fdr, current_best_for = apply_threshold(output_df, score_range_series = score_range_series,
                                                                                      sig_col = significance_col, score_col = "SLiM_Score",
                                                                                      return_optimized_fdr = True)
 
@@ -881,7 +875,7 @@ def make_pairwise_matrices(dens_df, percentiles_dict = None, slim_length = None,
                     best_score_threshold = current_best_score
                     best_weights = weights_list
                     best_weighted_matrices_dict = current_weighted_matrices_dict
-                    best_dens_df = current_dens_df
+                    best_dens_df = output_df.copy()
                     print(f"\t\t\tNew record set during round #{i} for FDR={best_fdr} and FOR={best_for}, using weights {weights_list}") if verbose else None
 
         if best_weights is not None:
