@@ -164,3 +164,54 @@ def save_dict(dictionary, output_path, filename):
     with open(file_path, 'w') as file:
         for key, value in dictionary.items():
             file.write(f'{key}: {value}\n')
+
+def save_dataframe(dataframe, output_directory, output_filename):
+    '''
+    Simple function to save a dataframe to a destination folder under a specific name
+
+    Args:
+        dataframe (pd.DataFrame): 	the dataframe to save
+        output_directory (str): 	the output directory
+        output_filename (str):     the name of the file
+
+    Returns:
+        output_file_path (str): 	the output path where the file was saved
+    '''
+
+    if ".csv" not in output_filename:
+        output_filename = output_filename + ".csv"
+
+    if not os.path.exists(output_directory):
+        os.makedirs(output_directory)
+
+    output_file_path = os.path.join(output_directory, output_filename)
+    dataframe.to_csv(output_file_path)
+
+    return output_file_path
+
+def save_weighted_matrices(weighted_matrices_dict, matrix_directory = None, save_pickled_dict = True):
+    '''
+    Simple function to save the weighted matrices to disk
+
+    Args:
+        weighted_matrices_dict (dict): the dictionary of type-position rule --> corresponding weighted matrix
+        matrix_directory (str): directory to save matrices into; defaults to a subfolder called Pairwise_Matrices
+    '''
+    if matrix_directory is None:
+        matrix_directory = os.path.join(os.getcwd(), "Pairwise_Matrices")
+
+    # If the matrix directory does not exist, make it
+    if not os.path.exists(matrix_directory):
+        os.makedirs(matrix_directory)
+
+    # Save matrices by key name as CSV files
+    for key, df in weighted_matrices_dict.items():
+        df.to_csv(os.path.join(matrix_directory, key + ".csv"))
+
+    if save_pickled_dict:
+        pickled_dict_path = os.path.join(matrix_directory, "weighted_matrices_dict.pkl")
+        with open(pickled_dict_path, "wb") as f:
+            pickle.dump(weighted_matrices_dict, f)
+        print(f"Saved {len(weighted_matrices_dict)} matrices and pickled weighted_matrices_dict to {matrix_directory}")
+    else:
+        print(f"Saved {len(weighted_matrices_dict)} matrices to {matrix_directory}")
