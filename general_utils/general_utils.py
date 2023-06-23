@@ -99,6 +99,37 @@ def list_inputter(item_prompt):
             no_more_items = True
     return output_list
 
+def get_delimited_list(prompt, enforced_list_length = None, delimiter = ",", dtype = float):
+    '''
+    Simple function to get a list as a delimited string and prompt the user if it is not correct
+
+    Args:
+        prompt (str):               the prompt to display to the user
+        enforced_list_length (int): if given, this list length is enforced by reprompting the user if incorrect length
+        delimiter (str):            the delimiter for the list, e.g. ","
+        dtype (type):               the dtype to enforce on the list
+
+    Returns:
+        delimited_list (list):      the delimited list
+    '''
+
+    valid_list_given = False
+    while not valid_list_given:
+        delimited_list_str = input(prompt)
+        delimited_list = delimited_list_str.split(delimiter)
+        try:
+            delimited_list = [dtype(x) for x in delimited_list]
+            if not enforced_list_length:
+                valid_list_given = True
+            elif len(delimited_list) = enforced_list_length:
+                valid_list_given = True
+            else:
+                print(f"Incorrect list length (expected {enforced_list_length}, got {len(delimited_list)}); please try again.")
+        except:
+            print(f"Error casting delimited list to dtype {dtype}; please try again.")
+
+    return delimited_list
+
 def mean_at_index(df, row_index, col_names):
     '''
     Simple function to find the mean of values in a dataframe row across a specified set of columns by name
