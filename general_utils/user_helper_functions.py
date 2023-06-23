@@ -104,3 +104,30 @@ def get_position_weights(slim_length):
         position_weights[position] = weight
 
     return position_weights
+
+def get_position_copies(slim_length):
+    # Helper function to get position copies dict for use in permute_weights()
+    cumulative_length = 0
+    current_index = 0
+    position_copies = {}
+    while cumulative_length < slim_length:
+        value = input_number(f"At position index {current_index}, how many copies?  ", "int")
+        position_copies[current_index] = value
+        cumulative_length += value
+        current_index += 1
+
+    return position_copies
+
+def get_comparator_baits():
+    '''
+    Function to prompt the user for the sets of baits to compare; allows pooling of baits for making specificity matrix
+
+    Returns:
+        comparator_set_1 (list): the first set of comparator baits
+        comparator_set_2 (list): the second set of comparator baits
+    '''
+
+    comparator_set_1 = list_inputter("For comparator bait set #1, input the baits one at a time:  ")
+    comparator_set_2 = list_inputter("For comparator bait set #2, input the baits one at a time:  ")
+
+    return comparator_set_1, comparator_set_2
