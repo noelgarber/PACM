@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
-from general_utils.general_utils import input_number, list_inputter, permute_weights, save_dict, get_log2fc_cols, least_different
+from general_utils.general_utils import permute_weights, least_different
 from general_utils.general_vars import amino_acids, amino_acids_phos
 from general_utils.user_helper_functions import get_comparator_baits
 from general_utils.matrix_utils import collapse_phospho
@@ -23,7 +23,7 @@ def bias_ratio(source_df, least_different_values, thresholds = (1,-1), passes_co
         pass_str (str):                      the string that indicates a pass in source_df[pass_col], e.g. "Yes"
 
     Returns:
-        ratio (float):             the ratio of entries above pos_thres to entries below neg_thres
+        ratio (float): the ratio of entries above pos_thres to entries below neg_thres
     '''
 
     positive_thres, negative_thres = thresholds
