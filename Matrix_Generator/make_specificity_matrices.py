@@ -299,7 +299,7 @@ def main(source_df, comparator_info = None, specificity_params = None):
         print(f"Optimal matrix weights, {best_weights}, gave an R2 value of {final_r2} for the equation y={final_coef}x+{final_intercept}")
 
     else:
-        # Use predefined weight, checked for correct dimensions and type
+        # Use predefined weights, checked for correct dimensions and type
         predefined_weights = specificity_params.get("predefined_weights")
         if isinstance(predefined_weights, list) or isinstance(predefined_weights, tuple):
             predefined_weights = np.array(predefined_weights)
