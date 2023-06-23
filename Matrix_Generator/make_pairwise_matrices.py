@@ -59,7 +59,7 @@ default_matrix_params = {"thresholds_points_dict": None,
                          "position_for_filtering": None,
                          "clear_filtering_column": False}
 
-def conditional_matrix(motif_length, source_dataframe, data_params = default_data_params, matrix_params = default_matrix_params):
+def conditional_matrix(motif_length, source_dataframe, data_params = None, matrix_params = None):
     '''
     Function for generating unadjusted conditional matrices from source peptide data,
     based on type-position rules (e.g. #1=Acidic)
@@ -87,6 +87,10 @@ def conditional_matrix(motif_length, source_dataframe, data_params = default_dat
     Returns:
         matrix_df (pd.DataFrame):		   standardized matrix for the given type-position rule
     '''
+
+    # Get default params if any of them are set to None, by getting the first truthy value with 'or'
+    data_params = data_params or default_data_params.copy()
+    matrix_params = matrix_params or default_matrix_params.copy()
 
     # Define the position for filtering, for the conditional matrix being generated
     position_for_filtering = matrix_params.get("position_for_filtering")
@@ -161,20 +165,25 @@ def conditional_matrix(motif_length, source_dataframe, data_params = default_dat
                        Define the function to generate type-position rule dicts of matrices
    ------------------------------------------------------------------------------------------------------------------'''
 
-def make_conditional_matrices(slim_length, source_df, aa_charac_dict, data_params = default_data_params, matrix_params = default_matrix_params):
+def make_conditional_matrices(slim_length, source_df, residue_charac_dict = None, data_params = None, matrix_params = None):
     '''
     Function for generating weighted matrices corresponding to each type/position rule (e.g. position #1 = Acidic)
 
     Args:
-        motif_length (int):                the length of the motif being assessed
-        source_dataframe (pd.DataFrame):   dataframe containing peptide-protein binding data
-        aa_charac_dict (dict): 	           the dictionary of amino acid characteristics and their constituent amino acids
-        data_params (dict):                same as data_params in conditional_matrix()
-        matrix_params (dict):              same as matrix_params in conditional_matrix()
+        slim_length (int):           the length of the motif being assessed
+        source_df (pd.DataFrame):    dataframe containing peptide-protein binding data
+        residue_charac_dict (dict):  the dictionary of amino acid characteristics and their constituent amino acids
+        data_params (dict):          same as data_params in conditional_matrix()
+        matrix_params (dict):        same as matrix_params in conditional_matrix()
 
     Returns:
         dictionary_of_matrices (dict): a dictionary of standardized matrices
     '''
+
+    # Get default params if any of them are set to None, by getting the first truthy value with 'or'
+    residue_charac_dict = residue_charac_dict or aa_charac_dict.copy()
+    data_params = data_params or default_data_params.copy()
+    matrix_params = matrix_params or default_matrix_params.copy()
 
     # Declare dict where keys are position-type rules (e.g. "#1=Acidic") and values are corresponding weighted matrices
     dictionary_of_matrices = {}
@@ -182,7 +191,7 @@ def make_conditional_matrices(slim_length, source_df, aa_charac_dict, data_param
     # Iterate over columns for the weighted matrix (position numbers)
     for filter_position in np.arange(1, slim_length + 1):
         # Iterate over dict of chemical characteristic --> list of member amino acids (e.g. "Acidic" --> ["D","E"]
-        for chemical_characteristic, member_list in aa_charac_dict.items():
+        for chemical_characteristic, member_list in residue_charac_dict.items():
             # Assign parameters for the current type-position rule
             current_matrix_params = matrix_params.copy()
             current_matrix_params["included_residues"] = member_list
@@ -323,8 +332,7 @@ def apply_motif_scores(input_df, weighted_matrices, slim_length = None, seq_col 
    ------------------------------------------------------------------------------------------------------------------'''
 
 def make_unweighted_matrices(input_df, percentiles_dict = None, slim_length = None, always_allowed_dict = None,
-                             aa_charac_dict = aa_charac_dict, data_params = default_data_params.copy(),
-                             matrix_params = default_matrix_params.copy(), verbose = True):
+                             aa_charac_dict = aa_charac_dict, data_params = None, matrix_params = None, verbose = True):
     '''
     Main function for making pairwise position-weighted matrices
 
@@ -358,6 +366,10 @@ def make_unweighted_matrices(input_df, percentiles_dict = None, slim_length = No
                                             score thresholds
     '''
     print("Starting the pairwise matrices generation process...") if verbose else None
+
+    # Get default params if any of them are set to None, by getting the first truthy value with 'or'
+    data_params = data_params or default_data_params.copy()
+    matrix_params = matrix_params or default_matrix_params.copy()
 
     # Define the length of the short linear motif (SLiM) being studied
     if slim_length is None:
@@ -579,8 +591,8 @@ default_general_params = {"percentiles_dict": None,
                           "optimize_weights": False,
                           "position_copies": None,
                           "aa_charac_dict": aa_charac_dict}
-def main(input_df, general_params = default_general_params, data_params = default_data_params,
-         matrix_params = default_matrix_params, verbose = True):
+
+def main(input_df, general_params = None, data_params = None, matrix_params = None, verbose = True):
     '''
     Main function for making pairwise position-weighted matrices
 
@@ -624,6 +636,10 @@ def main(input_df, general_params = default_general_params, data_params = defaul
         predictive_value_df (pd.DataFrame): only returned if optimize_weights is set to False; it is a dataframe 
                                             containing sensitivity/specificity/PPV/NPV values for different score thres
     '''
+
+    general_params = general_params or default_general_params.copy()
+    data_params = data_params or default_data_params.copy()
+    matrix_params = matrix_params or default_matrix_params.copy()
 
     # Declare the output folder for saving pairwise weighted matrices
     output_folder = general_params.get("output_folder")
