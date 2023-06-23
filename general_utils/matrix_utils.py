@@ -70,10 +70,15 @@ def collapse_phospho(matrix_df, in_place = True):
 
     output_df = matrix_df if in_place else matrix_df.copy()
 
-    output_df.loc["S"] = output_df.loc["S"] + output_df.loc["B"]
-    output_df.loc["T"] = output_df.loc["T"] + output_df.loc["J"]
-    output_df.loc["Y"] = output_df.loc["Y"] + output_df.loc["O"]
-    output_df.drop(labels=["B", "J", "O"], axis=0, inplace=True)
+    phospho_residues = ["B","J","O"]
+    counterparts = ["S","T","Y"]
+    drop_indices = []
+    for phospho_residue, counterpart in zip(phospho_residues, counterparts):
+        if output_df.index.__contains__(phospho_residue):
+            output_df.loc[counterpart] = output_df.loc[counterpart] + output_df.loc[phospho_residue]
+            drop_indices.append(phospho_residue)
+
+    output_df.drop(labels=drop_indices, axis=0, inplace=True)
 
     return output_df
 
