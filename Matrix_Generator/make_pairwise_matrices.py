@@ -580,7 +580,7 @@ def apply_predefined_weights(input_df, position_weights, matrices_dict, slim_len
     scored_data_filename = "pairwise_scored_data_thres" + str(selected_threshold) + ".csv"
     save_dataframe(output_df, output_folder, scored_data_filename)
 
-    return output_df, predictive_value_df
+    return output_df, weighted_matrices_dict, predictive_value_df
 
 default_general_params = {"percentiles_dict": None,
                           "slim_length": None,
@@ -660,21 +660,28 @@ def main(input_df, general_params = None, data_params = None, matrix_params = No
     sequence_col = data_params.get("seq_col")
     significance_col = data_params.get("bait_pass_col")
     score_col = data_params.get("dest_score_col")
+    output_statistics = {}
+
     if optimize_weights:
         # Find the optimal weights that produce the lowest FDR/FOR pair
         position_copies = general_params.get("position_copies")
         results_tuple = find_optimal_weights(input_df, slim_length, position_copies, matrices_dict, sequence_col,
                                              significance_col, score_col, matrix_output_folder, output_folder,
                                              chunk_size = 100, save_pickled_matrix_dict = True)
-        best_fdr, best_for, best_score_threshold, best_weights, best_weighted_matrices_dict, best_source_df = results_tuple
-
-        return best_source_df, best_weights
+        best_fdr, best_for, best_score_threshold, best_weights, weighted_matrices_dict, scored_df = results_tuple
+        position_weights = best_weights
+        output_statistics["FDR"] = best_fdr
+        output_statistics["FOR"] = best_for
+        output_statistics["cutoff_threshold"] = best_score_threshold
+        output_statistics["position_weights"] = best_weights
 
     else:
         # Apply predefined weights and calculate predictive values
         position_weights = general_params.get("position_weights")
         make_calls = general_params.get("make_calls")
-        output_df, predictive_value_df = apply_predefined_weights(input_df, position_weights, matrices_dict, slim_length,
-                                                                sequence_col, significance_col, score_col,
-                                                                matrix_output_folder, output_folder, make_calls)
-        return output_df, predictive_value_df
+        results = apply_predefined_weights(input_df, position_weights, matrices_dict, slim_length, sequence_col,
+                                           significance_col, score_col, matrix_output_folder, output_folder, make_calls)
+        scored_df, weighted_matrices_dict, predictive_value_df = results
+        output_statistics["predictive_value_df"] = predictive_value_df
+
+    return (scored_df, position_weights, weighted_matrices_dict, output_statistics)
