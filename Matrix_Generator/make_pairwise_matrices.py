@@ -49,7 +49,8 @@ default_data_params = {"bait": None,
                        "best_signal_col": "Max_Bait_Background-Adjusted_Mean",
                        "bait_pass_col": "One_Passes",
                        "pass_str": "Yes",
-                       "seq_col": "BJO_Sequence"}
+                       "seq_col": "BJO_Sequence",
+                       "dest_score_col": "SLiM_Score"}
 
 default_matrix_params = {"thresholds_points_dict": None,
                          "included_residues": amino_acids_phos,
@@ -556,10 +557,10 @@ def apply_predefined_weights(input_df, position_weights, matrices_dict, slim_len
     # Use thresholding to declare true/false positives/negatives in the peptide sequences
     if make_calls:
         output_df, selected_threshold, predictive_value_df = apply_threshold(output_df, sig_col = significance_col,
-                                                                             score_col = "SLiM_Score")
+                                                                             score_col = score_col)
     else:
         selected_threshold = None
-        predictive_value_df = apply_threshold(output_df, sig_col = significance_col, score_col = "SLiM_Score",
+        predictive_value_df = apply_threshold(output_df, sig_col = significance_col, score_col = score_col,
                                               return_pred_vals_only = True)
 
     # Save the weighted matrices and scored data
@@ -569,41 +570,51 @@ def apply_predefined_weights(input_df, position_weights, matrices_dict, slim_len
 
     return output_df, predictive_value_df
 
-def main(input_df, percentiles_dict = None, slim_length = None, always_allowed_dict = None, position_weights = None,
-         output_folder = None, make_calls = True, optimize_weights = False, position_copies = None,
-         score_col = "SLiM_Score", data_params = default_data_params, matrix_params = default_matrix_params,
-         verbose = True):
+default_general_params = {"percentiles_dict": None,
+                          "slim_length": None,
+                          "always_allowed_dict": None,
+                          "position_weights": None,
+                          "output_folder": None,
+                          "make_calls": True,
+                          "optimize_weights": False,
+                          "position_copies": None,
+                          "aa_charac_dict": aa_charac_dict}
+def main(input_df, general_params = default_general_params, data_params = default_data_params,
+         matrix_params = default_matrix_params, verbose = True):
     '''
     Main function for making pairwise position-weighted matrices
 
     Args:
         input_df (pd.DataFrame): 	the dataframe containing densitometry values for the peptides being analyzed
-        percentiles_dict (dict): 	dictionary of percentile --> mean signal value, for use in thesholding
-        slim_length (int): 			the length of the motif being studied
-        always_allowed_dict (dict): a dictionary of position number (int) --> always-permitted residues at that position (list)
-        position_weights (list): 	a list of weight values (int or float)
-        output_folder (str): 		the path to the folder where the output data should be saved
-        make_calls (bool): 			whether to prompt the user to set a threshold for making positive/negative calls
-        optimize_weights (bool): 	whether to optimize position weights along the motif sequence to maximize FDR & FOR
-        position_copies (dict): 	dict of permuted_weight_index --> copy_number, where the sum of all the dict values
-                                    is equal to slim_length; only required when optimize_weights is set to True
-        score_col (str):            the column in input_df where motif scores are stored
+        general_params (dict):      dictionary of general parameters:
+                                            --> percentiles_dict (dict): input data percentile --> mean signal value
+                                            --> slim_length (int): the length of the motif being studied
+                                            --> always_allowed_dict (dict): position --> always-permitted residues
+                                            --> position_weights (list): predefined weight values, if not optimizing
+                                            --> output_folder (str): path where the output data should be saved
+                                            --> make_calls (bool): whether to set thresholds and making +/- calls
+                                            --> optimize_weights (bool): whether to optimize weights to maximize FDR/FOR
+                                            --> position_copies (dict): permuted_weight_index --> copy_number;
+                                                sum of copy_number values must be equal to slim_length;
+                                                required only if optimize_weights is True
+                                            --> score_col (str): the column in input_df where motif scores go
+                                            --> aa_charac_dict (dict): dictionary of chemical_characteristic --> [AAs]
         data_params (dict):         dictionary of parameters describing the source_dataframe structure, used in matrix-building:
-                                             --> bait (str): the bait to use for matrix generation; defaults to best if left blank
-                                             --> bait_signal_col_marker (str): keyword that marks columns in source_dataframe that
+                                            --> bait (str): the bait to use for matrix generation; defaults to best if left blank
+                                            --> bait_signal_col_marker (str): keyword that marks columns in source_dataframe that
                                                  contain signal values; required only if bait is given
-                                             --> best_signal_col (str): column name with best signal values; used if bait is None
-                                             --> bait_pass_col (str): column name with pass/fail information
-                                             --> pass_str (str): the string representing a pass in bait_pass_col, e.g. "Yes"
-                                             --> seq_col (str): column name containing peptide sequences as strings
+                                            --> best_signal_col (str): column name with best signal values; used if bait is None
+                                            --> bait_pass_col (str): column name with pass/fail information
+                                            --> pass_str (str): the string representing a pass in bait_pass_col, e.g. "Yes"
+                                            --> seq_col (str): column name containing peptide sequences as strings
         matrix_params (dict):       dictionary of parameters that affect matrix-building behaviour, used in matrix-building:
-                                             --> thresholds_points_dict (dict): dictionary where threshold_value --> points_value
-                                             --> included_residues (list): the residues included for the current type-position rule
-                                             --> amino_acids (tuple): the alphabet of amino acids to use when constructing the matrix
-                                             --> min_members (int): the minimum number of peptides that must follow the current
-                                                 type-position rule for the matrix to be built
-                                             --> position_for_filtering (int): the position for the type-position rule being assessed
-                                             --> clear_filtering_column (bool): whether to set values in the filtering column to zero
+                                            --> thresholds_points_dict (dict): dictionary where threshold_value --> points_value
+                                            --> included_residues (list): the residues included for the current type-position rule
+                                            --> amino_acids (tuple): the alphabet of amino acids to use when constructing the matrix
+                                            --> min_members (int): the minimum number of peptides that must follow the current
+                                                type-position rule for the matrix to be built
+                                            --> position_for_filtering (int): the position for the type-position rule being assessed
+                                            --> clear_filtering_column (bool): whether to set values in the filtering column to zero
         verbose (bool): 			whether to display user feedback and debugging information
 
     Returns:
@@ -615,19 +626,27 @@ def main(input_df, percentiles_dict = None, slim_length = None, always_allowed_d
     '''
 
     # Declare the output folder for saving pairwise weighted matrices
+    output_folder = general_params.get("output_folder")
     if output_folder is None:
         output_folder = os.getcwd()
     matrix_output_folder = os.path.join(output_folder, "Pairwise_Matrices")
 
     # Obtain the dictionary of matrices that have not yet been weighted
+    percentiles_dict = general_params.get("percentiles_dict")
+    slim_length = general_params.get("slim_length")
+    always_allowed_dict = general_params.get("always_allowed_dict")
+    aa_charac_dict = general_params.get("aa_charac_dict")
     matrices_dict = make_unweighted_matrices(input_df, percentiles_dict, slim_length, always_allowed_dict,
                                              aa_charac_dict, data_params, matrix_params, verbose)
 
     # Apply weights to the generated matrices, or find optimal weights
+    optimize_weights = general_params.get("optimize_weights")
     sequence_col = data_params.get("seq_col")
     significance_col = data_params.get("bait_pass_col")
+    score_col = data_params.get("dest_score_col")
     if optimize_weights:
         # Find the optimal weights that produce the lowest FDR/FOR pair
+        position_copies = general_params.get("position_copies")
         results_tuple = find_optimal_weights(input_df, slim_length, position_copies, matrices_dict, sequence_col,
                                              significance_col, score_col, matrix_output_folder, output_folder,
                                              chunk_size = 100, save_pickled_matrix_dict = True)
@@ -637,6 +656,8 @@ def main(input_df, percentiles_dict = None, slim_length = None, always_allowed_d
 
     else:
         # Apply predefined weights and calculate predictive values
+        position_weights = general_params.get("position_weights")
+        make_calls = general_params.get("make_calls")
         output_df, predictive_value_df = apply_predefined_weights(input_df, position_weights, matrices_dict, slim_length,
                                                                 sequence_col, significance_col, score_col,
                                                                 matrix_output_folder, output_folder, make_calls)
