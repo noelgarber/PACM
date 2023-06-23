@@ -1,6 +1,6 @@
 import csv
 import os
-
+from user_helper_functions import get_position_copies
 
 def input_number(prompt, mode = "float"):
     '''
@@ -117,7 +117,7 @@ def mean_at_index(df, row_index, col_names):
     mean_value = values.mean()
     return mean_value
 
-def permute_weights(slim_length, position_copies):
+def permute_weights(slim_length, position_copies = None):
     '''
     Simple function to generate permutations of weights from 0-3 for scoring a peptide motif of defined length
 
@@ -128,6 +128,10 @@ def permute_weights(slim_length, position_copies):
     Returns:
         expanded_weights_array (np.ndarray): an array of shape (permutations_number, slim_length)
     '''
+
+    if position_copies is None:
+        position_copies = get_position_copies(slim_length)
+
     # Check that the dictionary of position copies is the correct length
     if slim_length != sum(position_copies.values()):
         raise ValueError(f"permute_weights error: slim_length ({slim_length}) is not equal to position_copies dict values sum ({sum(position_copies.values())})")
@@ -215,3 +219,76 @@ def save_weighted_matrices(weighted_matrices_dict, matrix_directory = None, save
         print(f"Saved {len(weighted_matrices_dict)} matrices and pickled weighted_matrices_dict to {matrix_directory}")
     else:
         print(f"Saved {len(weighted_matrices_dict)} matrices to {matrix_directory}")
+
+def get_log2fc_cols(comparator_set_1, comparator_set_2):
+    # Define the columns containing log2fc values
+    log2fc_cols = []
+    for bait1 in comparator_set_1:
+        for bait2 in comparator_set_2:
+            if bait1 != bait2:
+                log2fc_cols.append(bait1 + "_" + bait2 + "_log2fc")
+
+    return log2fc_cols
+
+def get_least_different_baits(row):
+    '''
+    Helper function to get a tuple of baits that represent the least different set when comparing two comparator sets
+
+    Args:
+        row (pd.Series):  a row from a pandas dataframe where the only passed columns are the log2fc columns
+
+    Returns:
+        baits (str):      "bait1,bait2" representing the least different pair, one from each comparator set
+    '''
+
+    abs_values = row.abs()
+    min_abs_value = abs_values.min()
+    min_abs_value_cols = abs_values[abs_values == min_abs_value].index
+    baits = min_abs_value_cols[0].rsplit("_",1)
+
+    return baits
+
+def least_different(input_df, comparator_set_1 = None, comparator_set_2 = None, log2fc_cols = None, return_df = False,
+                    return_series = True, in_place = True):
+    '''
+    Simple function to determine the least different log2fc between permutations of the sets of comparators
+
+    Args:
+        input_df (pd.DataFrame):   the dataframe to operate on
+        comparator_set_1 (list):   the first set of comparator baits
+        comparator_set_2 (list):   the second set of comparator baits
+        log2fc_cols (list):        list of columns; if not given, it will be auto-generated
+        return_df (bool):          whether to return the modified dataframe
+        return_series (bool):      whether to return the least different value series and least different bait series
+        in_place (bool):           whether to add "least_different_log2fc" and "least_different_baits" cols in-place
+
+    Returns:
+        least_different_series (pd.Series): log2fc values for the least different pair of baits
+        least_different_baits (pd.Series):  tuples of (bait1, bait2) corresponding to least_diff_log2fc
+        output_df (pd.DataFrame):           returned instead of the series if return_df is True; modified df with series
+    '''
+
+    if comparator_set_1 is None or comparator_set_2 is None:
+        comparator_set_1, comparator_set_2 = get_comparator_baits()
+
+    # Define the columns containing log2fc values
+    if log2fc_cols is None:
+        log2fc_cols = get_log2fc_cols(comparator_set_1, comparator_set_2)
+
+    # Get least different values and bait pairs
+    least_different_series = input_df[log2fc_cols].apply(lambda row: min(row, key=abs), axis=1)
+    least_different_baits = input_df[log2fc_cols].apply(get_least_different_baits, axis=1)
+
+    # Assign columns if specified
+    if in_place or return_df:
+        output_df = input_df if in_place else input_df.copy()
+        output_df["least_different_log2fc"] = least_different_series
+        output_df["least_different_baits"] = least_different_baits
+
+    # Return appropriate values
+    if return_series and not return_df:
+        return least_different_series, least_different_baits
+    elif return_series and return_df:
+        return least_different_series, least_different_baits, output_df
+    elif return_df and not return_series:
+        return output_df
