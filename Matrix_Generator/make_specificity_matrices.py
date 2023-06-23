@@ -4,10 +4,14 @@ import numpy as np
 import pandas as pd
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
-from general_utils.general_utils import permute_weights, least_different
+from general_utils.general_utils import permute_weights, least_different, get_delimited_list
 from general_utils.general_vars import amino_acids, amino_acids_phos
 from general_utils.user_helper_functions import get_comparator_baits
 from general_utils.matrix_utils import collapse_phospho
+
+'''---------------------------------------------------------------------------------------------------------------------
+                            Define functions for generating the specificity points matrix
+   ------------------------------------------------------------------------------------------------------------------'''
 
 def bias_ratio(source_df, least_different_values, thresholds = (1,-1), passes_col = "One_Passes", pass_str = "Yes"):
     '''
@@ -148,6 +152,10 @@ def make_specificity_matrix(thresholds, matching_points = (2,1,-1,-2), bias_mult
 
     return matrix_df
 
+'''---------------------------------------------------------------------------------------------------------------------
+                           Define function to apply/optimize weights and back-calculate scores 
+   ------------------------------------------------------------------------------------------------------------------'''
+
 def get_specificity_scores(sequences, log2fc_values, unweighted_matrix, position_weights = None):
     '''
     Function to back-calculate specificity scores on peptide sequences based on the generated specificity matrix
@@ -195,33 +203,53 @@ def get_specificity_scores(sequences, log2fc_values, unweighted_matrix, position
 
     return (score_values, weighted_specificity_matrix, coef, intercept, r2)
 
-def main(source_df, thresholds, matching_points = (2,1,-1,-2), comparator_set_1 = None, comparator_set_2 = None,
-         sequence_col = "BJO_Sequence", passes_col = "One_Passes", pass_str = "Yes", include_phospho = False,
-         predefined_weights = None, optimize_weights = True, position_copies = None):
+'''---------------------------------------------------------------------------------------------------------------------
+                                      Define main functions and default parameters
+   ------------------------------------------------------------------------------------------------------------------'''
+
+default_comparator_info = {"comparator_set_1": None,
+                           "comparator_set_2": None,
+                           "seq_col": "BJO_Sequence",
+                           "bait_pass_col": "One_Passes",
+                           "pass_str": "Yes"}
+
+default_specificity_params = {"thresholds": None,
+                              "matching_points": (2,1,-1,-2),
+                              "include_phospho": False,
+                              "predefined_weights": None,
+                              "optimize_weights": True,
+                              "position_copies": None}
+
+def main(source_df, comparator_info = None, specificity_params = None):
     '''
     Main function for generating and assessing optimal specificity position-weighted matrices
 
     Args:
-        source_df (pd.DataFrame):        dataframe containing sequences, pass/fail info, and log2fc values
-        comparator_set_1 (list):         the 1st set of pooled comparators; pass single comparators as list of len 1
-        comparator_set_2 (list):         the 2nd set of pooled comparators; pass single comparators as list of len 1
-        thresholds (tuple):              tuple of (upper_pos_thres, mid_pos_thres, mid_neg_thres, upper_neg_thres)
-        matching_points (tuple):         tuple of (upper_pos_points, mid_pos_points, mid_neg_points, upper_neg_points)
-        sequence_col (str):              source_df col with peptide sequences of equal length
-        passes_col (str):                source_df col with pass/fail info on whether each peptide is interpretable
-        pass_str (str):                  string representing a pass, e.g. "Yes"; used for converting pass col to bools
-        include_phospho (bool):          whether to include phospho-residues in matrix; if not, merges to non-phospho
-        predefined_weights (np.ndarray): required if optimize_weights is False; set of weights equal to matrix col count
-        optimize_weights (bool):         whether to optimize weights by iterating over a permuted weight set
-        position_copies (dict):          dict of index --> copy count for permuting weights; values sum equals seq len
+        source_df (pd.DataFrame):  dataframe containing sequences, pass/fail info, and log2fc values
+        comparator_info (dict):    dict of info about comparators and data locations:
+                                      --> comparator_set_1 (list): 1st set of pooled comparators (min length = 1)
+                                      --> comparator_set_2 (list): 2nd set of pooled comparators (min length = 1)
+                                      --> seq_col (str): source_df col with peptide sequences of equal length
+                                      --> bait_pass_col (str): source_df col with pass/fail info on each peptide
+                                      --> pass_str (str): string representing a pass, e.g. "Yes", for converting to bool
+        specificity_params (dict): dict of parameters controlling how the specificity position-weighted matrix is made:
+                                      --> thresholds (tuple): (upper_plus, mid_plus, mid_minus, upper_minus)
+                                      --> matching_points (tuple): tuple of points corresponding to thresholds above
+                                      --> include_phospho (bool): whether to include or merge phospho-residues in matrix
+                                      --> predefined_weights (np.ndarray): set of weights to use if not optimize_weights
+                                      --> optimize_weights (bool): whether to optimize weights from a permuted array
+                                      --> position_copies (dict): idx > copies for permuting weights; sum(vals)=len(seq)
 
     Returns:
-        final_results (tuple):           (scores (arr), weighted_matrix (df), coef, intercept, r2)
+        final_results (tuple):     (scores (arr), weighted_matrix (df), coef, intercept, r2)
     '''
 
     output_df = source_df.copy()
+    comparator_info = comparator_info or default_comparator_info.copy()
+    specificity_params = specificity_params or default_specificity_params.copy()
 
     # Calculate least different pair of baits and corresponding log2fc for each row in output_df
+    comparator_set_1, comparator_set_2 = comparator_info.get("comparator_set_1"), comparator_info.get("comparator_set_2")
     if comparator_set_1 is None or comparator_set_2 is None:
         comparator_set_1, comparator_set_2 = get_comparator_baits()
     least_different_results = least_different(output_df, comparator_set_1, comparator_set_2,
@@ -229,21 +257,33 @@ def main(source_df, thresholds, matching_points = (2,1,-1,-2), comparator_set_1 
     least_different_values, least_different_baits, output_df = least_different_results
 
     # Get the multiplier to adjust for asymmetric distribution of bait specificities in the data
+    thresholds = specificity_params.get("thresholds")
+    if thresholds is None:
+        thresholds = tuple(get_delimited_list("Please enter a comma-delimited list of thresholds, in descending order, as floats:  ", 4))
+    matching_points = specificity_params.get("matching_points")
+    if matching_points is None:
+        matching_points = tuple(get_delimited_list(f"Please entner a comma-delimited list of associated points for each of the given thresholds ({thresholds}), in order, as floats:  ", 4))
+
     extreme_thresholds = (thresholds[0], thresholds[3])
+    passes_col, pass_str = comparator_info.get("bait_pass_col"), comparator_info.get("pass_str")
     bias_multiplier = bias_ratio(output_df, least_different_values, extreme_thresholds, passes_col, pass_str)
 
     # Generate the unweighted specificity matrix
+    sequence_col = comparator_info.get("seq_col")
+    include_phospho = specificity_params.get("include_phospho")
     unweighted_matrix = make_specificity_matrix(thresholds, matching_points, bias_multiplier, source_df = source_df,
                                                 sequence_col = sequence_col, log2fc_col = "least_different_log2fc",
                                                 significance_col = passes_col, pass_str = pass_str,
                                                 include_phospho = include_phospho)
 
+    optimize_weights = specificity_params.get("optimize_weights")
     sequences = output_df[sequence_col].values
     log2fc_values = output_df["least_different_log2fc"].values
     sequence_length = len(sequences[0])
 
     if optimize_weights:
         # Determine optimal weights by maximizing the R2 value against a permuted array of weights arrays
+        position_copies = specificity_params.get("position_copies")
         permuted_weights_array = permute_weights(sequence_length, position_copies)
 
         best_r2 = 0.0
@@ -259,10 +299,14 @@ def main(source_df, thresholds, matching_points = (2,1,-1,-2), comparator_set_1 
         print(f"Optimal matrix weights, {best_weights}, gave an R2 value of {final_r2} for the equation y={final_coef}x+{final_intercept}")
 
     else:
-        # Use predefined weight, checked for correct dimensions
-        if not isinstance(predefined_weights, np.ndarray):
-            raise ValueError(f"predefined_weights type is {type(predefined_weights)}, but must be np.ndarray of equal length to sequence_length")
-        elif len(predefined_weights) != sequence_length:
+        # Use predefined weight, checked for correct dimensions and type
+        predefined_weights = specificity_params.get("predefined_weights")
+        if isinstance(predefined_weights, list) or isinstance(predefined_weights, tuple):
+            predefined_weights = np.array(predefined_weights)
+        elif not isinstance(predefined_weights, np.ndarray):
+            raise ValueError(f"predefined_weights type is {type(predefined_weights)}, but must be np.ndarray, list, or tuple, of equal length to sequence_length")
+
+        if len(predefined_weights) != sequence_length:
             raise ValueError(f"predefined_weights length ({len(predefined_weights)}) does not match sequence_length ({sequence_length})")
 
         final_results = get_specificity_scores(sequences, log2fc_values, unweighted_matrix, predefined_weights)
