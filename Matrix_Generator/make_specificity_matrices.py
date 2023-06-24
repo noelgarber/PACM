@@ -214,7 +214,7 @@ default_comparator_info = {"comparator_set_1": None,
                            "pass_str": "Yes"}
 
 default_specificity_params = {"thresholds": None,
-                              "matching_points": (2,1,-1,-2),
+                              "matching_points": None,
                               "include_phospho": False,
                               "predefined_weights": None,
                               "optimize_weights": True,
