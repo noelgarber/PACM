@@ -8,12 +8,12 @@ import warnings
 from Matrix_Generator.standardize_and_concatenate import main_workflow as standardized_concatenate
 
 from Matrix_Generator.make_pairwise_matrices import main as make_pairwise_matrices
-from Matrix_Generator.make_pairwise_matrices import default_data_params, default_matrix_params, default_general_params
+from Matrix_Generator.make_pairwise_matrices import default_general_params, default_data_params, default_matrix_params
 
 from Matrix_Generator.make_specificity_matrices import main as make_specificity_matrix
 from Matrix_Generator.make_specificity_matrices import default_comparator_info, default_specificity_params
 
-from general_utils.general_utils import input_number
+from general_utils.general_utils import input_number, list_inputter
 
 def get_data(output_folder=None, add_peptide_seqs=True,
              peptide_seq_cols=["Phos_Sequence", "No_Phos_Sequence", "BJO_Sequence"], verbose=False):
@@ -34,37 +34,7 @@ def get_data(output_folder=None, add_peptide_seqs=True,
 
     return reindexed_data_df, percentiles_dict
 
-# Default position copies; this is arbitrary and will depend on the characteristics of your motif of interest
-position_copies = {0: 4,
-                   1: 1,
-                   2: 1,
-                   3: 1,
-                   4: 1,
-                   5: 1,
-                   6: 1,
-                   7: 1,
-                   8: 1,
-                   9: 1,
-                   10: 2}
-
-# Define the default parameters for main
-default_data = {"slim_length": None,
-                "position_copies": position_copies,
-                "minimum_members": None,
-                "thres_tuple": None,
-                "points_tuple": None,
-                "always_allowed_dict": None,
-                "position_weights": None,
-                "peptide_seq_cols": ["Phos_Sequence", "No_Phos_Sequence", "BJO_Sequence"],
-                "sequence_col": "No_Phos_Sequence",
-                "significance_col": "One_Passes"}
-
-default_params = {"output_folder": None,
-                  "specificity_points_mode": "discrete",
-                  "add_peptide_seqs": True,
-                  "optimize_weights": True,
-                  "use_cached_data": False}
-
+# Define the default image quantification parameters
 
 default_image_params = {"output_folder": "",
                         "add_peptide_seqs": True,
@@ -73,6 +43,60 @@ default_image_params = {"output_folder": "",
 
 def main(image_params = None, general_params = None, data_params = None, matrix_params = None, comparator_info = None,
          specificity_params = None, use_cached_data = False, generate_specificity_matrix = True, verbose = True):
+    '''
+    Main function for quantifying source data, generating context-aware matrices, and generating the specificity matrix
+
+    Args:
+        image_params (dict):                SPOT peptide image quantification parameters for deriving binding data
+                                                --> "output_folder" (str): the folder path where data should be saved
+                                                --> "add_peptide_seqs" (bool): must be True when building matrices
+                                                --> "peptide_seq_cols" (list): col names, e.g. "BJO_Sequence"
+                                                --> "save_pickled_data" (bool): whether to pickle data for future re-use
+        general_params (dict):              general parameters as defined in make_pairwise_matrices:
+                                                Auto-generated params: "percentiles_dict", "always_allowed_dict"
+                                                Given in default_general_params: "aa_charac_dict"
+                                                Required always: "slim_length", "optimize_weights", "output_folder"
+                                                Required if optimizing weights: "position_copies"
+                                                Required if not optimizing weights: "position_weights", "make_calls"
+        data_params (dict):                 parameters describing source data, as defined in make_pairwise_matrices:
+                                                --> bait (str): the bait to use for matrix generation; defaults to best if left blank
+                                                --> bait_signal_col_marker (str): keyword that marks columns in source_dataframe that
+                                                     contain signal values; required only if bait is given
+                                                --> best_signal_col (str): column name with best signal values; used if bait is None
+                                                --> bait_pass_col (str): column name with pass/fail information
+                                                --> pass_str (str): the string representing a pass in bait_pass_col, e.g. "Yes"
+                                                --> seq_col (str): column name containing peptide sequences as strings
+        matrix_params (dict):               dictionary of parameters that affect matrix-building behaviour, used in matrix-building:
+                                                --> thresholds_points_dict (dict): dictionary where threshold_value --> points_value
+                                                --> included_residues (list): the residues included for the current type-position rule
+                                                --> amino_acids (tuple): the alphabet of amino acids to use when constructing the matrix
+                                                --> min_members (int): the minimum number of peptides that must follow the current
+                                                    type-position rule for the matrix to be built
+                                                --> position_for_filtering (int): the position for the type-position rule being assessed
+                                                --> clear_filtering_column (bool): whether to set values in the filtering column to zero
+        comparator_info (dict):
+        specificity_params (dict):
+        use_cached_data (bool):
+        generate_specificity_matrix (bool):
+        verbose (bool):
+
+    Returns:
+
+    '''
+
+    # Define a consistent output folder to be used everywhere
+    image_params = image_params or default_image_params.copy()
+    general_params = general_params or default_general_params.copy()
+    image_output_folder = image_params.get("output_folder")
+    matrix_output_folder = general_params.get("output_folder")
+    if not image_output_folder and not matrix_output_folder:
+        output_folder = input("Enter the folder to output data to:  ")
+    elif not image_output_folder:
+        output_folder = matrix_output_folder
+        image_params["output_folder"] = matrix_output_folder
+    else:
+        output_folder = image_output_folder
+        general_params["output_folder"] = image_output_folder
 
     # Quantify SPOT peptide binding data
     if use_cached_data:
@@ -81,11 +105,7 @@ def main(image_params = None, general_params = None, data_params = None, matrix_
             data_df, percentiles_dict = pickle.load(f)
     else:
         # Define necessary arguments for getting data
-        image_params = image_params or default_image_params.copy()
         add_peptide_seqs, peptide_seq_cols = image_params.get("add_peptide_seqs"), image_params.get("peptide_seq_cols")
-        output_folder = image_params.get("output_folder")
-        if output_folder == "" or output_folder is None:
-            output_folder = input("Enter the folder to output data to:  ")
 
         # Obtain and quantify the data
         data_df, percentiles_dict = get_data(output_folder, add_peptide_seqs, peptide_seq_cols, verbose)
@@ -98,7 +118,9 @@ def main(image_params = None, general_params = None, data_params = None, matrix_
                 pickle.dump((data_df, percentiles_dict), f)
 
     # Generate pairwise position-weighted matrices
-    general_params = general_params or default_general_params.copy()
+    general_params["percentiles_dict"] = percentiles_dict
+    general_params["output_folder"] = output_folder # ensure same folder is used
+
     data_params = data_params or default_data_params.copy()
     matrix_params = matrix_params or default_matrix_params.copy()
 
@@ -133,14 +155,45 @@ def main(image_params = None, general_params = None, data_params = None, matrix_
 
 # If the script is executed directly, invoke the main workflow
 if __name__ == "__main__":
-    data = default_data.copy()
-    params = default_params.copy()
-
-    slim_length = input_number("Please enter the length of the short linear motif being studied:  ", "int")
-    data["slim_length"] = slim_length
-
+    # Define image quantification parameters
+    image_params = default_image_params.copy()
     use_cached = input("Use cached pickled data from a previous run? (Y/N)  ")
-    if use_cached == "Y":
-        params["use_cached_data"] = True
+    use_cached_data = use_cached == "Y"
+    if not use_cached_data:
+        save_pickled = input("Save pickled data from this run for future use? (Y/N)  ")
+        save_pickled_data = save_pickled == "Y"
+        image_params["save_pickled_data"] = save_pickled_data
+        print("For adding sequences to quantified data, the following columns are expected:", image_params.get("peptide_seq_cols"))
+        different_seq_cols = input("Use different sequence columns? (Y/N)  ")
+        if different_seq_cols == "Y":
+            print("Enter sequence columns one at a time.")
+            seq_cols = list_inputter("Next col name:  ")
+            image_params["peptide_seq_cols"] = seq_cols
 
-    main(data, params, verbose = True)
+    # Define general params for context-aware matrix generation
+    general_params = default_general_params.copy()
+    general_params["slim_length"] = input_number("Please enter the length of the short linear motif being studied:  ", "int")
+    optimize_weights = input("Optimize context-aware matrix weights? (Y/N)  ") == "Y"
+    general_params["optimize_weights"] = optimize_weights
+    if not optimize_weights:
+        weights_list = input("Enter a comma-delimited list of predefined weights:  ")
+        weights_array = np.array(weights_list.split(",")).astype(float)
+        general_params["position_weights"] = weights_array
+
+    # Define source data params and matrix-building params for context-aware matrix generation; use defaults as-is
+    data_params = default_data_params.copy()
+    matrix_params = default_matrix_params.copy()
+
+    # Define comparator info and specificity params for generating the specificity position-weighted matrix
+    comparator_info = default_comparator_info.copy()
+    specificity_params = default_specificity_params.copy()
+    optimize_specificity_weights = input("Optimize specificity matrix weights? (Y/N)  ")
+    optimize_specificity_weights = optimize_specificity_weights == "Y"
+    specificity_params["optimize_weights"] = optimize_specificity_weights
+    if not optimize_specificity_weights:
+        specificity_weights_list = input("Enter a comma-delimited list of predefined weights:  ")
+        specificity_weights_array = np.array(specificity_weights_list.split(",")).astype(float)
+        specificity_params["predefined_weights"] = specificity_weights_array
+
+    # Execute the main function
+    main(image_params, general_params, data_params, matrix_params, comparator_info, specificity_params, use_cached_data)
