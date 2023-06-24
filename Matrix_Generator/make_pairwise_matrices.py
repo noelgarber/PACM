@@ -6,7 +6,8 @@ import os
 import pickle
 import multiprocessing
 from tqdm import trange
-from general_utils.general_utils import input_number, permute_weights, save_dataframe, save_weighted_matrices
+from general_utils.general_utils import input_number, save_dataframe, save_weighted_matrices
+from general_utils.weights_utils import permute_weights
 from general_utils.matrix_utils import increment_matrix, make_empty_matrix, collapse_phospho, apply_always_allowed, add_matrix_weights
 from general_utils.general_vars import aa_charac_dict, amino_acids, amino_acids_phos
 from general_utils.user_helper_functions import get_min_members, get_thresholds, get_always_allowed, get_position_weights
@@ -377,7 +378,7 @@ def make_unweighted_matrices(input_df, percentiles_dict = None, slim_length = No
 
     # Get the minimum number of peptides that must belong to a classified group for them to be used in matrix-building
     if matrix_params.get("min_members") is None:
-        matrix_params.get("min_members") = get_min_members()
+        matrix_params["min_members"] = get_min_members()
 
     # Get threshold and point values
     thresholds_points_dict = matrix_params.get("thresholds_points_dict")
