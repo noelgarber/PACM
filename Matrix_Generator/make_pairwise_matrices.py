@@ -142,7 +142,9 @@ def conditional_matrix(motif_length, source_dataframe, data_params = None, matri
     # Get boolean calls for whether each peptide passes and is a qualifying member of the matrix's filtering rule
     pass_str = data_params.get("pass_str")
     pass_calls = pass_values == pass_str
-    qualifying_member_calls = np.isin(sequences[:, index_for_filtering], included_residues)
+    get_nth_position = np.vectorize(lambda x: x[index_for_filtering] if len(x) >= index_for_filtering+1 else "")
+    filter_position_chars = get_nth_position(sequences)
+    qualifying_member_calls = np.isin(filter_position_chars, included_residues)
 
     # Get the sequences and signal values to use for incrementing the matrix
     logical_mask = np.logical_and(pass_calls, qualifying_member_calls)
