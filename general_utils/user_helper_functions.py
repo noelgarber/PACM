@@ -56,11 +56,10 @@ def get_thresholds(percentiles_dict = None, use_percentiles = True, show_guidanc
     Args:
         percentiles_dict (dict): dictionary of percentile numbers --> signal values
         use_percentiles (bool):  whether to display percentiles from a dict and use percentiles for setting thresholds
-        show_guidance (bool): 	 whether to display guidance for setting thresholds
+        show_guidance (bool):    whether to display guidance for setting thresholds
 
     Returns:
-        thres_tuple (tuple):  tuple of 3 thresholds for extreme, high, and mid-level signal values
-        points_tuple (tuple): tuple of 4 point values corresponding to extreme, high, mid-level, and below-threshold signal values
+        thres_dict (dict): dictionary of thresholds as keys and corresponding points as values
     '''
 
     print("Setting thresholds for scoring.",
@@ -69,21 +68,21 @@ def get_thresholds(percentiles_dict = None, use_percentiles = True, show_guidanc
           "\n---") if show_guidance else None
 
     # Set threshold values
-    no_more_thresholds = False
     thresholds_dict = {}
-    while not no_more_thresholds:
+    while True:
         if use_percentiles:
-            current_threshold = input("Enter the next threshold as an integer percentile:  ")
-            current_threshold = percentiles_dict.get(current_threshold)
+            current_threshold = input("Enter the next threshold as an integer percentile (or press Enter to finish): ")
+            if not current_threshold:
+                break
+            current_threshold = percentiles_dict.get(int(current_threshold))
         else:
-            current_threshold = input("Enter the next signal threshold:  ")
+            current_threshold = input("Enter the next signal threshold (or press Enter to finish): ")
+            if not current_threshold:
+                break
 
-        if current_threshold != "":
-            current_threshold = float(current_threshold)
-            current_points = input_number(f"\tPoints for hits >= {current_threshold}:  ", "float")
-            thresholds_dict[current_threshold] = current_points
-        else:
-            no_more_thresholds = True
+        current_threshold = float(current_threshold)
+        current_points = input_number(f"\tPoints for hits >= {current_threshold}: ", "float")
+        thresholds_dict[current_threshold] = current_points
 
     return thresholds_dict
 
