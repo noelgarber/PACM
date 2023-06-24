@@ -609,7 +609,6 @@ def main(input_df, general_params = None, data_params = None, matrix_params = No
                                             --> position_copies (dict): permuted_weight_index --> copy_number;
                                                 sum of copy_number values must be equal to slim_length;
                                                 required only if optimize_weights is True
-                                            --> score_col (str): the column in input_df where motif scores go
                                             --> aa_charac_dict (dict): dictionary of chemical_characteristic --> [AAs]
         data_params (dict):         dictionary of parameters describing the source_dataframe structure, used in matrix-building:
                                             --> bait (str): the bait to use for matrix generation; defaults to best if left blank
