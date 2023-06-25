@@ -2,6 +2,7 @@
 
 import numpy as np
 import pandas as pd
+import warnings
 
 def make_empty_matrix(position_count, amino_acid_list, dtype=np.int64):
     '''
@@ -38,22 +39,35 @@ def increment_matrix(sequences, sorted_thresholds, signal_values, matrix_df):
         matrix_df (pd.DataFrame):   the matrix to increment
 
     Returns:
-        None; operations are performed in-place
+        matrix_df (pd.DataFrame):   the updated matrix with incremented values
     '''
 
     # Get the relevant points values for each sequence
-    points_values = np.zeros(len(sequences))
+    points_values = np.zeros(len(sequences), dtype=float)
     for thres_val, points_val in sorted_thresholds:
         points_values[signal_values >= thres_val] = points_val
 
-    # Get lists of indices for use in incrementing the matrix
-    row_indices_list = [matrix_df.index.get_indexer_for(list(seq)) for seq in sequences]
-    valid_indices_list = [np.where(np.array(row_indices) != -1) for row_indices in row_indices_list]
-    valid_row_indices_list = [row_indices[valid_indices] for row_indices, valid_indices in zip(row_indices_list, valid_indices_list)]
+    # Get the indices for incrementing matrix_df
+    rows_2d = np.array([matrix_df.index.get_indexer_for(list(seq)) for seq in sequences]) # list of arrays of row indices, for each residue in each sequence
+    matrix_array = matrix_df.values.astype(float)
+    if (rows_2d==-1).any():
+        # Some residues were not found, so masking is required
+        warnings.warn("increment_matrix() warning: some residues in the given sequences array were not found as indices in the given matrix_df; they will be omitted")
+        valid_cols_list = [np.where(row_indices != -1)[0] for row_indices in rows_2d] # list of arrays of column indices where a row index was found
+        valid_rows_list = [row_indices[valid_col_indices] for row_indices, valid_col_indices in zip(rows_2d, valid_cols_list)] # list of arrays of valid row indices where the residue was found by get_indexer_for()
 
-    # Increment the matrix
-    for points, valid_row_indices, valid_indices in zip(points_values, valid_indices_list, valid_row_indices_list):
-        matrix_df.values[valid_row_indices, valid_indices] += points
+        # Increment the matrix
+        for points, row_indices, col_indices in zip(points_values, valid_rows_list, valid_cols_list):
+            matrix_array[row_indices, col_indices] += points
+    else:
+        # All columns are valid because all residues at all positions received valid row indices from get_indexer_for()
+        for points, row_indices in zip(points_values, rows_2d):
+            matrix_array[row_indices,:] += points
+
+    # Reassign the matrix array back to a dataframe
+    matrix_df = pd.DataFrame(matrix_array, index=matrix_df.index, columns=matrix_df.columns)
+
+    return matrix_df
 
 def collapse_phospho(matrix_df, in_place = True):
     '''

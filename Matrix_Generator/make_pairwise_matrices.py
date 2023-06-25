@@ -152,7 +152,7 @@ def conditional_matrix(motif_length, source_dataframe, data_params = None, matri
     masked_signal_values = mean_signal_values[logical_mask]
 
     # Conditionally increment the matrix by the number of points associated with its mean signal value
-    increment_matrix(masked_sequences, sorted_thresholds, masked_signal_values, matrix_df)
+    matrix_df = increment_matrix(masked_sequences, sorted_thresholds, masked_signal_values, matrix_df)
 
     # Optionally set the filtering position to zero
     clear_filtering_column = matrix_params.get("clear_filtering_column")
