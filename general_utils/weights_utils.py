@@ -1,3 +1,4 @@
+import numpy as np
 from general_utils.user_helper_functions import get_position_copies
 
 def permute_weights(slim_length, position_copies = None):

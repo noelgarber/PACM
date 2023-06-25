@@ -1,3 +1,4 @@
+import numpy as np
 from general_utils.general_utils import input_number
 
 def get_min_members(display_message = True):
@@ -106,6 +107,9 @@ def get_position_weights(slim_length):
 
 def get_position_copies(slim_length):
     # Helper function to get position copies dict for use in permute_weights()
+
+    print(f"Please input the copy numbers that will be used when permuting weights; sum of values must equal motif length {slim_length}")
+
     cumulative_length = 0
     current_index = 0
     position_copies = {}
