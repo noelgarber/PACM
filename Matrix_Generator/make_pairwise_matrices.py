@@ -6,6 +6,7 @@ import os
 import pickle
 import multiprocessing
 from tqdm import trange
+from functools import partial
 from general_utils.general_utils import input_number, save_dataframe, save_weighted_matrices
 from general_utils.weights_utils import permute_weights
 from general_utils.matrix_utils import increment_matrix, make_empty_matrix, collapse_phospho, apply_always_allowed, add_matrix_weights
@@ -218,12 +219,26 @@ def make_conditional_matrices(slim_length, source_df, residue_charac_dict = None
                     Define functions for scoring source peptide sequences based on generated matrices
    ------------------------------------------------------------------------------------------------------------------'''
 
-def aa_chemical_class(amino_acid, dict_of_aa_characs = aa_charac_dict):
+phospho_aa_conversions = {"B": "S", "J": "T", "O": "Y"}
+
+def aa_chemical_class(amino_acid, dict_of_aa_characs = aa_charac_dict, convert_phospho = True, phospho_aa_conversions = phospho_aa_conversions):
     # Simple function to check if a particular amino acid is a member of a chemical class in the dictionary
+    if convert_phospho:
+        if amino_acid == "B":
+            amino_acid = "S"
+        elif amino_acid == "J":
+            amino_acid = "T"
+        elif amino_acid == "O":
+            amino_acid = "Y"
+
     charac_result = next((charac for charac, mem_list in dict_of_aa_characs.items() if amino_acid in mem_list), None)
+
+    if not charac_result:
+        raise Exception(f"aa_chemical_class error: could not assign an amino acid chemical characteristic to \"{amino_acid}\"")
+
     return charac_result
 
-def score_aa_seq(sequence, weighted_matrices, slim_length):
+def score_aa_seq(sequence, weighted_matrices, slim_length, convert_phospho = True):
     '''
     Function to score amino acid sequences based on the dictionary of context-aware weighted matrices
 
@@ -242,6 +257,10 @@ def score_aa_seq(sequence, weighted_matrices, slim_length):
 
     # Get sequence as numpy array
     sequence_array = np.array(list(sequence))
+    if convert_phospho:
+        sequence_array[sequence_array=="B"] = "S"
+        sequence_array[sequence_array=="J"] = "T"
+        sequence_array[sequence_array=="O"] = "Y"
 
     # Define residues of interest; assume slim_length is equal to sequence length
     current_residues = sequence_array.copy()
@@ -409,8 +428,7 @@ def make_unweighted_matrices(input_df, percentiles_dict = None, slim_length = No
                         Define functions for parallelized optimization of matrix weights
    ------------------------------------------------------------------------------------------------------------------'''
 
-def process_weights_chunk(chunk, matrices_dict, source_df, slim_length, sequence_col = "No_Phos_Sequence",
-                          significance_col = "One_Passes", score_col = "SLiM_Score"):
+def process_weights_chunk(chunk, matrices_dict, source_df, slim_length, sequence_col, significance_col, score_col):
     '''
     Lower helper function for parallelization of position weight optimization; processes chunks of permuted weights
 
@@ -436,7 +454,7 @@ def process_weights_chunk(chunk, matrices_dict, source_df, slim_length, sequence
     for weights_array in chunk:
         current_weighted_matrices_dict = add_matrix_weights(weights_array, matrices_dict = matrices_dict)
 
-        apply_motif_scores(output_df, weighted_matrices, slim_length, sequence_col, score_col, in_place = True)
+        apply_motif_scores(output_df, current_weighted_matrices_dict, slim_length, sequence_col, score_col, in_place = True)
 
         score_range_series = np.linspace(output_df["SLiM_Score"].min(), output_df["SLiM_Score"].max(), num=100)
         current_best_score, current_best_fdr, current_best_for = apply_threshold(output_df, score_range_series,
@@ -472,12 +490,15 @@ def process_weights(weights_array_chunks, matrices_dict, slim_length, source_df,
     '''
 
     pool = multiprocessing.Pool()
+    process_partial = partial(process_weights_chunk, matrices_dict = matrices_dict, source_df = source_df,
+                              slim_length = slim_length, sequence_col = sequence_col,
+                              significance_col = significance_col, score_col = score_col)
 
     results = None
     best_fdr = 9999
 
     with trange(len(weights_array_chunks), desc="Processing weights") as pbar:
-        for chunk_results in pool.imap_unordered(process_weights_chunk, [(chunk, matrices_dict, source_df, slim_length, sequence_col, significance_col, score_col) for chunk in weights_array_chunks]):
+        for chunk_results in pool.imap_unordered(process_partial, weights_array_chunks):
             if chunk_results[0] < best_fdr:
                 results = chunk_results
 
