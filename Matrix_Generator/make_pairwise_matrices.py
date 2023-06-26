@@ -219,59 +219,63 @@ def make_conditional_matrices(slim_length, source_df, residue_charac_dict = None
                     Define functions for scoring source peptide sequences based on generated matrices
    ------------------------------------------------------------------------------------------------------------------'''
 
-phospho_aa_conversions = {"B": "S", "J": "T", "O": "Y"}
-
-def aa_chemical_class(amino_acid, dict_of_aa_characs = aa_charac_dict, convert_phospho = True, phospho_aa_conversions = phospho_aa_conversions):
-    # Simple function to check if a particular amino acid is a member of a chemical class in the dictionary
-    if convert_phospho:
-        if amino_acid == "B":
-            amino_acid = "S"
-        elif amino_acid == "J":
-            amino_acid = "T"
-        elif amino_acid == "O":
-            amino_acid = "Y"
-
-    charac_result = next((charac for charac, mem_list in dict_of_aa_characs.items() if amino_acid in mem_list), None)
-
-    if not charac_result:
-        raise Exception(f"aa_chemical_class error: could not assign an amino acid chemical characteristic to \"{amino_acid}\"")
-
-    return charac_result
-
-def score_aa_seq(sequence, weighted_matrices, slim_length, convert_phospho = True):
+def score_seqs(sequences, weighted_matrices, slim_length, convert_phospho = True, dict_of_aa_characs = aa_charac_dict):
     '''
-    Function to score amino acid sequences based on the dictionary of context-aware weighted matrices
+    Vectorized function to score amino acid sequences based on the dictionary of context-aware weighted matrices
 
     Args:
-        sequence (str): 		  the amino acid sequence; must be the same length as the motif described by the weighted matrices
-        weighted_matrices (dict): dictionary of type-position rule --> position-weighted matrix
-        slim_length (int): 		  the length of the motif being studied
+        sequences (np.ndarray):    peptide sequences of equal length (matching weighted matrices), as a 1D numpy array
+        weighted_matrices (dict):  dictionary of type-position rule --> position-weighted matrix
+        slim_length (int): 		   the length of the motif being studied
+        convert_phospho (bool):    whether to convert phospho-residues to non-phospho before doing lookups
+        dict_of_aa_characs (dict): the dictionary of chemical_class --> [amino acid members]
 
     Returns:
-        output_total_score (float): the total motif score for the input sequence
+        final_points_array (np.ndarray): the total motif scores for the input sequences
     '''
 
-    # Check that input arguments are correct
-    if len(sequence) != slim_length:
-        raise ValueError(f"score_aa_seq input sequence length was {len(sequence)}, but must be equal to slim_length ({slim_length})")
+    # Check input array shape
+    if not np.all(np.vectorize(len)(sequences)==len(sequences[0])):
+        raise ValueError(f"score_seqs error: sequences have variable length, but must all be of an equal length")
+    elif slim_length != len(sequences[0]):
+        raise ValueError(f"score_seqs error: len(sequences[0])={len(sequences[0])}, but slim_length={slim_length}")
 
-    # Get sequence as numpy array
-    sequence_array = np.array(list(sequence))
+    sequences_unravelled = sequences.view("U1")
+    sequences_2d = np.reshape(sequences_unravelled, (-1, slim_length))
     if convert_phospho:
-        sequence_array[sequence_array=="B"] = "S"
-        sequence_array[sequence_array=="J"] = "T"
-        sequence_array[sequence_array=="O"] = "Y"
+        sequences_2d[sequences_2d=="B"] = "S"
+        sequences_2d[sequences_2d=="J"] = "T"
+        sequences_2d[sequences_2d=="O"] = "Y"
 
-    # Define residues of interest; assume slim_length is equal to sequence length
-    current_residues = sequence_array.copy()
+    # Get row indices for unique residues; assume that all the dataframes in weighted_matrices have the same shape
+    unique_residues = np.unique(sequences_2d)
+    arbitrary_key = list(weighted_matrices.keys())[0]
+    arbitrary_matrix = weighted_matrices.get(arbitrary_key)
+    unique_residue_indices = arbitrary_matrix.index.get_indexer_for(unique_residues)
+    if (unique_residue_indices==-1).any(): # Get weighted matrices from keys
+        failed_residues = unique_residues[unique_residue_indices==-1]
+        raise Exception(f"score_seqs error: the following residues were not found in by the matrix indexer: {failed_residues}")
 
     # Define residues flanking either side of the residues of interest; for out-of-bounds cases, use only the other side
-    flanking_left = np.concatenate((current_residues[0:1], current_residues[0:-1]), axis=0)
-    flanking_right = np.concatenate((current_residues[1:], current_residues[-1:]), axis=0)
+    flanking_left_2d = np.concatenate((sequences_2d[:,0:1], sequences_2d[:,0:-1]), axis=1)
+    flanking_right_2d = np.concatenate((sequences_2d[:,1:], sequences_2d[:,-1:]), axis=1)
+
+    # Convert chemical classes dict from class_name --> [member list] to member --> class_name
+    chemical_class_dict = {}
+    max_str_len = 0
+    for characteristic, member_list in dict_of_aa_characs.items():
+        for member_aa in member_list:
+            chemical_class_dict[member_aa] = characteristic
+            if len(characteristic) > max_str_len:
+                max_str_len = len(characteristic)+1
 
     # Get chemical classes for flanking residues
-    flanking_left_classes = np.array([aa_chemical_class(left_residue) for left_residue in flanking_left])
-    flanking_right_classes = np.array([aa_chemical_class(right_residue) for right_residue in flanking_right])
+    classes_dtype = "<U" + str(max_str_len)
+    left_classes_2d = np.empty(flanking_left_2d.shape, dtype=classes_dtype)
+    right_classes_2d = np.empty(flanking_right_2d.shape, dtype=classes_dtype)
+    for member_aa, characteristic in chemical_class_dict.items():
+        left_classes_2d[flanking_left_2d==member_aa] = characteristic
+        right_classes_2d[flanking_right_2d==member_aa] = characteristic
 
     # Get positions, indexed from 1, for residues of interest and the flanking residues on either side
     positions = np.arange(1, slim_length + 1)
@@ -283,30 +287,60 @@ def score_aa_seq(sequence, weighted_matrices, slim_length, convert_phospho = Tru
     right_positions[-1] = left_positions[-1]
 
     # Get keys for weighted matrices
-    flanking_left_keys = np.char.add(np.char.add(np.char.add("#", left_positions.astype(str)), "="), flanking_left_classes)
-    flanking_right_keys = np.char.add(np.char.add(np.char.add("#", right_positions.astype(str)), "="), flanking_right_classes)
+    left_keys_prefixes = np.char.add(np.char.add("#", left_positions.astype(str)), "=")
+    right_keys_prefixes = np.char.add(np.char.add("#", right_positions.astype(str)), "=")
 
-    # Get weighted matrices from keys
-    flanking_left_weighted_matrices = [weighted_matrices.get(key) for key in flanking_left_keys]
-    flanking_right_weighted_matrices = [weighted_matrices.get(key) for key in flanking_right_keys]
+    # Tile prefixes to match shape of sequences_2d
+    repeat_count = len(sequences)
+    left_prefixes_2d = np.tile(left_keys_prefixes, repeat_count).reshape((repeat_count,len(left_keys_prefixes)))
+    right_prefixes_2d = np.tile(right_keys_prefixes, repeat_count).reshape((repeat_count,len(right_keys_prefixes)))
 
-    # Get column names for weighted matrix dataframes
-    matrix_columns = ["#" + str(position) for position in positions]
+    # Concatenate final keys in 2D
+    left_keys_2d = np.char.add(left_prefixes_2d, left_classes_2d)
+    right_keys_2d = np.char.add(right_prefixes_2d, right_classes_2d)
 
-    # Compute score values
-    flanking_left_scores = np.array([flanking_left_weighted_matrices[index].at[current_residues[index], matrix_columns[index]] for index in np.arange(slim_length)])
-    flanking_right_scores = np.array([flanking_right_weighted_matrices[index].at[current_residues[index], matrix_columns[index]] for index in np.arange(slim_length)])
-    total_position_scores = flanking_left_scores + flanking_right_scores
+    # Convert matrices_dict to a dict of numpy arrays (rather than dataframes) for subsequent concatenation
+    matrices_arrays_dict = {}
+    for key, matrix in weighted_matrices.items():
+        matrices_arrays_dict[key] = matrix.to_numpy()
 
-    # Get the total score
-    output_total_score = np.sum(total_position_scores)
+    # Get 3D array of shape (number_of_sequences, sequence_length, matrix_col_slice)
+    left_positions_matrices_3d = np.empty((sequences_2d.shape[0], sequences_2d.shape[1], arbitrary_matrix.shape[0]))
+    right_positions_matrices_3d = np.empty((sequences_2d.shape[0], sequences_2d.shape[1], arbitrary_matrix.shape[0]))
+    for seq_index in np.arange(sequences_2d.shape[0]):
+        for position_index in np.arange(sequences_2d.shape[1]):
+            left_key = left_keys_2d[seq_index,position_index]
+            left_matrix_array = matrices_arrays_dict.get(left_key)
+            left_matrix_slice = left_matrix_array[:,position_index] # col slice of array at matching seq aa position idx
+            left_positions_matrices_3d[seq_index,position_index] = left_matrix_slice
 
-    return output_total_score
+            right_key = right_keys_2d[seq_index,position_index]
+            right_matrix_array = matrices_arrays_dict.get(right_key)
+            right_matrix_slice = right_matrix_array[:,position_index]
+            right_positions_matrices_3d[seq_index,position_index] = right_matrix_slice
+
+    # Get matrix row indices
+    left_matrix_row_indices = np.empty_like(sequences_2d, dtype=int)
+    right_matrix_row_indices = np.empty_like(sequences_2d, dtype=int)
+    for unique_residue, row_index in zip(unique_residues, unique_residue_indices):
+        left_matrix_row_indices[sequences_2d==unique_residue] = row_index
+        right_matrix_row_indices[sequences_2d==unique_residue] = row_index
+
+    # Collapse the 3D arrays of matrix values to a single value at each 2D index for the residue matching it
+    left_collapsed_array = left_positions_matrices_3d[np.arange(sequences_2d.shape[0])[:, None], np.arange(sequences_2d.shape[1]), left_matrix_row_indices]
+    right_collapsed_array = right_positions_matrices_3d[np.arange(sequences_2d.shape[0])[:, None], np.arange(sequences_2d.shape[1]), right_matrix_row_indices]
+
+    # Get a 1D array of summed points values from the
+    left_summed_points = left_collapsed_array.sum(axis=1)
+    right_summed_points = right_collapsed_array.sum(axis=1)
+    final_points_array = left_summed_points + right_summed_points
+
+    return final_points_array
 
 def apply_motif_scores(input_df, weighted_matrices, slim_length = None, seq_col = "No_Phos_Sequence",
                        score_col = "SLiM_Score", add_residue_cols = False, in_place = False):
     '''
-    Function to apply the score_aa_seq() function to all sequences in the source dataframe
+    Function to apply the score_seqs() function to all sequences in the source df and add residue cols for sorting
 
     Args:
         input_df (pd.DataFrame):  dataframe containing the motif sequences to back-apply motif scores onto, that were originally used to generate the scoring system
@@ -323,8 +357,8 @@ def apply_motif_scores(input_df, weighted_matrices, slim_length = None, seq_col 
 
     output_df = input_df if in_place else input_df.copy()
 
-    sequences = input_df[seq_col].values
-    scores = [score_aa_seq(seq, weighted_matrices, slim_length) for seq in sequences]
+    sequences = input_df[seq_col].values.astype("<U")
+    scores = score_seqs(sequences, weighted_matrices, slim_length)
     output_df[score_col] = scores
 
     if add_residue_cols and not in_place:
@@ -510,7 +544,7 @@ def process_weights(weights_array_chunks, matrices_dict, slim_length, source_df,
     return results
 
 def find_optimal_weights(input_df, slim_length, position_copies, matrices_dict, sequence_col, significance_col,
-                         score_col, matrix_output_folder, output_folder, chunk_size = 100,
+                         score_col, matrix_output_folder, output_folder, chunk_size = 1000,
                          save_pickled_matrix_dict = True):
     '''
     Parent function for finding optimal position weights to generate optimally weighted matrices
