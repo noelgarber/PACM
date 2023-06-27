@@ -74,14 +74,25 @@ def main(image_params = None, general_params = None, data_params = None, matrix_
                                                     type-position rule for the matrix to be built
                                                 --> position_for_filtering (int): the position for the type-position rule being assessed
                                                 --> clear_filtering_column (bool): whether to set values in the filtering column to zero
-        comparator_info (dict):
-        specificity_params (dict):
-        use_cached_data (bool):
-        generate_specificity_matrix (bool):
-        verbose (bool):
+        comparator_info (dict):             parameters describing comparator groups used for specificity analysis:
+                                                --> comparator_set_1 (list-like): 1st set of pooled baits; if blank, the user is prompted
+                                                --> comparator_set_2 (list-like): 2nd set of pooled baits; if blank, the user is prompted
+                                                --> seq_col (str): the name of the column in the source dataframe containing peptide seqs
+                                                --> bait_pass_col (str): same as in data_params
+                                                --> pass_str (str): same as in data_params
+        specificity_params (dict):          dictionary of parameters that affect specificity matrix-building behaviour:
+                                                --> thresholds (list-like): log2fc threshold values; if absent, the user is prompted
+                                                --> matching_points (list_like): matching points for the thresholds; prompted if absent
+                                                --> include_phospho (bool): whether to include phospho residues in the matrix, or collapse them
+                                                --> predefined_weights (list_like): if not optimizing weights, these are the position weights
+                                                --> optimize_weights (bool): whether to optimize weights by attempting to maximize linear R2
+                                                --> position_copies (dict): dict used for generating permuted weights; sum of values must equal motif length
+        use_cached_data (bool):             whether to use cached quantified data from a previous run
+        generate_specificity_matrix (bool): whether to generate a specificity matrix
+        verbose (bool):                     whether to display additional information in the command line
 
     Returns:
-
+        results_tuple (tuple):              (scored_data_df, best_conditional_weights, weighted_matrices_dict, motif_statistics, specificity_weighted_matrix, specificity_statistics)
     '''
 
     # Define a consistent output folder to be used everywhere
