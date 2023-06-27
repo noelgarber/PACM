@@ -219,22 +219,27 @@ def make_conditional_matrices(slim_length, source_df, residue_charac_dict = None
                     Define functions for scoring source peptide sequences based on generated matrices
    ------------------------------------------------------------------------------------------------------------------'''
 
-def score_seqs(sequences, weighted_matrices, slim_length, convert_phospho = True, dict_of_aa_characs = aa_charac_dict):
+def score_seqs(sequences, slim_length, weighted_matrices, matrix_type = "df", matrix_index = None,
+               convert_phospho = True, dict_of_aa_characs = aa_charac_dict, chemical_class_dict = None):
     '''
     Vectorized function to score amino acid sequences based on the dictionary of context-aware weighted matrices
 
     Args:
-        sequences (np.ndarray):    peptide sequences of equal length (matching weighted matrices), as a 1D numpy array
-        weighted_matrices (dict):  dictionary of type-position rule --> position-weighted matrix
-        slim_length (int): 		   the length of the motif being studied
-        convert_phospho (bool):    whether to convert phospho-residues to non-phospho before doing lookups
-        dict_of_aa_characs (dict): the dictionary of chemical_class --> [amino acid members]
+        sequences (np.ndarray):     peptide sequences of equal length (matching weighted matrices), as a 1D numpy array
+        slim_length (int): 		    the length of the motif being studied
+        weighted_matrices (dict):   dictionary of type-position rule --> position-weighted matrix
+        matrix_type (str):          denotes whether each matrix is "df" (pd.DataFrame) or "numpy" (np.ndarray)
+        matrix_index (pd.Index):    only required if matrix_type is "numpy"; it is the index that matches the matrices'
+                                    dataframe counterparts, and is used for the get_indexer_for() method
+        convert_phospho (bool):     whether to convert phospho-residues to non-phospho before doing lookups
+        dict_of_aa_characs (dict):  the dictionary of chemical_class --> [amino acid members]
+        chemical_class_dict (dict): an inverted dictionary of amino_acid --> chemical_class; auto-generated if not given
 
     Returns:
         final_points_array (np.ndarray): the total motif scores for the input sequences
     '''
 
-    # Check input array shape
+    # Check that all the sequences are an equal, correct length, and then unravel them into a 2D array of residues
     if not np.all(np.vectorize(len)(sequences)==len(sequences[0])):
         raise ValueError(f"score_seqs error: sequences have variable length, but must all be of an equal length")
     elif slim_length != len(sequences[0]):
@@ -249,9 +254,16 @@ def score_seqs(sequences, weighted_matrices, slim_length, convert_phospho = True
 
     # Get row indices for unique residues; assume that all the dataframes in weighted_matrices have the same shape
     unique_residues = np.unique(sequences_2d)
-    arbitrary_key = list(weighted_matrices.keys())[0]
-    arbitrary_matrix = weighted_matrices.get(arbitrary_key)
-    unique_residue_indices = arbitrary_matrix.index.get_indexer_for(unique_residues)
+    arbitrary_matrix = list(weighted_matrices.values())[0] # obtains a random matrix to use for indexing, assuming they are all indexed the same way
+    if matrix_type == "df":
+        unique_residue_indices = arbitrary_matrix.index.get_indexer_for(unique_residues)
+    elif matrix_type == "numpy" and matrix_index is not None:
+        unique_residue_indices = matrix_index.get_indexer_for(unique_residues)
+    elif matrix_type == "numpy":
+        raise ValueError(f"score_seqs error: matrix_type = \"numpy\", but matrix_index was not given")
+    else:
+        raise ValueError(f"score_seqs error: invalid matrix_type, got {matrix_type} but expected either \"df\" or \"numpy\"")
+
     if (unique_residue_indices==-1).any(): # Get weighted matrices from keys
         failed_residues = unique_residues[unique_residue_indices==-1]
         raise Exception(f"score_seqs error: the following residues were not found in by the matrix indexer: {failed_residues}")
@@ -261,18 +273,15 @@ def score_seqs(sequences, weighted_matrices, slim_length, convert_phospho = True
     flanking_right_2d = np.concatenate((sequences_2d[:,1:], sequences_2d[:,-1:]), axis=1)
 
     # Convert chemical classes dict from class_name --> [member list] to member --> class_name
-    chemical_class_dict = {}
-    max_str_len = 0
-    for characteristic, member_list in dict_of_aa_characs.items():
-        for member_aa in member_list:
-            chemical_class_dict[member_aa] = characteristic
-            if len(characteristic) > max_str_len:
-                max_str_len = len(characteristic)+1
+    if not chemical_class_dict:
+        chemical_class_dict = {}
+        for characteristic, member_list in dict_of_aa_characs.items():
+            for member_aa in member_list:
+                chemical_class_dict[member_aa] = characteristic
 
     # Get chemical classes for flanking residues
-    classes_dtype = "<U" + str(max_str_len)
-    left_classes_2d = np.empty(flanking_left_2d.shape, dtype=classes_dtype)
-    right_classes_2d = np.empty(flanking_right_2d.shape, dtype=classes_dtype)
+    left_classes_2d = np.empty(flanking_left_2d.shape, dtype = "<U100") # hard-coded to accept max string length of 100
+    right_classes_2d = np.empty(flanking_right_2d.shape, dtype = "<U100")
     for member_aa, characteristic in chemical_class_dict.items():
         left_classes_2d[flanking_left_2d==member_aa] = characteristic
         right_classes_2d[flanking_right_2d==member_aa] = characteristic
@@ -282,7 +291,7 @@ def score_seqs(sequences, weighted_matrices, slim_length, convert_phospho = True
     left_positions = positions - 1
     right_positions = positions + 1
 
-    # Ending residues don't have neighbours on both sides; in these cases, use the existing neighbour twice
+    # Start/end residues don't have neighbours on both sides; in these cases, use the existing neighbour twice
     left_positions[0] = right_positions[0]
     right_positions[-1] = left_positions[-1]
 
@@ -300,24 +309,27 @@ def score_seqs(sequences, weighted_matrices, slim_length, convert_phospho = True
     right_keys_2d = np.char.add(right_prefixes_2d, right_classes_2d)
 
     # Convert matrices_dict to a dict of numpy arrays (rather than dataframes) for subsequent concatenation
-    matrices_arrays_dict = {}
-    for key, matrix in weighted_matrices.items():
-        matrices_arrays_dict[key] = matrix.to_numpy()
+    if matrix_type != "numpy":
+        matrices_arrays_dict = {}
+        for key, matrix in weighted_matrices.items():
+            matrices_arrays_dict[key] = matrix.to_numpy()
+    else:
+        matrices_arrays_dict = weighted_matrices
 
     # Get 3D array of shape (number_of_sequences, sequence_length, matrix_col_slice)
     left_positions_matrices_3d = np.empty((sequences_2d.shape[0], sequences_2d.shape[1], arbitrary_matrix.shape[0]))
     right_positions_matrices_3d = np.empty((sequences_2d.shape[0], sequences_2d.shape[1], arbitrary_matrix.shape[0]))
-    for seq_index in np.arange(sequences_2d.shape[0]):
-        for position_index in np.arange(sequences_2d.shape[1]):
-            left_key = left_keys_2d[seq_index,position_index]
-            left_matrix_array = matrices_arrays_dict.get(left_key)
-            left_matrix_slice = left_matrix_array[:,position_index] # col slice of array at matching seq aa position idx
-            left_positions_matrices_3d[seq_index,position_index] = left_matrix_slice
 
-            right_key = right_keys_2d[seq_index,position_index]
-            right_matrix_array = matrices_arrays_dict.get(right_key)
-            right_matrix_slice = right_matrix_array[:,position_index]
-            right_positions_matrices_3d[seq_index,position_index] = right_matrix_slice
+    for unique_key in np.unique(np.concatenate([left_keys_2d, right_keys_2d])):
+        unique_matrix = matrices_arrays_dict.get(unique_key)
+
+        # Iterate over columns (positions) in the unique matrix
+        for position_index, matrix_col_slice in enumerate(unique_matrix.T):
+            left_column_mask = np.where(left_keys_2d[:,position_index] == unique_key)
+            left_positions_matrices_3d[left_column_mask,position_index] = matrix_col_slice
+
+            right_column_mask = np.where(right_keys_2d[:,position_index] == unique_key)
+            right_positions_matrices_3d[right_column_mask, position_index] = matrix_col_slice
 
     # Get matrix row indices
     left_matrix_row_indices = np.empty_like(sequences_2d, dtype=int)
@@ -337,19 +349,27 @@ def score_seqs(sequences, weighted_matrices, slim_length, convert_phospho = True
 
     return final_points_array
 
-def apply_motif_scores(input_df, weighted_matrices, slim_length = None, seq_col = "No_Phos_Sequence",
-                       score_col = "SLiM_Score", add_residue_cols = False, in_place = False):
+def apply_motif_scores(input_df, slim_length, weighted_matrices, matrix_type = "df", matrix_index = None,
+                       seq_col = "No_Phos_Sequence", score_col = "SLiM_Score", convert_phospho = True,
+                       dict_of_aa_characs = aa_charac_dict, chemical_class_dict = None, add_residue_cols = False,
+                       in_place = False, return_array = True):
     '''
     Function to apply the score_seqs() function to all sequences in the source df and add residue cols for sorting
 
     Args:
-        input_df (pd.DataFrame):  dataframe containing the motif sequences to back-apply motif scores onto, that were originally used to generate the scoring system
-        weighted_matrices (dict): dictionary of type-position rule --> position-weighted matrix
-        slim_length (int): 		  the length of the motif being studied; only required if add_residue_cols is True
-        seq_col (str): 			  the column in dens_df that contains the peptide sequence to score (unphosphorylated, if model phospho-residues were collapsed to non-phospho during building)
-        score_col (str): 		  the column in dens_df that will contain the score values
-        add_residue_cols (bool):  whether to add columns containing individual residue letters, for sorting, in a df
-        in_place (bool):          whether to apply operations in-place; cannot be True if add_residue_cols is True
+        input_df (pd.DataFrame):    dataframe containing the motif sequences to back-apply motif scores onto, that were originally used to generate the scoring system
+        slim_length (int): 		    the length of the motif being studied
+        weighted_matrices (dict):   dictionary of type-position rule --> position-weighted matrix
+        matrix_type (str):          denotes whether each matrix is "df" (pd.DataFrame) or "numpy" (np.ndarray)
+        matrix_index (pd.Index):    only required if matrix_type is "numpy"; it is the index that matches the matrices'
+                                    dataframe counterparts, and is used for the get_indexer_for() method
+        seq_col (str): 			    the column in dens_df that contains the peptide sequence to score (unphosphorylated, if model phospho-residues were collapsed to non-phospho during building)
+        score_col (str): 		    the column in dens_df that will contain the score values
+        convert_phospho (bool):     whether to convert phospho-residues to non-phospho before doing lookups
+        dict_of_aa_characs (dict):  the dictionary of chemical_class --> [amino acid members]
+        chemical_class_dict (dict): an inverted dictionary of amino_acid --> chemical_class; auto-generated if not given
+        add_residue_cols (bool):    whether to add columns containing individual residue letters, for sorting, in a df
+        in_place (bool):            whether to apply operations in-place; cannot be True if add_residue_cols is True
 
     Returns:
         output_df (pd.DataFrame): dens_df with scores added
@@ -358,7 +378,10 @@ def apply_motif_scores(input_df, weighted_matrices, slim_length = None, seq_col 
     output_df = input_df if in_place else input_df.copy()
 
     sequences = input_df[seq_col].values.astype("<U")
-    scores = score_seqs(sequences, weighted_matrices, slim_length)
+    scores = score_seqs(sequences, slim_length, weighted_matrices, matrix_type, matrix_index,
+                        convert_phospho, dict_of_aa_characs, chemical_class_dict)
+    if return_array:
+        return scores
     output_df[score_col] = scores
 
     if add_residue_cols and not in_place:
@@ -376,7 +399,7 @@ def apply_motif_scores(input_df, weighted_matrices, slim_length = None, seq_col 
         final_columns.extend(current_cols[insert_index:])
 
         # Reassign the output df with the ordered columns
-        output_df = output_df[columns]
+        output_df = output_df[final_columns]
 
     elif add_residue_cols and in_place:
         raise Exception("apply_motif_scores error: in_place cannot be set to True when add_residue_cols is True")
@@ -462,18 +485,29 @@ def make_unweighted_matrices(input_df, percentiles_dict = None, slim_length = No
                         Define functions for parallelized optimization of matrix weights
    ------------------------------------------------------------------------------------------------------------------'''
 
-def process_weights_chunk(chunk, matrices_dict, source_df, slim_length, sequence_col, significance_col, score_col):
+def process_weights_chunk(chunk, matrix_arrays_dict, matrix_index, source_df, slim_length, sequence_col,
+                          significance_col, score_col, significant_str = "Yes", dict_of_aa_characs = aa_charac_dict,
+                          chemical_class_dict = None, convert_phospho = True):
     '''
     Lower helper function for parallelization of position weight optimization; processes chunks of permuted weights
 
+    Note that matrix_arrays_dict, unlike matrices_dict which appears elsewhere, contains numpy arrays instead of
+    pandas dataframes. This greatly improves performance, but requires the matching pd.Index to be passed separately.
+
     Args:
         chunk (np.ndarray):         the chunk of permuted weights currently being processed
-        matrices_dict (dict):       the dictionary of position-type rules --> unweighted matrices
+        matrix_arrays_dict (dict):  the dictionary of position-type rules --> unweighted matrices as np.ndarray
+        matrix_index (pd.Index):    the original index for the matrix arrays, as pd.Index, which may be queried using
+                                    get_indexer_for() without needing to query each matrix df
         source_df (pd.DataFrame):   the dataframe containing source peptide-protein binding data
         slim_length (int):          the length of the motif being studied
         sequence_col (str):         the name of the column where sequences are stored
         significance_col (str):     the name of the column where significance information is found
         score_col (str):            the name of the column where motif scores are found
+        significant_str (str):      the string representing a pass in source_df[significance_col]
+        dict_of_aa_characs (dict):  the dictionary of chemical_class --> [amino acid members]
+        chemical_class_dict (dict): an inverted dict of amino_acid --> chemical_characteristic; auto-generated if None
+        convert_phospho (bool):     whether to convert phospho-residues to non-phospho before doing lookups
 
     Returns:
         results_tuple (tuple):  (chunk_best_fdr, chunk_best_for, chunk_best_score_threshold, chunk_best_weights,
@@ -482,51 +516,86 @@ def process_weights_chunk(chunk, matrices_dict, source_df, slim_length, sequence
 
     output_df = source_df.copy()
 
-    chunk_best_fdr, chunk_best_for, chunk_best_score_threshold = 9999, 9999, 0
-    chunk_best_weights, chunk_best_weighted_matrices_dict, chunk_best_source_df = None, None, None
+    passes_bools = source_df[significance_col]==significant_str
+
+    # Initialize what will become a list of tuples of (best_score, best_fdr, best_for) matching the indices of chunk
+    optimal_values = []
 
     for weights_array in chunk:
-        current_weighted_matrices_dict = add_matrix_weights(weights_array, matrices_dict = matrices_dict)
+        # Apply the current weights_array to the dict of matrices as a numpy multiplication operation
+        current_weighted_matrices_dict = add_matrix_weights(weights_array, matrices_dict = matrix_arrays_dict)
 
-        apply_motif_scores(output_df, current_weighted_matrices_dict, slim_length, sequence_col, score_col, in_place = True)
+        # Get the array of scores for peptide entries in source_df using the current set of weighted matrices
+        scores_array = apply_motif_scores(output_df, slim_length, current_weighted_matrices_dict, "numpy", matrix_index,
+                                          sequence_col, score_col, convert_phospho, dict_of_aa_characs,
+                                          chemical_class_dict, return_array = True)
 
-        score_range_series = np.linspace(output_df["SLiM_Score"].min(), output_df["SLiM_Score"].max(), num=100)
-        current_best_score, current_best_fdr, current_best_for = apply_threshold(output_df, score_range_series,
-                                                                                 significance_col, score_col,
+        # Determine the optimal threshold score that gives balanced FDR/FOR values, which are inversely correlated
+        score_range_series = np.linspace(scores_array.min(), scores_array.max(), num=100)
+        current_best_score, current_best_fdr, current_best_for = apply_threshold(None, score_range_series,
+                                                                                 passes_bools = passes_bools,
+                                                                                 scores_array = scores_array,
                                                                                  return_optimized_fdr = True)
 
-        if not np.isnan(current_best_fdr) and not np.isnan(current_best_for):
-            if current_best_fdr < chunk_best_fdr:
-                chunk_best_fdr, chunk_best_for = current_best_fdr, current_best_for
-                chunk_best_score_threshold = current_best_score
-                chunk_best_weights, chunk_best_weighted_matrices_dict = weights_array, current_weighted_matrices_dict
-                chunk_best_source_df = output_df
+        optimal_values.append((current_best_score, current_best_fdr, current_best_for))
 
-    results_tuple = (chunk_best_fdr, chunk_best_for, chunk_best_score_threshold, chunk_best_weights, chunk_best_weighted_matrices_dict, chunk_best_source_df)
+    # Find the chunk index for the weights array that produces the lowest optimal FDR value
+    optimal_values_array = np.array(optimal_values)
+    optimal_values_array[np.isnan(optimal_values_array)] = np.inf
+    best_index = optimal_values_array[:,1].argmin()
+
+    chunk_best_score_threshold, chunk_best_fdr, chunk_best_for = optimal_values_array[best_index]
+    chunk_best_weights = chunk[best_index]
+
+    # Get the matching dict of weighted matrices and use it to apply final scores to output_df
+    best_weighted_matrices_dict = add_matrix_weights(chunk_best_weights, matrices_dict = matrix_arrays_dict)
+    chunk_best_source_df = apply_motif_scores(source_df, slim_length, best_weighted_matrices_dict, "numpy",
+                                              matrix_index, sequence_col, score_col, convert_phospho,
+                                              dict_of_aa_characs, chemical_class_dict, add_residue_cols = True,
+                                              in_place = False, return_array = False)
+
+    results_tuple = (chunk_best_fdr, chunk_best_for, chunk_best_score_threshold,
+                     chunk_best_weights, best_weighted_matrices_dict, chunk_best_source_df)
 
     return results_tuple
 
-def process_weights(weights_array_chunks, matrices_dict, slim_length, source_df, sequence_col, significance_col, score_col):
+def process_weights(weights_array_chunks, matrix_arrays_dict, matrix_index, slim_length, source_df,
+                    sequence_col, significance_col, score_col, dict_of_aa_characs = aa_charac_dict,
+                    chemical_class_dict = None, convert_phospho = True):
     '''
     Upper helper function for parallelization of position weight optimization; processes weights by chunking
 
     Args:
         weights_array_chunks (list): list of chunks as numpy arrays for feeding to process_weights_chunk
-        matrices_dict (dict):        the dictionary of position-type rules --> unweighted matrices
+        matrix_arrays_dict (dict):   the dictionary of position-type rules --> unweighted matrices as np.ndarray
+        matrix_index (pd.Index):     the original index for the matrix arrays, as pd.Index, which may be queried using
+                                     get_indexer_for() without needing to query each matrix df
         slim_length (int):           the length of the motif being studied
         source_df (pd.DataFrame):    the dataframe containing source peptide-protein binding data
         sequence_col (str):          the name of the column in chunk where sequences are stored
         significance_col (str):      the name of the column in chunk where significance information is found
         score_col (str):             the name of the column where motif scores are found
+        dict_of_aa_characs (dict):   the dictionary of chemical_class --> [amino acid members]
+        chemical_class_dict (dict):  an inverted dict of amino_acid --> chemical_characteristic; auto-generated if None
+        convert_phospho (bool):      whether to convert phospho-residues to non-phospho before doing lookups
 
     Returns:
         results_list (list):     the list of results sets for all the weights arrays
     '''
 
+    # Generate inverted version of dict_of_aa_characs if not given upfront
+    if not chemical_class_dict:
+        chemical_class_dict = {}
+        for characteristic, member_list in dict_of_aa_characs.items():
+            for member_aa in member_list:
+                chemical_class_dict[member_aa] = characteristic
+
     pool = multiprocessing.Pool()
-    process_partial = partial(process_weights_chunk, matrices_dict = matrices_dict, source_df = source_df,
-                              slim_length = slim_length, sequence_col = sequence_col,
-                              significance_col = significance_col, score_col = score_col)
+    process_partial = partial(process_weights_chunk, matrix_arrays_dict = matrix_arrays_dict,
+                              matrix_index = matrix_index, source_df = source_df, slim_length = slim_length,
+                              sequence_col = sequence_col, significance_col = significance_col, score_col = score_col,
+                              dict_of_aa_characs = None, chemical_class_dict = chemical_class_dict,
+                              convert_phospho = convert_phospho)
 
     results = None
     best_fdr = 9999
@@ -543,23 +612,26 @@ def process_weights(weights_array_chunks, matrices_dict, slim_length, source_df,
 
     return results
 
-def find_optimal_weights(input_df, slim_length, position_copies, matrices_dict, sequence_col, significance_col,
-                         score_col, matrix_output_folder, output_folder, chunk_size = 1000,
-                         save_pickled_matrix_dict = True):
+def find_optimal_weights(input_df, slim_length, position_copies, matrix_dataframes_dict, sequence_col, significance_col,
+                         score_col, matrix_output_folder, output_folder, dict_of_aa_characs = aa_charac_dict,
+                         convert_phospho = True, chunk_size = 1000, save_pickled_matrix_dict = True):
     '''
     Parent function for finding optimal position weights to generate optimally weighted matrices
 
     Args:
-        input_df (pd.DataFrame):     input dataframe containing all of the sequences, values, and significances
-        slim_length (int):          length of the motif being studied
-        position_copies (dict):     integer-keyed dictionary where values must be integers whose sum is equal to slim_length
-        matrices_dict (dict):       dictionary of position-type rules --> unweighted matrices
-        sequence_col (str):         the name of the column in chunk where sequences are stored
-        significance_col (str):     the name of the column in chunk where significance information is found
-        score_col (str):            the name of the column where motif scores are found
-        matrix_output_folder (str): the path for saving weighted matrices
-        output_folder (str):        the path for saving the scored data
-        chunk_size (int):           the number of position weights to process at a time
+        input_df (pd.DataFrame):         input dataframe containing all of the sequences, values, and significances
+        slim_length (int):               length of the motif being studied
+        position_copies (dict):          integer-keyed dictionary where values must be integers whose sum is equal to slim_length
+        matrix_dataframes_dict (dict):   the dictionary of position-type rules --> unweighted matrices as pd.DataFrame
+        sequence_col (str):              the name of the column in chunk where sequences are stored
+        significance_col (str):          the name of the column in chunk where significance information is found
+        score_col (str):                 the name of the column where motif scores are found
+        dict_of_aa_characs (dict):       the dictionary of chemical_class --> [amino acid members]
+        matrix_output_folder (str):      the path for saving weighted matrices
+        output_folder (str):             the path for saving the scored data
+        convert_phospho (bool):          whether to convert phospho-residues to non-phospho before doing lookups
+        chunk_size (int):                the number of position weights to process at a time
+        save_pickled_matrix_dict (bool): whether to save a pickled version of the dict of matrices
 
     Returns:
         results_tuple (tuple):  (best_fdr, best_for, best_score_threshold, best_weights, best_weighted_matrices_dict, best_dens_df)
@@ -571,15 +643,23 @@ def find_optimal_weights(input_df, slim_length, position_copies, matrices_dict, 
     expanded_weights_array = permute_weights(slim_length, position_copies)
     weights_array_chunks = [expanded_weights_array[i:i + chunk_size] for i in range(0, len(expanded_weights_array), chunk_size)]
 
+    # Make a dictionary of matrices as np.ndarray instead of dataframes, for performance improvement
+    arbitrary_matrix = list(matrix_dataframes_dict.values())[0]
+    matrix_index = arbitrary_matrix.index
+    matrix_arrays_dict = {}
+    for key, matrix_df in matrix_dataframes_dict.items():
+        matrix_arrays_dict[key] = matrix_df.to_numpy()
+
     # Run the parallelized optimization process
-    results = process_weights(weights_array_chunks, matrices_dict, slim_length, output_df, sequence_col, significance_col, score_col)
-    best_fdr, best_for, best_score_threshold, best_weights, best_weighted_matrices_dict, best_dens_df = results
+    results = process_weights(weights_array_chunks, matrix_arrays_dict, matrix_index, slim_length, output_df,
+                              sequence_col, significance_col, score_col, dict_of_aa_characs, None, convert_phospho)
+    best_fdr, best_for, best_score_threshold, best_weights, best_weighted_matrices_dict, best_scored_df = results
     print("\t---\n", f"\tOptimal weights of {best_weights} gave FDR = {best_fdr} and FOR = {best_for} at a SLiM score threshold > {best_score_threshold}")
 
     # Save the weighted matrices and scored data
     save_weighted_matrices(best_weighted_matrices_dict, matrix_output_folder, save_pickled_matrix_dict)
     scored_data_filename = "pairwise_scored_data_thres" + str(best_score_threshold) + ".csv"
-    save_dataframe(best_dens_df, output_folder, scored_data_filename)
+    save_dataframe(best_scored_df, output_folder, scored_data_filename)
     print(f"Saved weighted matrices and scored data to {output_folder}")
 
     return results
@@ -648,7 +728,8 @@ default_general_params = {"percentiles_dict": None,
                           "make_calls": True,
                           "optimize_weights": False,
                           "position_copies": None,
-                          "aa_charac_dict": aa_charac_dict}
+                          "aa_charac_dict": aa_charac_dict,
+                          "convert_phospho": True}
 
 def main(input_df, general_params = None, data_params = None, matrix_params = None, verbose = True):
     '''
@@ -668,6 +749,7 @@ def main(input_df, general_params = None, data_params = None, matrix_params = No
                                                 sum of copy_number values must be equal to slim_length;
                                                 required only if optimize_weights is True
                                             --> aa_charac_dict (dict): dictionary of chemical_characteristic --> [AAs]
+                                            --> convert_phospho (bool): whether to convert phospho-residues to unphospho
         data_params (dict):         dictionary of parameters describing the source_dataframe structure, used in matrix-building:
                                             --> bait (str): the bait to use for matrix generation; defaults to best if left blank
                                             --> bait_signal_col_marker (str): keyword that marks columns in source_dataframe that
@@ -714,6 +796,7 @@ def main(input_df, general_params = None, data_params = None, matrix_params = No
 
     # Apply weights to the generated matrices, or find optimal weights
     optimize_weights = general_params.get("optimize_weights")
+    convert_phospho = general_params.get("convert_phospho")
     sequence_col = data_params.get("seq_col")
     significance_col = data_params.get("bait_pass_col")
     score_col = data_params.get("dest_score_col")
@@ -724,7 +807,8 @@ def main(input_df, general_params = None, data_params = None, matrix_params = No
         position_copies = general_params.get("position_copies")
         results_tuple = find_optimal_weights(input_df, slim_length, position_copies, matrices_dict, sequence_col,
                                              significance_col, score_col, matrix_output_folder, output_folder,
-                                             chunk_size = 100, save_pickled_matrix_dict = True)
+                                             aa_charac_dict, convert_phospho, chunk_size = 1000,
+                                             save_pickled_matrix_dict = True)
         best_fdr, best_for, best_score_threshold, best_weights, weighted_matrices_dict, scored_df = results_tuple
         position_weights = best_weights
         output_statistics["FDR"] = best_fdr

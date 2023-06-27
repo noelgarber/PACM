@@ -125,17 +125,21 @@ def apply_always_allowed(matrix_df, always_allowed_dict, in_place = True):
 
     return output_df
 
-def add_matrix_weights(position_weights, matrix_df = None, matrices_dict = None):
+def add_matrix_weights(position_weights, matrix = None, matrices_dict = None):
     '''
     Function to apply the matrix weights by position to the generated matrices
 
     Args:
-        position_weights (np.ndarray):  list of position weights; length is equal to slim_length
-        matrix_df (pd.DataFrame):       if given, it is a single matrix to which weights will be applied
-        matrices_dict (dict):           if given, it is a dict of matrices, where weights are applied to each matrix
+        position_weights (np.ndarray):        list of position weights; length is equal to slim_length
+        matrix (pd.DataFrame or np.ndarray):  if given, it is a single matrix to which weights will be applied
+        matrices_dict (dict):                 if given, it is a dict of matrices (either as pd.DataFrame or np.ndarray),
+                                              where weights are applied to each matrix
 
     Returns:
-        output_df (pd.DataFrame):       the modified matrix_df
+        weighted_matrix (pd.DataFrame or np.ndarray): if a single matrix was given, this is the modified matrix of the
+                                                      same object type as the original (either df or ndarray)
+        weighted_matrices_dict (dict):                if a dict of matrices was given, this is the modified dict with
+                                                      weights applied, in the same object type as original (df or arr)
     '''
 
     if matrices_dict is not None:
@@ -145,8 +149,8 @@ def add_matrix_weights(position_weights, matrix_df = None, matrices_dict = None)
             weighted_matrices_dict[key] = weighted_matrix
         return weighted_matrices_dict
 
-    elif matrix_df is not None:
-        weighted_matrix = matrix_df * position_weights
+    elif matrix is not None:
+        weighted_matrix = matrix * position_weights
         return weighted_matrix
 
     else:
