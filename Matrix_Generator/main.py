@@ -131,13 +131,13 @@ def main(image_params = None, general_params = None, data_params = None, matrix_
                 pickle.dump((data_df, percentiles_dict), f)
 
     # Generate pairwise position-weighted matrices
+    general_params["percentiles_dict"] = percentiles_dict
+    general_params["output_folder"] = output_folder  # ensure same folder is used
+
+    data_params = data_params or default_data_params.copy()
+    matrix_params = matrix_params or default_matrix_params.copy()
+
     if generate_context_matrices:
-        general_params["percentiles_dict"] = percentiles_dict
-        general_params["output_folder"] = output_folder # ensure same folder is used
-
-        data_params = data_params or default_data_params.copy()
-        matrix_params = matrix_params or default_matrix_params.copy()
-
         pairwise_results = make_pairwise_matrices(data_df, general_params, data_params, matrix_params, verbose)
         scored_data_df, conditional_matrix_weights, weighted_matrices_dict, motif_statistics = pairwise_results
         if not generate_specificity_matrix:
