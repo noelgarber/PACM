@@ -656,6 +656,11 @@ def find_optimal_weights(input_df, slim_length, position_copies, matrix_datafram
     best_fdr, best_for, best_score_threshold, best_weights, best_weighted_matrices_dict, best_scored_df = results
     print("\t---\n", f"\tOptimal weights of {best_weights} gave FDR = {best_fdr} and FOR = {best_for} at a SLiM score threshold > {best_score_threshold}")
 
+    # Rebuild best_weighted_matrices_dict into a dict of dataframes rather than numpy arrays
+    for key, arr in best_weighted_matrices_dict.items():
+        df = pd.DataFrame(arr, index = arbitrary_matrix.index, columns = arbitrary_matrix.columns)
+        best_weighted_matrices_dict[key] = df
+
     # Save the weighted matrices and scored data
     save_weighted_matrices(best_weighted_matrices_dict, matrix_output_folder, save_pickled_matrix_dict)
     scored_data_filename = "pairwise_scored_data_thres" + str(best_score_threshold) + ".csv"
