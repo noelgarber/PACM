@@ -42,7 +42,8 @@ default_image_params = {"output_folder": "",
                         "save_pickled_data": True}
 
 def main(image_params = None, general_params = None, data_params = None, matrix_params = None, comparator_info = None,
-         specificity_params = None, use_cached_data = False, generate_specificity_matrix = True, verbose = True):
+         specificity_params = None, use_cached_data = False, generate_context_matrices = True,
+         generate_specificity_matrix = True, verbose = True):
     '''
     Main function for quantifying source data, generating context-aware matrices, and generating the specificity matrix
 
@@ -88,6 +89,7 @@ def main(image_params = None, general_params = None, data_params = None, matrix_
                                                 --> optimize_weights (bool): whether to optimize weights by attempting to maximize linear R2
                                                 --> position_copies (dict): dict used for generating permuted weights; sum of values must equal motif length
         use_cached_data (bool):             whether to use cached quantified data from a previous run
+        generate_context_matrices (bool):   whether tp generate context-aware position-weighted matrices for overall motif prediction
         generate_specificity_matrix (bool): whether to generate a specificity matrix
         verbose (bool):                     whether to display additional information in the command line
 
