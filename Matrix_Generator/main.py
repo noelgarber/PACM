@@ -131,16 +131,19 @@ def main(image_params = None, general_params = None, data_params = None, matrix_
                 pickle.dump((data_df, percentiles_dict), f)
 
     # Generate pairwise position-weighted matrices
-    general_params["percentiles_dict"] = percentiles_dict
-    general_params["output_folder"] = output_folder # ensure same folder is used
+    if generate_context_matrices:
+        general_params["percentiles_dict"] = percentiles_dict
+        general_params["output_folder"] = output_folder # ensure same folder is used
 
-    data_params = data_params or default_data_params.copy()
-    matrix_params = matrix_params or default_matrix_params.copy()
+        data_params = data_params or default_data_params.copy()
+        matrix_params = matrix_params or default_matrix_params.copy()
 
-    pairwise_results = make_pairwise_matrices(data_df, general_params, data_params, matrix_params, verbose)
-    scored_data_df, conditional_matrix_weights, weighted_matrices_dict, motif_statistics = pairwise_results
-    if not generate_specificity_matrix:
-        return scored_data_df, conditional_matrix_weights, weighted_matrices_dict, motif_statistics
+        pairwise_results = make_pairwise_matrices(data_df, general_params, data_params, matrix_params, verbose)
+        scored_data_df, conditional_matrix_weights, weighted_matrices_dict, motif_statistics = pairwise_results
+        if not generate_specificity_matrix:
+            return (scored_data_df, conditional_matrix_weights, weighted_matrices_dict, motif_statistics)
+    elif not generate_specificity_matrix:
+        return data_df
 
     # Get specificity matrix comparator info and ensure consistency with data_params
     comparator_info = comparator_info or default_comparator_info.copy()
@@ -153,7 +156,10 @@ def main(image_params = None, general_params = None, data_params = None, matrix_
     specificity_params["position_copies"] = general_params["position_copies"]
 
     # Generate specificity matrix and back-calculate scores
+    if not generate_context_matrices:
+        scored_data_df = data_df.copy()
     specificity_results = make_specificity_matrix(scored_data_df, comparator_info, specificity_params)
+
     specificity_score_values, specificity_weighted_matrix, linear_coef, linear_intercept, model_r2 = specificity_results
     scored_data_df["Specificity_Score"] = specificity_score_values
 
@@ -163,8 +169,10 @@ def main(image_params = None, general_params = None, data_params = None, matrix_
     specificity_statistics = {"coefficient": linear_coef, "intercept": linear_intercept,
                               "equation": linear_equation, "r2": model_r2}
 
-    return (scored_data_df, best_conditional_weights, weighted_matrices_dict, motif_statistics, specificity_weighted_matrix, specificity_statistics)
-
+    if generate_context_matrices and generate_specificity_matrix:
+        return (scored_data_df, conditional_matrix_weights, weighted_matrices_dict, motif_statistics, specificity_weighted_matrix, specificity_statistics)
+    elif generate_specificity_matrix:
+        return (scored_data_df, specificity_weighted_matrix, specificity_statistics)
 
 # If the script is executed directly, invoke the main workflow
 if __name__ == "__main__":
@@ -183,30 +191,41 @@ if __name__ == "__main__":
             seq_cols = list_inputter("Next col name:  ")
             image_params["peptide_seq_cols"] = seq_cols
 
-    # Define general params for context-aware matrix generation
-    general_params = default_general_params.copy()
-    general_params["slim_length"] = input_number("Please enter the length of the short linear motif being studied:  ", "int")
-    optimize_weights = input("Optimize context-aware matrix weights? (Y/N)  ") == "Y"
-    general_params["optimize_weights"] = optimize_weights
-    if not optimize_weights:
-        weights_list = input("Enter a comma-delimited list of predefined weights:  ")
-        weights_array = np.array(weights_list.split(",")).astype(float)
-        general_params["position_weights"] = weights_array
-
-    # Define source data params and matrix-building params for context-aware matrix generation; use defaults as-is
-    data_params = default_data_params.copy()
-    matrix_params = default_matrix_params.copy()
+    # Define general, source data, and matrix-building params for context-aware matrix generation
+    generate_context_matrices = input("Generate context-aware position-weighted matrices? (Y/N)  ") == "Y"
+    if generate_context_matrices:
+        general_params = default_general_params.copy()
+        general_params["slim_length"] = input_number("Please enter the length of the short linear motif being studied:  ", "int")
+        optimize_weights = input("Optimize context-aware matrix weights? (Y/N)  ") == "Y"
+        general_params["optimize_weights"] = optimize_weights
+        if not optimize_weights:
+            weights_list = input("Enter a comma-delimited list of predefined weights:  ")
+            weights_array = np.array(weights_list.split(",")).astype(float)
+            general_params["position_weights"] = weights_array
+        data_params = default_data_params.copy()
+        matrix_params = default_matrix_params.copy()
+    else:
+        general_params = None
+        optimize_weights = False
+        data_params = None
+        matrix_params = None
 
     # Define comparator info and specificity params for generating the specificity position-weighted matrix
-    comparator_info = default_comparator_info.copy()
-    specificity_params = default_specificity_params.copy()
-    optimize_specificity_weights = input("Optimize specificity matrix weights? (Y/N)  ")
-    optimize_specificity_weights = optimize_specificity_weights == "Y"
-    specificity_params["optimize_weights"] = optimize_specificity_weights
-    if not optimize_specificity_weights:
-        specificity_weights_list = input("Enter a comma-delimited list of predefined weights:  ")
-        specificity_weights_array = np.array(specificity_weights_list.split(",")).astype(float)
-        specificity_params["predefined_weights"] = specificity_weights_array
+    generate_specificity_matrix = input("Generate specificity position-weighted matrix? (Y/N)  ") == "Y"
+    if generate_specificity_matrix:
+        comparator_info = default_comparator_info.copy()
+        specificity_params = default_specificity_params.copy()
+        optimize_specificity_weights = input("Optimize specificity matrix weights? (Y/N)  ")
+        optimize_specificity_weights = optimize_specificity_weights == "Y"
+        specificity_params["optimize_weights"] = optimize_specificity_weights
+        if not optimize_specificity_weights:
+            specificity_weights_list = input("Enter a comma-delimited list of predefined weights:  ")
+            specificity_weights_array = np.array(specificity_weights_list.split(",")).astype(float)
+            specificity_params["predefined_weights"] = specificity_weights_array
+    else:
+        comparator_info = None
+        specificity_params = None
 
     # Execute the main function
-    main(image_params, general_params, data_params, matrix_params, comparator_info, specificity_params, use_cached_data)
+    main(image_params, general_params, data_params, matrix_params, comparator_info, specificity_params,
+         use_cached_data, generate_context_matrices, generate_specificity_matrix)
