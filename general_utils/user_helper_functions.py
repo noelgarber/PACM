@@ -1,5 +1,5 @@
 import numpy as np
-from general_utils.general_utils import input_number
+from general_utils.general_utils import input_number, list_inputter
 
 def get_min_members(display_message = True):
     '''
