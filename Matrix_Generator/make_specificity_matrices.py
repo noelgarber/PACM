@@ -53,15 +53,21 @@ def bias_ratio(source_df, least_different_values, thresholds = (1,-1), passes_co
 
 def reorder_matrix(matrix_df, include_phospho = False):
     # Basic function to add missing amino acid rows if necessary and reorder matrix_df by aa_list
-
     if not include_phospho:
         collapse_phospho(matrix_df)
 
-    aa_list = amino_acids if not include_phospho else amino_acids_phos
-    missing_row_indices = [residue for residue in aa_list if residue not in matrix_df.index]
-    if missing_row_indices:
-        new_rows = pd.DataFrame(0, columns = matrix_df.columns, index = missing_row_indices)
+    aa_list = list(amino_acids) if not include_phospho else list(amino_acids_phos)
+
+    missing_row_indices = []
+    for aa in aa_list:
+        if aa not in matrix_df.index:
+            missing_row_indices.append(aa)
+
+    if len(missing_row_indices) > 0:
+        new_rows = pd.DataFrame(0, index = missing_row_indices, columns = matrix_df.columns)
         matrix_df = pd.concat([matrix_df, new_rows])
+
+    # Reorder the matrix rows according to aa_list as the indices
     matrix_df = matrix_df.loc[aa_list]
 
     return matrix_df
@@ -70,7 +76,7 @@ def make_specificity_matrix(thresholds, matching_points = (2,1,-1,-2), bias_mult
                             log2fc_values = None, significance_array = None, source_df = None, sequence_col = None,
                             log2fc_col = None, significance_col = None, pass_str = "Yes", include_phospho = False):
     '''
-    Function for generating a position-weigted matrix by assigning points based on sequences and their log2fc values
+    Function for generating a position-weighted matrix by assigning points based on sequences and their log2fc values
 
     Args:
         thresholds (tuple):              tuple of (upper_positive_thres, middle_positive_thres, middle_negative_thres, upper_negative_thres)
@@ -78,7 +84,7 @@ def make_specificity_matrix(thresholds, matching_points = (2,1,-1,-2), bias_mult
         bias_multiplier (float):         ratio of data specific to the first set of comparators to those specific to the second set
         sequences (np.ndarray):          sequences can be given as a numpy array for performance improvement, otherwise source_df[sequence_col] is used
         log2fc_values (np.ndarray):      log2fc values can be given as a numpy array for performance improvement, otherwise source_df[log2fc_col] is used
-        significance_array (np.ndarray): significance calls (either as bool or str) can be given for performance improvement, otherwise source_df[significance_col] is sued
+        significance_array (np.ndarray): significance calls (either as bool or str) can be given for performance improvement, otherwise source_df[significance_col] is used
         source_df (pd.DataFrame):        source data; only required if sequences, log2fc_values, and significant_series are not given
         sequence_col (str):              sequence col name; only required if sequences is not given
         log2fc_col (str):                log2fc col name; only required if log2fc_values is not given
@@ -115,15 +121,15 @@ def make_specificity_matrix(thresholds, matching_points = (2,1,-1,-2), bias_mult
         log2fc_values = log2fc_values[significant_indices]
 
     # Check that all the sequences are the same length
-    same_length = np.all(np.char.str_len(sequences) == np.char.str_len(sequences[0]))
+    same_length = np.all(np.char.str_len(sequences.astype(str)) == np.char.str_len(sequences.astype(str)[0]))
     if not same_length:
         raise ValueError(f"source_df[{sequence_col}] sequences have varying length, but are required to be equal in length")
     sequence_length = len(sequences[0])
 
     # Find where log2fc values pass each threshold
     passes_upper_positive = np.where(log2fc_values >= thresholds[0])
-    passes_middle_positive = np.where(log2fc_values >= thresholds[1] & log2fc_values < thresholds[0])
-    passes_middle_negative = np.where(log2fc_values <= thresholds[2] & log2fc_values > thresholds[3])
+    passes_middle_positive = np.where(np.logical_and(log2fc_values >= thresholds[1], log2fc_values < thresholds[0]))
+    passes_middle_negative = np.where(np.logical_and(log2fc_values <= thresholds[2], log2fc_values > thresholds[3]))
     passes_upper_negative = np.where(log2fc_values <= thresholds[3])
 
     # Get an array of points values matching the sequences
@@ -134,7 +140,9 @@ def make_specificity_matrix(thresholds, matching_points = (2,1,-1,-2), bias_mult
     points_values[passes_upper_negative] = matching_points[3] * bias_multiplier
 
     # Convert sequences to array of arrays, and do the same for matching points
-    sequences_2d = np.array(list(sequences.view('|U1'))).reshape(sequences.shape + (-1,))
+    sequences = sequences.astype("<U")
+    sequences_unravelled = sequences.view("U1")
+    sequences_2d = np.reshape(sequences_unravelled, (-1, sequence_length))
     points_2d = np.repeat(points_values[:, np.newaxis], sequence_length, axis = 1)
 
     # Make a new matrix and apply points to it
@@ -182,7 +190,9 @@ def get_specificity_scores(sequences, log2fc_values, unweighted_matrix, position
     # Get the indices for the matrix for each amino acid at each position
     sequence_count = len(sequences)
     sequence_length = len(sequences[0])
-    sequences_2d = np.array(list(sequences.view('|U1'))).reshape(sequences.shape + (-1,))
+    sequences = sequences.astype("<U")
+    sequences_unravelled = sequences.view("U1")
+    sequences_2d = np.reshape(sequences_unravelled, (-1, sequence_length))
 
     row_indices = weighted_specificity_matrix.index.get_indexer(sequences_2d.ravel()).reshape(sequences_2d.shape)
     column_indices = np.arange(sequence_length)[np.newaxis, :].repeat(sequence_count, axis=0)
@@ -254,7 +264,7 @@ def main(source_df, comparator_info = None, specificity_params = None):
     if comparator_set_1 is None or comparator_set_2 is None:
         comparator_set_1, comparator_set_2 = get_comparator_baits()
     least_different_results = least_different(output_df, comparator_set_1, comparator_set_2,
-                                              return_series = True, return_df = True, in_place = False)
+                                              return_array = True, return_df = True, in_place = False)
     least_different_values, least_different_baits, output_df = least_different_results
 
     # Get the multiplier to adjust for asymmetric distribution of bait specificities in the data
@@ -263,7 +273,7 @@ def main(source_df, comparator_info = None, specificity_params = None):
         thresholds = tuple(get_delimited_list("Please enter a comma-delimited list of thresholds, in descending order, as floats:  ", 4))
     matching_points = specificity_params.get("matching_points")
     if matching_points is None:
-        matching_points = tuple(get_delimited_list(f"Please entner a comma-delimited list of associated points for each of the given thresholds ({thresholds}), in order, as floats:  ", 4))
+        matching_points = tuple(get_delimited_list(f"Please enter a comma-delimited list of associated points for each of the given thresholds ({thresholds}), in order, as floats:  ", 4))
 
     extreme_thresholds = (thresholds[0], thresholds[3])
     passes_col, pass_str = comparator_info.get("bait_pass_col"), comparator_info.get("pass_str")
@@ -271,15 +281,16 @@ def main(source_df, comparator_info = None, specificity_params = None):
 
     # Generate the unweighted specificity matrix
     sequence_col = comparator_info.get("seq_col")
+    sequences = source_df[sequence_col].to_numpy()
+    significance_array = source_df[passes_col].values == pass_str
     include_phospho = specificity_params.get("include_phospho")
-    unweighted_matrix = make_specificity_matrix(thresholds, matching_points, bias_multiplier, source_df = source_df,
-                                                sequence_col = sequence_col, log2fc_col = "least_different_log2fc",
-                                                significance_col = passes_col, pass_str = pass_str,
+    unweighted_matrix = make_specificity_matrix(thresholds, matching_points, bias_multiplier, sequences,
+                                                least_different_values, significance_array,
                                                 include_phospho = include_phospho)
 
     optimize_weights = specificity_params.get("optimize_weights")
     sequences = output_df[sequence_col].values
-    log2fc_values = output_df["least_different_log2fc"].values
+    log2fc_values = least_different_values
     sequence_length = len(sequences[0])
 
     if optimize_weights:
