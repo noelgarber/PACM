@@ -1,3 +1,4 @@
+import numpy as np
 import csv
 import os
 import pickle
@@ -222,26 +223,8 @@ def get_log2fc_cols(comparator_set_1, comparator_set_2):
 
     return log2fc_cols
 
-def get_least_different_baits(row):
-    '''
-    Helper function to get a tuple of baits that represent the least different set when comparing two comparator sets
-
-    Args:
-        row (pd.Series):  a row from a pandas dataframe where the only passed columns are the log2fc columns
-
-    Returns:
-        baits (str):      "bait1,bait2" representing the least different pair, one from each comparator set
-    '''
-
-    abs_values = row.abs()
-    min_abs_value = abs_values.min()
-    min_abs_value_cols = abs_values[abs_values == min_abs_value].index
-    baits = min_abs_value_cols[0].rsplit("_",1)
-
-    return baits
-
 def least_different(input_df, comparator_set_1 = None, comparator_set_2 = None, log2fc_cols = None, return_df = False,
-                    return_series = True, in_place = True):
+                    return_array = True, in_place = True):
     '''
     Simple function to determine the least different log2fc between permutations of the sets of comparators
 
@@ -251,13 +234,13 @@ def least_different(input_df, comparator_set_1 = None, comparator_set_2 = None, 
         comparator_set_2 (list):   the second set of comparator baits
         log2fc_cols (list):        list of columns; if not given, it will be auto-generated
         return_df (bool):          whether to return the modified dataframe
-        return_series (bool):      whether to return the least different value series and least different bait series
+        return_array (bool):       whether to return the least different value array and least different baits array
         in_place (bool):           whether to add "least_different_log2fc" and "least_different_baits" cols in-place
 
     Returns:
-        least_different_series (pd.Series): log2fc values for the least different pair of baits
-        least_different_baits (pd.Series):  tuples of (bait1, bait2) corresponding to least_diff_log2fc
-        output_df (pd.DataFrame):           returned instead of the series if return_df is True; modified df with series
+        least_different_values (np.ndarray): log2fc values for the least different pair of baits
+        least_different_baits (np.ndarray):  tuples of (bait1, bait2) corresponding to least_diff_log2fc
+        output_df (pd.DataFrame):            returned instead of the series if return_df is True; modified df with series
     '''
 
     if comparator_set_1 is None or comparator_set_2 is None:
@@ -268,19 +251,23 @@ def least_different(input_df, comparator_set_1 = None, comparator_set_2 = None, 
         log2fc_cols = get_log2fc_cols(comparator_set_1, comparator_set_2)
 
     # Get least different values and bait pairs
-    least_different_series = input_df[log2fc_cols].apply(lambda row: min(row, key=abs), axis=1)
-    least_different_baits = input_df[log2fc_cols].apply(get_least_different_baits, axis=1)
+    log2fc_array = input_df[log2fc_cols].to_numpy()
+    log2fc_array[np.isnan(log2fc_array)] = np.inf
+    least_different_indices = np.argmin(log2fc_array, axis=1)
+    least_different_values = np.min(log2fc_array, axis=1)
+    least_different_cols = np.array(log2fc_cols)[least_different_indices]
+    least_different_baits = [col.rsplit("_", 1)[0] for col in least_different_cols]
 
     # Assign columns if specified
     if in_place or return_df:
         output_df = input_df if in_place else input_df.copy()
-        output_df["least_different_log2fc"] = least_different_series
+        output_df["least_different_log2fc"] = least_different_values
         output_df["least_different_baits"] = least_different_baits
 
     # Return appropriate values
-    if return_series and not return_df:
-        return least_different_series, least_different_baits
-    elif return_series and return_df:
-        return least_different_series, least_different_baits, output_df
+    if return_array and not return_df:
+        return least_different_values, least_different_baits
+    elif return_array and return_df:
+        return least_different_values, least_different_baits, output_df
     elif return_df and not return_series:
         return output_df
