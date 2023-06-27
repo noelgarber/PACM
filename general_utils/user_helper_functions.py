@@ -130,7 +130,9 @@ def get_comparator_baits():
         comparator_set_2 (list): the second set of comparator baits
     '''
 
-    comparator_set_1 = list_inputter("For comparator bait set #1, input the baits one at a time:  ")
-    comparator_set_2 = list_inputter("For comparator bait set #2, input the baits one at a time:  ")
+    print("For comparator bait set #1, input the baits one at a time:  ")
+    comparator_set_1 = list_inputter("\tNext member of comparator pool 1:  ")
+    print("For comparator bait set #2, input the baits one at a time:  ")
+    comparator_set_2 = list_inputter("\tNext member of comparator pool 2:  ")
 
     return comparator_set_1, comparator_set_2
