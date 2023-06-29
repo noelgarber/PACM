@@ -163,6 +163,10 @@ def make_specificity_matrix(thresholds, matching_points = (2,1,-1,-2), bias_mult
     # Add missing amino acid rows if necessary and reorder matrix_df by aa_list
     matrix_df = reorder_matrix(matrix_df, include_phospho)
 
+    # Standardize matrix by max column values
+    max_values = matrix_df.max(axis=0)
+    matrix_df = matrix_df / max_values
+
     return matrix_df
 
 '''---------------------------------------------------------------------------------------------------------------------
