@@ -436,7 +436,7 @@ def main(source_df, comparator_info = None, specificity_params = None):
     # Apply score values to output dataframe
     score_values_all = np.zeros(shape=sequences.shape, dtype=float)
     score_values_all[significance_array] = score_values
-    output_df["Specificity_Score"] = score_values
+    output_df["Specificity_Score"] = score_values_all
 
     specificity_results = (output_df,) + specificity_results
 
