@@ -28,24 +28,34 @@ def make_empty_matrix(position_count, amino_acid_list, dtype=np.int64):
 
     return empty_matrix_df
 
-def increment_matrix(sequences, sorted_thresholds, signal_values, matrix_df):
+def increment_matrix(sequences, matrix_df, sorted_thresholds = None, signal_values = None, enforced_points = None,
+                     return_mean_points = False):
     '''
     Function to increment a position-weighted matrix based on sequences and their associated points values
 
     Args:
         sequences (array-like):     the sequences as a list of strings
+        matrix_df (pd.DataFrame):   the matrix to increment
         sorted_thresholds (list):   list of tuples of signal thresholds and associated points values
         signal_values (array-like): the signal values associated with the sequences
-        matrix_df (pd.DataFrame):   the matrix to increment
+        enforced_points (float):    if not using thresholding, this is the enforced points value used for incrementing;
+                                    negative values result in decrementing; should be set to -(mean points val) for
+                                    positive peptides if used for proportional decrementing
+        return_mean_points (bool):  whether to also return the mean points value for all positive peptides
 
     Returns:
         matrix_df (pd.DataFrame):   the updated matrix with incremented values
     '''
 
     # Get the relevant points values for each sequence
-    points_values = np.zeros(len(sequences), dtype=float)
-    for thres_val, points_val in sorted_thresholds:
-        points_values[signal_values >= thres_val] = points_val
+    if enforced_points is None:
+        points_values = np.zeros(len(sequences), dtype=float)
+        for thres_val, points_val in sorted_thresholds:
+            points_values[signal_values >= thres_val] = points_val
+    else:
+        points_values = np.ones(len(sequences), dtype=float) * enforced_points
+
+    mean_points = points_values.mean()
 
     # Get the indices for incrementing matrix_df
     rows_2d = np.array([matrix_df.index.get_indexer_for(list(seq)) for seq in sequences]) # list of arrays of row indices, for each residue in each sequence
@@ -67,7 +77,10 @@ def increment_matrix(sequences, sorted_thresholds, signal_values, matrix_df):
     # Reassign the matrix array back to a dataframe
     matrix_df = pd.DataFrame(matrix_array, index=matrix_df.index, columns=matrix_df.columns)
 
-    return matrix_df
+    if return_mean_points:
+        return matrix_df, mean_points
+    else:
+        return matrix_df
 
 def collapse_phospho(matrix_df, in_place = True):
     '''

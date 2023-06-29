@@ -3,7 +3,6 @@
 import numpy as np
 import pandas as pd
 import os
-import pickle
 import multiprocessing
 from tqdm import trange
 from functools import partial
@@ -59,7 +58,8 @@ default_matrix_params = {"thresholds_points_dict": None,
                          "amino_acids": amino_acids_phos,
                          "min_members": None,
                          "position_for_filtering": None,
-                         "clear_filtering_column": False}
+                         "clear_filtering_column": False,
+                         "penalize_negatives": True}
 
 def conditional_matrix(motif_length, source_dataframe, data_params = None, matrix_params = None):
     '''
@@ -85,6 +85,7 @@ def conditional_matrix(motif_length, source_dataframe, data_params = None, matri
                                                  type-position rule for the matrix to be built
                                              --> position_for_filtering (int): the position for the type-position rule being assessed
                                              --> clear_filtering_column (bool): whether to set values in the filtering column to zero
+                                             --> penalize_negatives (bool): whether to decrement the matrix based on negative peptides
 
     Returns:
         matrix_df (pd.DataFrame):		   standardized matrix for the given type-position rule
@@ -153,7 +154,18 @@ def conditional_matrix(motif_length, source_dataframe, data_params = None, matri
     masked_signal_values = mean_signal_values[logical_mask]
 
     # Conditionally increment the matrix by the number of points associated with its mean signal value
-    matrix_df = increment_matrix(masked_sequences, sorted_thresholds, masked_signal_values, matrix_df)
+    matrix_df, mean_points = increment_matrix(masked_sequences, matrix_df, sorted_thresholds, masked_signal_values,
+                                              return_mean_points = True)
+
+    # If penalizing negatives, decrement the matrix appropriately for negative peptides
+    penalize_negatives = matrix_params.get("penalize_negatives")
+    if penalize_negatives:
+        negative_points = mean_points * -1
+        inverse_logical_mask = np.logical_and(~pass_calls, qualifying_member_calls)
+        inverse_masked_sequences = sequences[inverse_logical_mask]
+        matrix_df = increment_matrix(inverse_masked_sequences, matrix_df, enforced_points = negative_points)
+        # Replace negative matrix values with 0
+        matrix_df[matrix_df < 0] = 0
 
     # Optionally set the filtering position to zero
     clear_filtering_column = matrix_params.get("clear_filtering_column")
