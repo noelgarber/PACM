@@ -53,43 +53,14 @@ def main(image_params = None, general_params = None, data_params = None, matrix_
                                                 --> "add_peptide_seqs" (bool): must be True when building matrices
                                                 --> "peptide_seq_cols" (list): col names, e.g. "BJO_Sequence"
                                                 --> "save_pickled_data" (bool): whether to pickle data for future re-use
-        general_params (dict):              general parameters as defined in make_pairwise_matrices:
-                                                Auto-generated params: "percentiles_dict", "always_allowed_dict"
-                                                Given in default_general_params: "aa_charac_dict"
-                                                Required always: "slim_length", "optimize_weights", "output_folder"
-                                                Required if optimizing weights: "position_copies"
-                                                Required if not optimizing weights: "position_weights", "make_calls"
-        data_params (dict):                 parameters describing source data, as defined in make_pairwise_matrices:
-                                                --> bait (str): the bait to use for matrix generation; defaults to best if left blank
-                                                --> bait_signal_col_marker (str): keyword that marks columns in source_dataframe that
-                                                     contain signal values; required only if bait is given
-                                                --> best_signal_col (str): column name with best signal values; used if bait is None
-                                                --> bait_pass_col (str): column name with pass/fail information
-                                                --> pass_str (str): the string representing a pass in bait_pass_col, e.g. "Yes"
-                                                --> seq_col (str): column name containing peptide sequences as strings
-        matrix_params (dict):               dictionary of parameters that affect matrix-building behaviour, used in matrix-building:
-                                                --> thresholds_points_dict (dict): dictionary where threshold_value --> points_value
-                                                --> included_residues (list): the residues included for the current type-position rule
-                                                --> amino_acids (tuple): the alphabet of amino acids to use when constructing the matrix
-                                                --> min_members (int): the minimum number of peptides that must follow the current
-                                                    type-position rule for the matrix to be built
-                                                --> position_for_filtering (int): the position for the type-position rule being assessed
-                                                --> clear_filtering_column (bool): whether to set values in the filtering column to zero
-        comparator_info (dict):             parameters describing comparator groups used for specificity analysis:
-                                                --> comparator_set_1 (list-like): 1st set of pooled baits; if blank, the user is prompted
-                                                --> comparator_set_2 (list-like): 2nd set of pooled baits; if blank, the user is prompted
-                                                --> seq_col (str): the name of the column in the source dataframe containing peptide seqs
-                                                --> bait_pass_col (str): same as in data_params
-                                                --> pass_str (str): same as in data_params
-        specificity_params (dict):          dictionary of parameters that affect specificity matrix-building behaviour:
-                                                --> thresholds (list-like): log2fc threshold values; if absent, the user is prompted
-                                                --> matching_points (list_like): matching points for the thresholds; prompted if absent
-                                                --> include_phospho (bool): whether to include phospho residues in the matrix, or collapse them
-                                                --> predefined_weights (list_like): if not optimizing weights, these are the position weights
-                                                --> optimize_weights (bool): whether to optimize weights by attempting to maximize linear R2
-                                                --> position_copies (dict): dict used for generating permuted weights; sum of values must equal motif length
+        general_params (dict):              as defined in make_pairwise_matrices.py
+        data_params (dict):                 as defined in make_pairwise_matrices.py
+        matrix_params (dict):               as defined in make_pairwise_matrices.py
+        comparator_info (dict):             as defined in make_specificity_matrices.py
+        specificity_params (dict):          as defined in make_specificity_matrices.py
         use_cached_data (bool):             whether to use cached quantified data from a previous run
-        generate_context_matrices (bool):   whether tp generate context-aware position-weighted matrices for overall motif prediction
+        generate_context_matrices (bool):   whether to generate context-aware position-weighted matrices for
+                                            overall motif prediction
         generate_specificity_matrix (bool): whether to generate a specificity matrix
         verbose (bool):                     whether to display additional information in the command line
 
@@ -130,6 +101,9 @@ def main(image_params = None, general_params = None, data_params = None, matrix_
             with open(save_path, "wb") as f:
                 pickle.dump((data_df, percentiles_dict), f)
 
+    if not generate_context_matrices and not generate_specificity_matrix:
+        return data_df
+
     # Generate pairwise position-weighted matrices
     general_params["percentiles_dict"] = percentiles_dict
     general_params["output_folder"] = output_folder  # ensure same folder is used
@@ -140,10 +114,6 @@ def main(image_params = None, general_params = None, data_params = None, matrix_
     if generate_context_matrices:
         pairwise_results = make_pairwise_matrices(data_df, general_params, data_params, matrix_params, verbose)
         scored_data_df, conditional_matrix_weights, weighted_matrices_dict, motif_statistics = pairwise_results
-        if not generate_specificity_matrix:
-            return (scored_data_df, conditional_matrix_weights, weighted_matrices_dict, motif_statistics)
-    elif not generate_specificity_matrix:
-        return data_df
 
     # Get specificity matrix comparator info and ensure consistency with data_params
     comparator_info = comparator_info or default_comparator_info.copy()
@@ -160,19 +130,42 @@ def main(image_params = None, general_params = None, data_params = None, matrix_
         scored_data_df = data_df.copy()
     specificity_results = make_specificity_matrix(scored_data_df, comparator_info, specificity_params)
 
-    specificity_score_values, specificity_weighted_matrix, linear_coef, linear_intercept, model_r2 = specificity_results
-    scored_data_df["Specificity_Score"] = specificity_score_values
+    scored_data_df = specificity_results[0]
+    specificity_weights = specificity_results[1]
+    specificity_weighted_matrix = specificity_results[3]
+    specificity_statistics = {"equation": specificity_results[4], "coefficient": specificity_results[5],
+                              "intercept": specificity_results[6], "r2": specificity_results[7]}
 
-    linear_intercept_signed = "+"+str(linear_intercept) if linear_intercept >= 0 else "-"+str(linear_intercept)
-    linear_equation = "y=" + str(linear_coef) + "x" + linear_intercept_signed
+    # Save data that has not been saved already
+    if generate_context_matrices or generate_specificity_matrix:
+        scored_data_df.to_csv(os.path.join(output_folder, "final_scored_data.csv"))
+    if generate_specificity_matrix:
+        specificity_weighted_matrix.to_csv(os.path.join(output_folder, "specificity_weighted_matrix.csv"))
 
-    specificity_statistics = {"coefficient": linear_coef, "intercept": linear_intercept,
-                              "equation": linear_equation, "r2": model_r2}
+    # Display final report in the command line
+    print("--------------------------------------------------------------------")
+    print("                       Final Analysis Report                        ")
+    if generate_context_matrices:
+        print("                     -------------------------                      ")
+        print("Context-aware position-weighted matrix weights:", conditional_matrix_weights)
+        print("Detected motif statistics: ")
+        print(motif_statistics)
+    if generate_specificity_matrix:
+        print("                     -------------------------                      ")
+        print("Specificity position-weighted matrix weights:", specificity_weights)
+        print("Specificity statistics: ")
+        print(specificity_statistics)
+    print("--------------------------------------------------------------------")
+
 
     if generate_context_matrices and generate_specificity_matrix:
-        return (scored_data_df, conditional_matrix_weights, weighted_matrices_dict, motif_statistics, specificity_weighted_matrix, specificity_statistics)
+        return (scored_data_df, conditional_matrix_weights, weighted_matrices_dict, motif_statistics,
+                specificity_weights, specificity_weighted_matrix, specificity_statistics)
+    elif generate_context_matrices:
+        return (scored_data_df, conditional_matrix_weights, weighted_matrices_dict, motif_statistics)
     elif generate_specificity_matrix:
-        return (scored_data_df, specificity_weighted_matrix, specificity_statistics)
+        return (scored_data_df, specificity_weights, specificity_weighted_matrix, specificity_statistics)
+
 
 # If the script is executed directly, invoke the main workflow
 if __name__ == "__main__":
