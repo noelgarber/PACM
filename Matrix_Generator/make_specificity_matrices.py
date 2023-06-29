@@ -2,6 +2,10 @@
 
 import numpy as np
 import pandas as pd
+import os
+import multiprocessing
+from tqdm import trange
+from functools import partial
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
 from general_utils.general_utils import least_different, get_delimited_list
@@ -204,8 +208,9 @@ def get_specificity_scores(sequences, log2fc_values, unweighted_matrix, position
 
     # Perform linear regression between log2fc values and scores
     model = LinearRegression()
-    x_actual = score_values.reshape(-1, 1)
-    y_actual = log2fc_values.reshape(-1, 1)
+    valid_indices = np.where(np.logical_and(~np.isnan(log2fc_values), ~np.isinf(log2fc_values)))
+    x_actual = score_values[valid_indices].reshape(-1, 1)
+    y_actual = log2fc_values[valid_indices].reshape(-1, 1)
     model.fit(x_actual, y_actual)
     coef = model.coef_
     intercept = model.intercept_
@@ -213,6 +218,107 @@ def get_specificity_scores(sequences, log2fc_values, unweighted_matrix, position
     r2 = r2_score(y_actual, y_pred)
 
     return (score_values, weighted_specificity_matrix, coef, intercept, r2)
+
+'''------------------------------------------------------------------------------------------------------------------
+                     Define functions for parallelized optimization of specificity matrix weights
+   ------------------------------------------------------------------------------------------------------------------'''
+
+def process_weights_chunk(chunk, significant_sequences, significant_log2fc, unweighted_matrix):
+    '''
+    Lower helper function for parallelization of position weight optimization for the specificity matrix
+
+    Args:
+        chunk (np.ndarray):                 the chunk of permuted weights currently being processed
+        significant_sequences (np.ndarray): 1D array of sequences of equal length that have passed significance testing
+        significant_log2fc (np.ndarray):    1D array of matching log2fc values for each sequence
+        unweighted_matrix (pd.DataFrame):   the unweighted specificity matrix onto which weights will be applied
+
+    Returns:
+        results_tuple (tuple):  best_weights is the array of optimal weights out of the current chunk
+                                best_r2 is the matching R2 value for the linear regression of scores with log2fc values
+    '''
+
+    sequence_length = len(chunk[0])
+    best_r2 = 0.0
+    best_weights = np.ones(sequence_length)
+    for permuted_weights in chunk:
+        _, _, _, _, current_r2 = get_specificity_scores(significant_sequences, significant_log2fc,
+                                                        unweighted_matrix, permuted_weights)
+        if current_r2 > best_r2:
+            best_weights = permuted_weights
+            best_r2 = current_r2
+
+    return (best_weights, best_r2)
+
+def process_weights(weights_array_chunks, significant_sequences, significant_log2fc, unweighted_matrix):
+    '''
+    Upper helper function for parallelization of position weight optimization; processes weights by chunking
+
+    Args:
+        weights_array_chunks (list): list of chunks as numpy arrays for feeding to process_weights_chunk
+        significant_sequences (np.ndarray): 1D array of sequences of equal length that have passed significance testing
+        significant_log2fc (np.ndarray):    1D array of matching log2fc values for each sequence
+        unweighted_matrix (pd.DataFrame):   the unweighted specificity matrix onto which weights will be applied
+
+    Returns:
+        results_list (list):     the list of results sets for all the weights arrays
+    '''
+
+    pool = multiprocessing.Pool()
+    process_partial = partial(process_weights_chunk, significant_sequences = significant_sequences,
+                              significant_log2fc = significant_log2fc, unweighted_matrix = unweighted_matrix)
+
+    best_weights = None
+    best_r2 = 0
+
+    with trange(len(weights_array_chunks), desc="Processing specificity matrix weights") as pbar:
+        for chunk_results in pool.imap_unordered(process_partial, weights_array_chunks):
+            if 1 >= chunk_results[1] > best_r2:
+                best_weights = chunk_results[0]
+                best_r2 = chunk_results[1]
+
+            pbar.update()
+
+    pool.close()
+    pool.join()
+
+    return best_weights, best_r2
+
+def find_optimal_weights(significant_sequences, significant_log2fc, unweighted_matrix, slim_length, position_copies,
+                         output_folder, chunk_size = 1000):
+    '''
+    Parent function for finding optimal position weights to generate an optimally weighted specificity matrix
+
+    Args:
+        significant_sequences (np.ndarray): 1D array of sequences of equal length that have passed significance testing
+        significant_log2fc (np.ndarray):    1D array of matching log2fc values for each sequence
+        unweighted_matrix (pd.DataFrame):   the unweighted specificity matrix onto which weights will be applied
+        slim_length (int):                  length of the motif being studied
+        position_copies (dict):             integer-keyed dictionary where values must be integers whose sum is equal to slim_length
+        output_folder (str):                the path for saving the weighted specificity matrix
+        chunk_size (int):                   the number of position weights to process at a time
+
+    Returns:
+        results_tuple (tuple):  (best_fdr, best_for, best_score_threshold, best_weights, best_weighted_matrices_dict, best_dens_df)
+    '''
+
+    # Get the permuted weights and break into chunks for parallelization
+    expanded_weights_array = permute_weights(slim_length, position_copies)
+    weights_array_chunks = [expanded_weights_array[i:i + chunk_size] for i in range(0, len(expanded_weights_array), chunk_size)]
+
+    # Run the parallelized optimization process
+    best_weights, best_r2 = process_weights(weights_array_chunks, significant_sequences, significant_log2fc, unweighted_matrix)
+    results = get_specificity_scores(significant_sequences, significant_log2fc, unweighted_matrix, best_weights)
+    score_values, weighted_specificity_matrix, coef, intercept, r2 = results
+    sign = "+" if intercept >= 0 else ""
+    equation = "y=" + str(coef) + "x" + sign + str(intercept)
+    print("\t---\n", f"\tOptimal weights of {best_weights} gave a score/log2fc R2 = {best_r2} for the equation {equation}")
+
+    # Save the weighted matrices and scored data
+    matrix_output_path = os.path.join(output_folder, "specificity_weighted_matrix.csv")
+    weighted_specificity_matrix.to_csv(matrix_output_path)
+
+    return (best_weights, score_values, weighted_specificity_matrix, equation, coef, intercept, r2)
 
 '''---------------------------------------------------------------------------------------------------------------------
                                       Define main functions and default parameters
@@ -229,7 +335,8 @@ default_specificity_params = {"thresholds": None,
                               "include_phospho": False,
                               "predefined_weights": None,
                               "optimize_weights": True,
-                              "position_copies": None}
+                              "position_copies": None,
+                              "output_folder": None}
 
 def main(source_df, comparator_info = None, specificity_params = None):
     '''
@@ -250,9 +357,11 @@ def main(source_df, comparator_info = None, specificity_params = None):
                                       --> predefined_weights (np.ndarray): set of weights to use if not optimize_weights
                                       --> optimize_weights (bool): whether to optimize weights from a permuted array
                                       --> position_copies (dict): idx > copies for permuting weights; sum(vals)=len(seq)
+                                      --> output_folder (str): the folder to save matrix and scored data into
 
     Returns:
-        final_results (tuple):     (scores (arr), weighted_matrix (df), coef, intercept, r2)
+        specificity_results (tuple):  (output_df, predefined_weights, score_values, weighted_matrix,
+                                       equation, coef, intercept, r2)
     '''
 
     output_df = source_df.copy()
@@ -289,26 +398,21 @@ def main(source_df, comparator_info = None, specificity_params = None):
                                                 include_phospho = include_phospho)
 
     optimize_weights = specificity_params.get("optimize_weights")
-    sequences = output_df[sequence_col].values
-    log2fc_values = least_different_values
+    significant_sequences = sequences[significance_array]
+    significant_least_different = least_different_values[significance_array]
     sequence_length = len(sequences[0])
+    output_folder = specificity_params.get("output_folder")
+    if not output_folder:
+        output_folder = input("Please enter a path where specificity matrix and scoring data should be saved:  ")
 
     if optimize_weights:
         # Determine optimal weights by maximizing the R2 value against a permuted array of weights arrays
         position_copies = specificity_params.get("position_copies")
-        permuted_weights_array = permute_weights(sequence_length, position_copies)
-
-        best_r2 = 0.0
-        best_weights = np.ones(sequence_length)
-        for permuted_weights in permuted_weights_array:
-            _, _, _, _, current_r2 = get_specificity_scores(sequences, log2fc_values, unweighted_matrix, permuted_weights)
-            if current_r2 > best_r2:
-                best_weights = permuted_weights
-                best_r2 = current_r2
-
-        final_results = get_specificity_scores(sequences, log2fc_values, best_weights)
-        final_score_values, final_weighted_matrix, final_coef, final_intercept, final_r2 = final_results
-        print(f"Optimal matrix weights, {best_weights}, gave an R2 value of {final_r2} for the equation y={final_coef}x+{final_intercept}")
+        specificity_results = find_optimal_weights(significant_sequences, significant_least_different,
+                                                   unweighted_matrix, sequence_length, position_copies, output_folder,
+                                                   chunk_size = 1000)
+        best_weights, score_values, weighted_specificity_matrix, equation, coef, intercept, r2 = specificity_results
+        print(f"Optimal matrix weights, {best_weights}, gave an R2 value of {r2} for the equation {equation}")
 
     else:
         # Use predefined weights, checked for correct dimensions and type
@@ -321,8 +425,19 @@ def main(source_df, comparator_info = None, specificity_params = None):
         if len(predefined_weights) != sequence_length:
             raise ValueError(f"predefined_weights length ({len(predefined_weights)}) does not match sequence_length ({sequence_length})")
 
-        final_results = get_specificity_scores(sequences, log2fc_values, unweighted_matrix, predefined_weights)
-        final_score_values, final_weighted_matrix, final_coef, final_intercept, final_r2 = final_results
+        results = get_specificity_scores(significant_sequences, significant_least_different, unweighted_matrix, predefined_weights)
+        score_values, weighted_matrix, coef, intercept, r2 = results
+        sign = "+" if intercept >= 0 else ""
+        equation = "y=" + str(coef) + "x" + sign + str(intercept)
+        specificity_results = (predefined_weights, score_values, weighted_matrix, equation, coef, intercept, r2)
+
         print(f"The given matrix weights, {predefined_weights}, gave an R2 value of {final_r2} for the equation y={final_coef}x+{final_intercept}")
 
-    return final_results
+    # Apply score values to output dataframe
+    score_values_all = np.zeros(shape=sequences.shape, dtype=float)
+    score_values_all[significance_array] = score_values
+    output_df["Specificity_Score"] = score_values
+
+    specificity_results = (output_df,) + specificity_results
+
+    return specificity_results
