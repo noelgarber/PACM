@@ -58,7 +58,7 @@ class SpotArray:
 
     def __init__(self, tiff_path, spot_dimensions, metadata = (None, None, None), show_sliced_image = False,
                  show_outlined_image = False, suppress_warnings = False, pixel_log_base = 1,
-                 ending_coord = None, arbitrary_coords_to_drop = None, verbose = False):
+                 ending_coord = None, arbitrary_coords_to_drop = None, buffer_width = 0, verbose = False):
         '''
         Initialization function invoked when a new instance of the SpotArray class is created
 
@@ -98,11 +98,12 @@ class SpotArray:
         self.analyze_array(ellipsoid_dilation_factor = 1, show_sliced_image = show_sliced_image,
                            show_outlined_image = show_outlined_image, show_individual_spot_images = False,
                            center_spots_mode = "iterative", ending_coord = ending_coord,
-                           arbitrary_coords_to_drop = arbitrary_coords_to_drop, verbose = verbose)
+                           arbitrary_coords_to_drop = arbitrary_coords_to_drop, buffer_width = buffer_width,
+                           verbose = verbose)
 
     def analyze_array(self, ellipsoid_dilation_factor = 1, show_sliced_image = False, show_outlined_image = False,
                       show_individual_spot_images = False, center_spots_mode = "iterative",
-                      ending_coord = None, arbitrary_coords_to_drop = None, verbose = False):
+                      ending_coord = None, arbitrary_coords_to_drop = None, buffer_width = 0, verbose = False):
         '''
         Main function to analyze and quantify grids of spots
 
@@ -115,6 +116,7 @@ class SpotArray:
             ending_coord (str):                 the last coord after which coords should be dropped;
                                                 e.g. if set to D5, all coords from D6 onwards will be deleted
             arbitrary_coords_to_drop (list):    list of coords to drop if desired
+            buffer_width (int):                 a positive integer used to dilate circles, when mode is iterative, before background adjustment
             verbose (Boolean):                  whether to display progress information for debugging
 
         Returns:
@@ -144,7 +146,7 @@ class SpotArray:
         # (unadjusted_signal, background_adjusted_signal, ellipsoid_index, peak_intersect, top_left_corner)
         print("\t\tcomputing background-adjusted signal and ellipsoid_index...") if verbose else None
         self.outlined_image, self.spot_info_dict = self.ellipsoid_constrain(spot_images = image_slices, dilation_factor = ellipsoid_dilation_factor,
-                                                                            centering_mode = center_spots_mode, verbose = verbose)
+                                                                            centering_mode = center_spots_mode, buffer_width = buffer_width, verbose = verbose)
 
         # Remove specified coords
         self.spot_info_dict = self.drop_specified_coords(self.spot_info_dict, ending_coord = ending_coord,
@@ -625,7 +627,9 @@ class SpotArray:
 
     #-------------------------------------------------------------------------------------------------------------------------------------------------------
 
-    def ellipsoid_constrain(self, spot_images, dilation_factor = 1, centering_mode = "iterative", spot_radius_mode = "inferred", return_coordinates_list = False, verbose = False):
+    def ellipsoid_constrain(self, spot_images, dilation_factor = 1, centering_mode = "iterative",
+                            spot_radius_mode = "inferred", return_coordinates_list = False, buffer_width = 0,
+                            verbose = False):
         '''
         Function that returns a dictionary of spot coordinates where the value is a tuple of:
             unadjusted_signal (float): sum of pixel values inside the ellipse defining the spot
@@ -647,6 +651,7 @@ class SpotArray:
             dilation_factor (float): a multiplier to enlarge or constrict the defined constraining ellipsoid
             centering_mode (str): mode for how to center and constrain the spot ellipsoid
             return_coordinates_list (bool): whether to reutrn a list of coordinates for the spots, in addition to the results dictionary
+            buffer_width (int): a positive integer used to dilate circles before declaring outside pixels for use in local background adjustment
             verbose (bool): whether to display debugging information
 
         Returns:
@@ -727,7 +732,10 @@ class SpotArray:
                 spot_radius = spot_radii.min() * dilation_factor  # enforce circles when ellipsoids are oblong
 
                 # Quantify the defined circle
-                pixels_inside, pixels_outside, unadjusted_signal, sum_outside, ellipsoid_index, background_adjusted_signal = circle_stats(grayscale_image, center = spot_midpoint, radius = spot_radius)
+                pixels_inside, pixels_outside, unadjusted_signal, sum_outside, ellipsoid_index, background_adjusted_signal = circle_stats(grayscale_image,
+                                                                                                                                          center = spot_midpoint,
+                                                                                                                                          radius = spot_radius,
+                                                                                                                                          buffer_width = buffer_width)
 
             # To the output dict, add a tuple containing the background-adjusted signal and the ellipsoid index
             output_dict[spot_coordinates] = (unadjusted_signal, background_adjusted_signal, ellipsoid_index, spot_midpoint, top_left_corner)
