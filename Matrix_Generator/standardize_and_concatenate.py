@@ -49,7 +49,7 @@ def get_image_dirs_dims():
     return output_dict
 
 def preprocess_list(image_directory_dims_dict = None, add_peptide_seqs = False, peptide_seq_cols = None,
-                    ending_coord = None, arbitrary_coords_to_drop = None):
+                    ending_coord = None, arbitrary_coords_to_drop = None, buffer_width = None):
     '''
     Function to preprocess a list of images
 
@@ -66,7 +66,8 @@ def preprocess_list(image_directory_dims_dict = None, add_peptide_seqs = False, 
         while not no_more_sets:
             df = preprocess_images(multiline_cols = False, add_peptide_seqs = add_peptide_seqs,
                                    peptide_seq_cols = peptide_seq_cols, ending_coord = ending_coord,
-                                   arbitrary_coords_to_drop = arbitrary_coords_to_drop, verbose = False)
+                                   arbitrary_coords_to_drop = arbitrary_coords_to_drop, buffer_width = buffer_width,
+                                   verbose = False)
             df_list.append(df)
             print("----------------------------------------------------------------")
             add_another_df = input("Would you like to process another set of images? (Y/N)  ")
@@ -198,14 +199,15 @@ def standardize_by_control(df_list):
     return df_list
 
 # Perform image pre-processing, quantified data processing, standardization, and concatenation
-def main_workflow(predefined_batch = True, add_peptide_seqs = False, peptide_seq_cols = None):
+def main_workflow(predefined_batch = True, add_peptide_seqs = False, peptide_seq_cols = None, buffer_width = None):
     # Preprocess the sets of images
     if predefined_batch:
         image_dirs_dims_dict = get_image_dirs_dims()
         df_list = preprocess_list(image_directory_dims_dict = image_dirs_dims_dict, add_peptide_seqs = add_peptide_seqs,
-                                  peptide_seq_cols = peptide_seq_cols)
+                                  peptide_seq_cols = peptide_seq_cols, buffer_width = buffer_width)
     else:
-        df_list = preprocess_list(add_peptide_seqs = add_peptide_seqs, peptide_seq_cols = peptide_seq_cols)
+        df_list = preprocess_list(add_peptide_seqs = add_peptide_seqs, peptide_seq_cols = peptide_seq_cols,
+                                  buffer_width = buffer_width)
 
     # Intra-Group Standardization to enforce consistent controls between baits, along with comparative processing
     control_probe_name = input("For comparative processing, enter the name of the probe control (e.g. \"Secondary-only\"): ")
