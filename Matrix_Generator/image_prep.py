@@ -22,7 +22,7 @@ def get_grid_dimensions(verbose = True):
     return spot_grid_dimensions
 
 def load_spot_arrays(filenames_list, image_directory, spot_grid_dimensions, pixel_log_base = 1, ending_coord = None,
-                     arbitrary_coords_to_drop = None, verbose = True):
+                     arbitrary_coords_to_drop = None, buffer_width = 0, verbose = True):
     '''
     Function to load a set of SpotArray objects and return them as a list
 
@@ -34,6 +34,8 @@ def load_spot_arrays(filenames_list, image_directory, spot_grid_dimensions, pixe
         ending_coord (str):              the last alphanumeric coordinate that represents a sample peptide,
                                          if trailing ones are blank
         arbitrary_coords_to_drop (list): if given, it is the list of coords to be dropped from the loaded spot data
+        buffer_width (int):              a positive integer used for defining a buffer between inner and outer pixels
+                                         for each spot during the background adjustment process
         verbose (bool):                  whether to display separator lines
 
     Returns:
@@ -51,7 +53,8 @@ def load_spot_arrays(filenames_list, image_directory, spot_grid_dimensions, pixe
         spot_array = SpotArray(tiff_path = file_path, spot_dimensions = spot_grid_dimensions, metadata = metadata_tuple,
                                show_sliced_image = False, show_outlined_image = False, suppress_warnings = False,
                                pixel_log_base = pixel_log_base, ending_coord = ending_coord,
-                               arbitrary_coords_to_drop = arbitrary_coords_to_drop, verbose = verbose)
+                               arbitrary_coords_to_drop = arbitrary_coords_to_drop, buffer_width = buffer_width,
+                               verbose = verbose)
         spot_arrays.append(spot_array)
     print("-----------------------") if verbose else None
     return spot_arrays
@@ -210,7 +213,7 @@ def add_peptide_names(data_df, names_path = None, include_seqs = False, cols_lis
 def main_preprocessing(image_directory = None, spot_grid_dimensions = None, output_dirs = None,
                        peptide_names_path = None, ellipsoid_index_thres = None, probes_ordered = None,
                        multiline_cols = True, add_peptide_seqs = False, peptide_seq_cols = None,
-                       ending_coord = None, arbitrary_coords_to_drop = None, verbose = True):
+                       ending_coord = None, arbitrary_coords_to_drop = None, buffer_width = None, verbose = True):
     if spot_grid_dimensions is None:
         spot_grid_dimensions = get_grid_dimensions(verbose = verbose)
     if image_directory is None:
@@ -219,10 +222,13 @@ def main_preprocessing(image_directory = None, spot_grid_dimensions = None, outp
 
     # Load images as SpotArray objects
     print("Loading and processing files as SpotArray objects...") if verbose else None
+    if buffer_width is None:
+        buffer_width = input_number("Please enter the buffer width separating spot pixels from surrounding pixels during background adjustment:  ", "int")
+
     spot_arrays = load_spot_arrays(filenames_list = filenames_list, image_directory = image_directory,
                                    spot_grid_dimensions = spot_grid_dimensions, pixel_log_base = 1,
                                    ending_coord = ending_coord, arbitrary_coords_to_drop = arbitrary_coords_to_drop,
-                                   verbose = verbose)
+                                   buffer_width = buffer_width, verbose = verbose)
 
     # Assemble a dataframe containing results values
     print("Assembling dataframe and saving images...") if verbose else None
