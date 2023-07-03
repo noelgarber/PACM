@@ -72,7 +72,7 @@ def concatenate_images(image_list):
 
     return concatenated_image
 
-def circle_stats(grayscale_image, center, radius):
+def circle_stats(grayscale_image, center, radius, buffer_width = 0):
     '''
     Function to obtain pixel counts/sums inside and outside of a defined circle
 
@@ -80,6 +80,9 @@ def circle_stats(grayscale_image, center, radius):
         grayscale_image (np.ndarray): image as 2D numpy array
         center (tuple): pair of (x,y) values representing the center point of the circle; x=horizontal and y=vertical
         radius (int): the radius of the circle to define
+        buffer_width (int): the excluded buffer zone between pixels inside the circle and pixels outside the circle;
+                            can be set to a positive value to remove effects of bleedover into the outer area during
+                            background adjustment
 
     Returns:
         pixels_inside (np.int64): number of pixels inside the defined circle
@@ -95,18 +98,20 @@ def circle_stats(grayscale_image, center, radius):
 
     # Create a binary mask to identify the pixels inside the circle
     mask = distance <= radius
+    dilated_mask = distance <= (radius + buffer_width)
 
     # Flatten the image and mask arrays
     flat_image = grayscale_image.flatten()
     flat_mask = mask.flatten()
+    flat_dilated_mask = dilated_mask.flatten()
 
     # Count the number of pixels inside the circle and outside the circle
     pixels_inside = np.sum(flat_mask)
-    pixels_outside = np.sum(~flat_mask)
+    pixels_outside = np.sum(~flat_dilated_mask)
 
     # Calculate the sum of pixel values inside the circle and outside the circle
     sum_inside = np.sum(flat_image[flat_mask])
-    sum_outside = np.sum(flat_image[~flat_mask])
+    sum_outside = np.sum(flat_image[~flat_dilated_mask])
 
     # Calculate the ellipsoid index
     mean_intensity_inside = sum_inside / pixels_inside
