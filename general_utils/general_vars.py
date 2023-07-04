@@ -2,8 +2,8 @@
 aa_charac_dict = {
     "Acidic": ["D", "E"],
     "Basic": ["K", "R", "H"],
-    "ST": ["S", "T"],
-    "Aromatic": ["F", "Y"],
+    "ST": ["S", "T", "B", "J"],
+    "Aromatic": ["F", "Y", "O"],
     "Aliphatic": ["A", "V", "I", "L"],
     "Other_Hydrophobic": ["W", "M"],
     "Polar_Uncharged": ["N", "Q", "C"],
