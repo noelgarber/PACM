@@ -15,8 +15,9 @@ from Matrix_Generator.make_specificity_matrices import default_comparator_info, 
 
 from general_utils.general_utils import input_number, list_inputter
 
-def get_data(output_folder=None, add_peptide_seqs=True,
-             peptide_seq_cols=["Phos_Sequence", "No_Phos_Sequence", "BJO_Sequence"], verbose=False):
+def get_data(output_folder = None, add_peptide_seqs = True,
+             peptide_seq_cols = ["Phos_Sequence", "No_Phos_Sequence", "BJO_Sequence"], buffer_width = None,
+             verbose = False):
     # Get output folder if not provided
     if output_folder is None:
         user_output_folder = input("Enter the folder for saving data, or leave blank to use the working directory:  ")
@@ -28,7 +29,8 @@ def get_data(output_folder=None, add_peptide_seqs=True,
     # Get the standardized concatenated dataframe containing all of the quantified peptide spot data
     print("Processing and standardizing the SPOT image data...") if verbose else None
     data_df, percentiles_dict = standardized_concatenate(predefined_batch = True, add_peptide_seqs = add_peptide_seqs,
-                                                         peptide_seq_cols = peptide_seq_cols)
+                                                         peptide_seq_cols = peptide_seq_cols,
+                                                         buffer_width = buffer_width)
     reindexed_data_df = data_df.reset_index(drop = False)
     reindexed_data_df.to_csv(os.path.join(output_folder, "standardized_and_concatenated_data.csv"))
 
@@ -39,7 +41,8 @@ def get_data(output_folder=None, add_peptide_seqs=True,
 default_image_params = {"output_folder": "",
                         "add_peptide_seqs": True,
                         "peptide_seq_cols": ["Phos_Sequence", "No_Phos_Sequence", "BJO_Sequence"],
-                        "save_pickled_data": True}
+                        "save_pickled_data": True,
+                        "buffer_width": None}
 
 def main(image_params = None, general_params = None, data_params = None, matrix_params = None, comparator_info = None,
          specificity_params = None, use_cached_data = False, generate_context_matrices = True,
@@ -90,9 +93,10 @@ def main(image_params = None, general_params = None, data_params = None, matrix_
     else:
         # Define necessary arguments for getting data
         add_peptide_seqs, peptide_seq_cols = image_params.get("add_peptide_seqs"), image_params.get("peptide_seq_cols")
+        buffer_width = image_params.get("buffer_width")
 
         # Obtain and quantify the data
-        data_df, percentiles_dict = get_data(output_folder, add_peptide_seqs, peptide_seq_cols, verbose)
+        data_df, percentiles_dict = get_data(output_folder, add_peptide_seqs, peptide_seq_cols, buffer_width, verbose)
 
         # Optionally save pickled quantified data for future runs
         save_pickled_data = image_params.get("save_pickled_data")
@@ -177,12 +181,18 @@ if __name__ == "__main__":
         save_pickled = input("Save pickled data from this run for future use? (Y/N)  ")
         save_pickled_data = save_pickled == "Y"
         image_params["save_pickled_data"] = save_pickled_data
+
         print("For adding sequences to quantified data, the following columns are expected:", image_params.get("peptide_seq_cols"))
         different_seq_cols = input("Use different sequence columns? (Y/N)  ")
         if different_seq_cols == "Y":
             print("Enter sequence columns one at a time.")
             seq_cols = list_inputter("Next col name:  ")
             image_params["peptide_seq_cols"] = seq_cols
+
+        buffer_width = image_params.get("buffer_width")
+        if buffer_width is None:
+            buffer_width = input_number("Please enter the buffer width for separating spot pixels from background pixels:  ", "int")
+            image_params["buffer_width"] = buffer_width
 
     # Define general, source data, and matrix-building params for context-aware matrix generation
     generate_context_matrices = input("Generate context-aware position-weighted matrices? (Y/N)  ") == "Y"
