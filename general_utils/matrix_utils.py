@@ -29,7 +29,7 @@ def make_empty_matrix(position_count, amino_acid_list, dtype=np.int64):
     return empty_matrix_df
 
 def increment_matrix(sequences, matrix_df, sorted_thresholds = None, signal_values = None, enforced_points = None,
-                     return_mean_points = False):
+                     return_mean_points = False, verbose = True):
     '''
     Function to increment a position-weighted matrix based on sequences and their associated points values
 
@@ -42,20 +42,30 @@ def increment_matrix(sequences, matrix_df, sorted_thresholds = None, signal_valu
                                     negative values result in decrementing; should be set to -(mean points val) for
                                     positive peptides if used for proportional decrementing
         return_mean_points (bool):  whether to also return the mean points value for all positive peptides
+        verbose (bool):             whether to display debugging info
 
     Returns:
         matrix_df (pd.DataFrame):   the updated matrix with incremented values
     '''
+
+    if len(sequences) == 0:
+        warnings.warn("increment_matrix warning: 0 sequences were passed, so matrix_df was returned as-is", category = RuntimeWarning)
+        if return_mean_points:
+            return matrix_df, 0
+        else:
+            return matrix_df
 
     # Get the relevant points values for each sequence
     if enforced_points is None:
         points_values = np.zeros(len(sequences), dtype=float)
         for thres_val, points_val in sorted_thresholds:
             points_values[signal_values >= thres_val] = points_val
+        mean_points = points_values.mean()
+        print(f"Assigned an average of {mean_points} points to {len(sequences)} positive peptides") if verbose else None
     else:
-        points_values = np.ones(len(sequences), dtype=float) * enforced_points
-
-    mean_points = points_values.mean()
+        points_values = np.repeat(enforced_points, len(sequences))
+        mean_points = enforced_points
+        print(f"Assigned {enforced_points} to {len(sequences)} negative peptides") if verbose else None
 
     # Get the indices for incrementing matrix_df
     rows_2d = np.array([matrix_df.index.get_indexer_for(list(seq)) for seq in sequences]) # list of arrays of row indices, for each residue in each sequence
