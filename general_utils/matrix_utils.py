@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import warnings
+from functools import partial
 
 def make_empty_matrix(position_count, amino_acid_list, dtype=np.int64):
     '''
@@ -28,24 +29,49 @@ def make_empty_matrix(position_count, amino_acid_list, dtype=np.int64):
 
     return empty_matrix_df
 
-def get_peptide_points(signal_values, sequence_count, sorted_thresholds, enforced_points = None, verbose = False):
+def continuous_points(x_value, peak_points, peak_at_signal):
+    '''
+    Simple function for continuous points assignment based on signal value, using a modified sigmoid function
+
+    Args:
+        x_value (float):        the signal value to evaluate for points assignment
+        peak_points (float):    maximum number of points that can be assigned
+        peak_at_signal (float): signal value threshold where maximum points are assigned, followed by a steady decrease
+
+    Returns:
+        points_at_x (float):    the evaluated number of points corresponding to the signal x_value given
+    '''
+
+    k = 2 / peak_at_signal
+    kx_minus_1 = (k * x_value) - 1
+    points_relative = (kx_minus_1 / (1 + kx_minus_1**2)) + 1/2
+    points = peak_points * points_relative
+
+    return points
+
+def get_peptide_points(signal_values, sequence_count, sorted_thresholds = None, use_sigmoid = False,
+                       sigmoid_peak_signal = 10, sigmoid_peak_points = 4, enforced_points = None, verbose = False):
     # Helper function to apply sorted thresholds, as tuples of (threshold, points), to an array of peptide sequences
 
-    if enforced_points is None:
+    if use_sigmoid:
+        get_points = partial(continuous_points, peak_points = sigmoid_peak_points, peak_at_signal = sigmoid_peak_signal)
+        points_values = [get_points(signal_val) for signal_val in signal_values]
+        points_values = np.array(points_values)
+    elif enforced_points is None:
         points_values = np.zeros(sequence_count, dtype=float)
         for thres_val, points_val in sorted_thresholds:
             points_values[signal_values >= thres_val] = points_val
-        mean_points = points_values.mean()
         print(f"Assigned an average of {mean_points} points to {sequence_count} positive peptides") if verbose else None
     else:
         points_values = np.repeat(enforced_points, sequence_count)
-        mean_points = enforced_points
         print(f"Assigned {enforced_points} to {sequence_count} negative peptides") if verbose else None
+
+    mean_points = points_values.mean()
 
     return points_values, mean_points
 
 def increment_matrix(sequences, matrix_df, sequences_2d = None, sorted_thresholds = None, signal_values = None,
-                     enforced_points = None, return_mean_points = False, verbose = False):
+                     enforced_points = None, points_mode = "use_sigmoid", return_mean_points = False, verbose = False):
     '''
     Function to increment a position-weighted matrix based on sequences and their associated points values
 
@@ -58,6 +84,10 @@ def increment_matrix(sequences, matrix_df, sequences_2d = None, sorted_threshold
         signal_values (array-like): the signal values associated with the sequences
         enforced_points (float):    if not using thresholding, this is the enforced points value used for incrementing;
                                     negative values result in decrementing
+        points_mode (str):          "use_sigmoid" calculates points by signal value, rising to a peak and then
+                                    decreasing to a plateau at half of the peak value;
+                                    "use_thresholds" uses sorted_thresholds;
+                                    "enforced_points" uses enforced_points as the same points value for all peptides
         return_mean_points (bool):  whether to also return the mean points value for all positive peptides
         verbose (bool):             whether to display debugging info
 
@@ -73,8 +103,19 @@ def increment_matrix(sequences, matrix_df, sequences_2d = None, sorted_threshold
         return results
 
     # Get the relevant points values for each sequence
-    points_values, mean_points = get_peptide_points(signal_values, sequence_count, sorted_thresholds,
-                                                    enforced_points, verbose)
+    if points_mode == "use_sigmoid":
+        mean_positive_signal = signal_values[signal_values >= 0].mean()
+        points_values, mean_points = get_peptide_points(signal_values, sequence_count, use_sigmoid = True,
+                                                        sigmoid_peak_signal = mean_positive_signal,
+                                                        sigmoid_peak_points = 4, verbose = verbose)
+    elif points_mode == "use_thresholds":
+        points_values, mean_points = get_peptide_points(signal_values, sequence_count, sorted_thresholds,
+                                                        verbose = verbose)
+    else:
+        if points_mode != "enforced_points":
+            print(f"increment_matrix got an invalid points_mode ({points_mode}); defaulting to enforced_points")
+        points_values, mean_points = get_peptide_points(None, sequence_count, enforced_points = enforced_points,
+                                                        verbose = verbose)
 
     # Get the indices for incrementing matrix_df
     if sequences_2d is None:
