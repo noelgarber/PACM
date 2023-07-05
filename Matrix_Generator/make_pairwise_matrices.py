@@ -7,7 +7,7 @@ import time
 import multiprocessing
 from tqdm import trange
 from functools import partial
-from general_utils.general_utils import input_number, save_dataframe, save_weighted_matrices
+from general_utils.general_utils import input_number, save_dataframe, save_weighted_matrices, unravel_seqs
 from general_utils.weights_utils import permute_weights
 from general_utils.matrix_utils import increment_matrix, make_empty_matrix, collapse_phospho, apply_always_allowed, add_matrix_weights
 from general_utils.general_vars import aa_charac_dict, amino_acids, amino_acids_phos
@@ -322,26 +322,6 @@ def make_unweighted_matrices(source_df, percentiles_dict, slim_length, residue_c
 '''------------------------------------------------------------------------------------------------------------------
                     Define functions for scoring source peptide sequences based on generated matrices
    ------------------------------------------------------------------------------------------------------------------'''
-
-def unravel_seqs(sequences_array, motif_length, convert_phospho = True):
-    # Simple function to convert an array of sequences of equal length to a 2D array of amino acid residues
-
-    # Check that all the sequences are an equal, correct length, and then unravel them into a 2D array of residues
-    sequence_lengths = np.vectorize(len)(sequences_array)
-    matches_slim_length = sequence_lengths == motif_length
-    if not matches_slim_length.all():
-        wrong_lengths_count = np.sum(~matches_slim_length)
-        raise ValueError(f"score_seqs error: {wrong_lengths_count} seqs (of {len(sequences)}) are not the expected length ({slim_length})")
-
-    sequences_array = sequences_array.astype("<U")
-    sequences_unravelled = sequences_array.view("U1")
-    sequences_2d = np.reshape(sequences_unravelled, (-1, motif_length))
-    if convert_phospho:
-        sequences_2d[sequences_2d=="B"] = "S"
-        sequences_2d[sequences_2d=="J"] = "T"
-        sequences_2d[sequences_2d=="O"] = "Y"
-
-    return sequences_2d
 
 def score_seqs(sequences, slim_length, weighted_matrix_of_matrices, matrix_index, encoded_chemical_classes,
                encoded_class_count, sequences_2d = None, convert_phospho = True):

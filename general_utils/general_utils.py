@@ -282,3 +282,23 @@ def print_whole_df(df, preceding_title = None):
     pd.set_option('display.max_columns', None)
     print(df)
     print("---")
+
+def unravel_seqs(sequences_array, motif_length, convert_phospho = True):
+    # Simple function to convert an array of sequences of equal length to a 2D array of amino acid residues
+
+    # Check that all the sequences are an equal, correct length, and then unravel them into a 2D array of residues
+    sequence_lengths = np.vectorize(len)(sequences_array)
+    matches_slim_length = sequence_lengths == motif_length
+    if not matches_slim_length.all():
+        wrong_lengths_count = np.sum(~matches_slim_length)
+        raise ValueError(f"score_seqs error: {wrong_lengths_count} seqs (of {len(sequences)}) are not the expected length ({slim_length})")
+
+    sequences_array = sequences_array.astype("<U")
+    sequences_unravelled = sequences_array.view("U1")
+    sequences_2d = np.reshape(sequences_unravelled, (-1, motif_length))
+    if convert_phospho:
+        sequences_2d[sequences_2d=="B"] = "S"
+        sequences_2d[sequences_2d=="J"] = "T"
+        sequences_2d[sequences_2d=="O"] = "Y"
+
+    return sequences_2d
