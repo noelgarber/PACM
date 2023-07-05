@@ -523,7 +523,7 @@ def process_weights_chunk(chunk, matrix_arrays_dict, matrix_index, source_df, sl
 
     output_df = source_df.copy()
 
-    passes_bools = source_df[significance_col]==significant_str
+    passes_bools = source_df[significance_col].values == significant_str
 
     start_time = time.time()
     # Convert the dictionary of matrices into a 3D numpy array with a dedicated pandas indexer

@@ -19,15 +19,18 @@ def get_rates(scores_array, passes_array, score_range_series, return_comprehensi
 
     above_thres_2d = scores_array >= score_range_series[:, np.newaxis]
     below_thres_2d = ~above_thres_2d
+    passes_array_2d = np.repeat(passes_array[np.newaxis,:], len(score_range_series), axis=0)
 
-    TP_counts = np.sum(above_thres_2d & passes_array, axis=1)
+    TP_counts = np.sum(above_thres_2d & passes_array_2d, axis=1)
     positive_calls_counts = above_thres_2d.sum(axis=1)
-    ppv_values = TP_counts / positive_calls_counts
 
-    fails_array = ~passes_array
+    fails_array = ~passes_array_2d
     TN_counts = np.sum(below_thres_2d & fails_array, axis=1)
     negative_calls_counts = below_thres_2d.sum(axis=1)
-    npv_values = TN_counts / negative_calls_counts
+
+    with np.errstate(divide = "ignore", invalid = "ignore"):
+        ppv_values = TP_counts / positive_calls_counts
+        npv_values = TN_counts / negative_calls_counts
 
     # Make an array where each row is [ppv_val, npv_val]
     if not return_comprehensive:
@@ -75,7 +78,7 @@ def optimize_threshold_fdr(input_df, score_range_series = None, sig_col = "One_P
     '''
 
     # Get required boolean arrays if not provided upfront
-    passes_bools = input_df[sig_col]==truth_value if passes_bools is None else passes_bools
+    passes_bools = input_df[sig_col].values == truth_value if passes_bools is None else passes_bools
     scores_array = input_df[score_col].to_numpy() if scores_array is None else scores_array
 
     # Make a range of SLiM scores between the minimum and maximum score values from the dataframe
@@ -83,7 +86,7 @@ def optimize_threshold_fdr(input_df, score_range_series = None, sig_col = "One_P
         score_range_series = get_score_ranges(input_df, score_col, range_count, verbose)
 
     # Find the row where the FDR/FOR ratio is closest to 1, and use that for the FDR
-    fdr_for_array = get_fdrs_fors(scores_array, passes_bools, score_range_series)
+    fdr_for_array = get_rates(scores_array, passes_bools, score_range_series, return_comprehensive = False)
 
     with np.errstate(divide="ignore"):
         ratios = fdr_for_array[:,0] / fdr_for_array[:,1]
