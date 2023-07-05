@@ -12,7 +12,7 @@ from general_utils.weights_utils import permute_weights
 from general_utils.matrix_utils import increment_matrix, make_empty_matrix, collapse_phospho, apply_always_allowed, add_matrix_weights
 from general_utils.general_vars import aa_charac_dict, amino_acids, amino_acids_phos
 from general_utils.user_helper_functions import get_min_members, get_thresholds, get_always_allowed, get_position_weights
-from general_utils.statistics import apply_threshold
+from general_utils.statistics import optimize_threshold_fdr, apply_threshold
 
 def qualifying_entries_count(source_dataframe, seq_col, position_for_filtering, residues_included_at_filter_position):
     '''
@@ -575,10 +575,9 @@ def process_weights_chunk(chunk, matrix_arrays_dict, matrix_index, source_df, sl
 
         # Determine the optimal threshold score that gives balanced FDR/FOR values, which are inversely correlated
         score_range_series = np.linspace(scores_array.min(), scores_array.max(), num=100)
-        current_best_score, current_best_fdr, current_best_for = apply_threshold(None, score_range_series,
-                                                                                 passes_bools = passes_bools,
-                                                                                 scores_array = scores_array,
-                                                                                 return_optimized_fdr = True)
+        best_results = optimize_threshold_fdr(None, score_range_series, passes_bools = passes_bools,
+                                              scores_array = scores_array, verbose = verbose)
+        current_best_score, current_best_fdr, current_best_for = best_results
         t3 = time.time() # uses around 93% of the total time
 
         total_elapsed = t3 - t0
@@ -724,7 +723,7 @@ def find_optimal_weights(input_df, slim_length, position_copies, matrix_datafram
    ------------------------------------------------------------------------------------------------------------------'''
 
 def apply_predefined_weights(input_df, position_weights, matrices_dict, slim_length, sequence_col, significance_col,
-                             score_col, matrix_output_folder, output_folder, make_calls):
+                             truth_val, score_col, matrix_output_folder, output_folder, make_calls):
     '''
     Function that applies and assesses a given set of weights against matrices and source data
 
@@ -735,6 +734,7 @@ def apply_predefined_weights(input_df, position_weights, matrices_dict, slim_len
         slim_length (int): 			the length of the motif being studied
         sequence_col (str):         the column in the dataframe that contains peptide sequences
         significance_col (str): 	the column in the dataframe that contains significance calls (Yes/No)
+        truth_val (str):          the value to test against input_df[significance_col]
         score_col (str):            the name of the column where motif scores are found
         matrix_output_folder (str): the path to the folder where final matrices should be saved
         output_folder (str): 		the path to the folder where the output data should be saved
@@ -761,12 +761,12 @@ def apply_predefined_weights(input_df, position_weights, matrices_dict, slim_len
 
     # Use thresholding to declare true/false positives/negatives in the peptide sequences
     if make_calls:
-        output_df, selected_threshold, predictive_value_df = apply_threshold(output_df, sig_col = significance_col,
-                                                                             score_col = score_col)
+        results = apply_threshold(output_df, sig_col = significance_col, score_col = score_col, truth_value = truth_val)
+        output_df, selected_threshold, predictive_value_df = results
     else:
         selected_threshold = None
         predictive_value_df = apply_threshold(output_df, sig_col = significance_col, score_col = score_col,
-                                              return_pred_vals_only = True)
+                                              truth_value = truth_val, return_predictive_only = True)
 
     # Save the weighted matrices and scored data
     save_weighted_matrices(weighted_matrices_dict, matrix_output_folder, save_pickled_dict = True)
@@ -880,7 +880,8 @@ def main(input_df, general_params = None, data_params = None, matrix_params = No
         position_weights = general_params.get("position_weights")
         make_calls = general_params.get("make_calls")
         results = apply_predefined_weights(input_df, position_weights, matrices_dict, slim_length, sequence_col,
-                                           significance_col, score_col, matrix_output_folder, output_folder, make_calls)
+                                           significance_col, significant_str, score_col, matrix_output_folder,
+                                           output_folder, make_calls)
         scored_df, weighted_matrices_dict, predictive_value_df = results
         output_statistics["predictive_value_df"] = predictive_value_df
 
