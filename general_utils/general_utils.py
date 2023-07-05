@@ -271,3 +271,14 @@ def least_different(input_df, comparator_set_1 = None, comparator_set_2 = None, 
         return least_different_values, least_different_baits, output_df
     elif return_df and not return_series:
         return output_df
+
+
+def print_whole_df(df, preceding_title = None):
+    # Simple helper function for displaying the score threshold selection dataframe
+
+    print("---")
+    print(preceding_title) if preceding_title else None
+    pd.set_option('display.max_rows', None)
+    pd.set_option('display.max_columns', None)
+    print(df)
+    print("---")
