@@ -55,6 +55,7 @@ default_data_params = {"bait": None,
                        "dest_score_col": "SLiM_Score"}
 
 default_matrix_params = {"thresholds_points_dict": None,
+                         "points_assignment_mode": "continuous",
                          "included_residues": amino_acids_phos,
                          "amino_acids": amino_acids_phos,
                          "include_phospho": False,
@@ -62,6 +63,69 @@ default_matrix_params = {"thresholds_points_dict": None,
                          "position_for_filtering": None,
                          "clear_filtering_column": False,
                          "penalize_negatives": True}
+
+def check_seq_lengths(seq_series, expected_length):
+    # Helper function to check that a pandas series of peptide sequences is all the same length
+
+    sequence_lengths = seq_series.str.len()
+    if sequence_lengths.nunique() > 1:
+        error_state = ValueError(f"weighted_matrix error: source_dataframe sequences in \"{seq_col}\" vary in length from {sequence_lengths.min()} to {sequence_lengths.max()}, but must be equal.")
+    elif sequence_lengths[0] != expected_length:
+        error_state = ValueError(f"weighted_matrix error: source_dataframe sequences are {sequence_lengths[0]} amino acids long, but motif_length is set to {motif_length}")
+    else:
+        error_state = None
+
+    if error_state:
+        raise error_state
+
+def get_signal_cols(source_df, data_params):
+    # Helper function to extract signal value containing columns from the source dataframe
+
+    bait = data_params.get("bait")
+    if bait is None:
+        signal_cols = [data_params.get("best_signal_col")]
+    else:
+        signal_col_marker = data_params.get("bait_signal_col_marker")
+        signal_cols = []
+        for col in source_df.columns:
+            if bait in col and signal_col_marker in col:
+                signal_cols.append(col)
+
+    return signal_cols
+
+def decrement_negatives(penalize_negatives, matrix_df, pass_calls, qualifying_member_calls, sequences_2d,
+                        masked_sequences_2d, mean_positive_points):
+    # Helper function for conditional_matrix() that decrements the matrix based on negative peptides if indicated
+
+    if penalize_negatives:
+        inverse_logical_mask = np.logical_and(~pass_calls, qualifying_member_calls)
+        inverse_masked_sequences_2d = sequences_2d[inverse_logical_mask]
+
+        # Decrement the matrix based on inverse masked sequences
+        if len(inverse_masked_sequences_2d) > 0:
+            # Adjust for inequality in number of negative hits compared to positive
+            positive_count = len(masked_sequences_2d)
+            negative_count = len(inverse_masked_sequences_2d)
+            positive_negative_ratio = positive_count / negative_count
+            negative_points = -1 * mean_positive_points * positive_negative_ratio
+
+            # Only use AAs that are never found in passing peptides, i.e. forbidden AAs, to decrement the matrix
+            for col_number in np.arange(inverse_masked_sequences_2d.shape[1]):
+                positive_masked_col = masked_sequences_2d[:, col_number]
+                negative_masked_col = inverse_masked_sequences_2d[:, col_number]
+                for aa in np.unique(negative_masked_col):
+                    if np.isin(aa, positive_masked_col):
+                        # Set non-forbidden residues to X such that they will not be used to decrement the matrix
+                        negative_masked_col[negative_masked_col == aa] = "X"
+                inverse_masked_sequences_2d[:, col_number] = negative_masked_col
+
+            matrix_df = increment_matrix(None, matrix_df, inverse_masked_sequences_2d,
+                                         enforced_points = negative_points, points_mode = "enforced_points")
+
+        else:
+            print("No failing sequences found for the current type-position rule, so negatives were not penalized.")
+
+    return matrix_df
 
 def conditional_matrix(motif_length, source_dataframe, data_params = None, matrix_params = None):
     '''
@@ -94,28 +158,16 @@ def conditional_matrix(motif_length, source_dataframe, data_params = None, matri
     '''
 
     # Get default params if any of them are set to None
-    if data_params is None:
-        data_params = default_data_params.copy()
-    if matrix_params is None:
-        matrix_params = default_matrix_params.copy()
+    data_params = default_data_params.copy() if data_params is None else data_params
+    matrix_params = default_matrix_params.copy() if matrix_params is None else matrix_params
 
-    # Define the position for filtering, for the conditional matrix being generated
+    # Extract and unravel sequences and filter position
     position_for_filtering = matrix_params.get("position_for_filtering")
     index_for_filtering = position_for_filtering - 1
-
-    # Get the dictionary of signal thresholds and associated points for peptides
-    thresholds_points_dict = matrix_params.get("thresholds_points_dict")
-
-    # Check if the sequences are all the same length and equal to motif_length, which is required
     seq_col = data_params.get("seq_col")
-    sequence_lengths = source_dataframe[seq_col].str.len()
-    if sequence_lengths.nunique() > 1:
-        raise ValueError(f"weighted_matrix error: source_dataframe sequences in \"{seq_col}\" vary in length from {sequence_lengths.min()} to {sequence_lengths.max()}, but must be equal.")
-    elif sequence_lengths[0] != motif_length:
-        raise ValueError(f"weighted_matrix error: source_dataframe sequences are {sequence_lengths[0]} amino acids long, but motif_length is set to {motif_length}")
-
-    # Sort the thresholds
-    sorted_thresholds = sorted(thresholds_points_dict.items(), reverse = True)
+    sequences = source_dataframe[seq_col].to_numpy()
+    check_seq_lengths(source_dataframe[seq_col], motif_length)  # check that all seqs in seq_col are the same length
+    sequences_2d = unravel_seqs(sequences, motif_length, convert_phospho=False)
 
     # Create a dataframe where the index is the list of amino acids and the columns are the positions (e.g. #1)
     amino_acids = matrix_params.get("amino_acids")
@@ -125,25 +177,13 @@ def conditional_matrix(motif_length, source_dataframe, data_params = None, matri
     min_members = matrix_params.get("min_members")
     included_residues = matrix_params.get("included_residues")
     num_qualifying_entries = qualifying_entries_count(source_dataframe, seq_col, position_for_filtering, included_residues)
-    if num_qualifying_entries < min_members:
-        # Default to no filtering, which means an unfiltered position-weighted matrix will be returned
-        included_residues = amino_acids
+    included_residues = matrix_params.get("included_residues") if num_qualifying_entries >= min_members else amino_acids
 
-    # Get the bait name and data column information
-    bait = data_params.get("bait")
+    # Get signal values and pass/fail information
+    signal_cols = get_signal_cols(source_dataframe, data_params)
     pass_col = data_params.get("bait_pass_col")
-    if bait is None:
-        signal_cols = [data_params.get("best_signal_col")]
-    else:
-        signal_col_marker = data_params.get("bait_signal_col_marker")
-        signal_cols = []
-        for col in source_dataframe.columns:
-            if bait in col and signal_col_marker in col:
-                signal_cols.append(col)
-
-    mean_signal_values = source_dataframe[signal_cols].mean(axis=1).values
-    pass_values = source_dataframe[pass_col].values
-    sequences = source_dataframe[seq_col].values
+    mean_signal_values = source_dataframe[signal_cols].mean(axis=1).to_numpy()
+    pass_values = source_dataframe[pass_col].to_numpy()
 
     # Get boolean calls for whether each peptide passes and is a qualifying member of the matrix's filtering rule
     pass_str = data_params.get("pass_str")
@@ -154,30 +194,32 @@ def conditional_matrix(motif_length, source_dataframe, data_params = None, matri
 
     # Get the sequences and signal values to use for incrementing the matrix
     logical_mask = np.logical_and(pass_calls, qualifying_member_calls)
-    masked_sequences = sequences[logical_mask]
+    masked_sequences_2d = sequences_2d[logical_mask]
     masked_signal_values = mean_signal_values[logical_mask]
 
-    # Conditionally increment the matrix by the number of points associated with its mean signal value
-    matrix_df, mean_points = increment_matrix(masked_sequences, matrix_df, sorted_thresholds, masked_signal_values,
-                                              return_mean_points = True)
+    # Assign points for positive peptides and increment the matrix
+    points_assignment_mode = matrix_params.get("points_assignment_mode")
+    if points_assignment_mode == "continuous":
+        matrix_df, mean_points = increment_matrix(None, matrix_df, masked_sequences_2d,
+                                                  signal_values = masked_signal_values, points_mode = "continuous",
+                                                  return_mean_points = True)
+    elif points_assignment_mode == "thresholds":
+        thresholds_points_dict = matrix_params.get("thresholds_points_dict")
+        sorted_thresholds = sorted(thresholds_points_dict.items(), reverse=True)
+        matrix_df, mean_points = increment_matrix(None, matrix_df, masked_sequences_2d, sorted_thresholds,
+                                                  masked_signal_values, return_mean_points = True)
+    else:
+        raise ValueError(f"conditional_matrix error: matrix_params[\"points_assignment_mode\"] is set to {points_assignment_mode}, which is not an accepted mode for positive peptides")
 
     # If penalizing negatives, decrement the matrix appropriately for negative peptides
-    penalize_negatives = matrix_params.get("penalize_negatives")
-    if penalize_negatives:
-        negative_points = mean_points * -1
-        inverse_logical_mask = np.logical_and(~pass_calls, qualifying_member_calls)
-        inverse_masked_sequences = sequences[inverse_logical_mask]
-        if len(inverse_masked_sequences) > 0:
-            matrix_df = increment_matrix(inverse_masked_sequences, matrix_df, enforced_points = negative_points)
-        else:
-            print("No failing sequences found for the current type-position rule, so negatives were not penalized.")
-        # Replace negative matrix values with 0
-        matrix_df[matrix_df < 0] = 0
+    penalize_negatives = matrix_params.get("penalize_negatives") # boolean on whether to penalize negative peptides
+    matrix_df = decrement_negatives(penalize_negatives, matrix_df, pass_calls, qualifying_member_calls, sequences_2d,
+                                    masked_sequences_2d, mean_points)
 
     # Optionally combine phospho and non-phospho residue rows in the matrix
     include_phospho = matrix_params.get("include_phospho")
     if not include_phospho:
-        collapse_phospho(matrix_df, in_place=True)
+        collapse_phospho(matrix_df, in_place = True)
 
     # Optionally set the filtering position to zero
     clear_filtering_column = matrix_params.get("clear_filtering_column")
@@ -219,7 +261,7 @@ def make_unweighted_matrices(source_df, percentiles_dict, slim_length, residue_c
 
     if matrix_params.get("min_members") is None:
         matrix_params["min_members"] = get_min_members()
-    if not isinstance(matrix_params.get("thresholds_points_dict"), dict):
+    if matrix_params.get("points_assignment_mode") == "thresholds" and not isinstance(matrix_params.get("thresholds_points_dict"), dict):
         matrix_params["thresholds_points_dict"] = get_thresholds(percentiles_dict, use_percentiles = True, show_guidance = True)
 
     # Get default params if any of them are set to None
@@ -253,6 +295,7 @@ def make_unweighted_matrices(source_df, percentiles_dict, slim_length, residue_c
             current_matrix_params["position_for_filtering"] = filter_position
 
             # Generate the weighted matrix
+            print(f"Generating conditional_matrix for rule: #{filter_position}={chemical_characteristic}")
             current_matrix = conditional_matrix(slim_length, source_df, data_params, current_matrix_params)
 
             # Standardize the weighted matrix so that the max value is 1
@@ -630,7 +673,7 @@ def find_optimal_weights(input_df, slim_length, position_copies, matrix_datafram
         matrix_dataframes_dict (dict):   the dictionary of position-type rules --> unweighted matrices as pd.DataFrame
         sequence_col (str):              the name of the column in chunk where sequences are stored
         significance_col (str):          the name of the column in chunk where significance information is found
-        significant_str (str):       the value in significance_col that denotes significance, e.g. "Yes"
+        significant_str (str):           the value in significance_col that denotes significance, e.g. "Yes"
         score_col (str):                 the name of the column where motif scores are found
         dict_of_aa_characs (dict):       the dictionary of chemical_class --> [amino acid members]
         matrix_output_folder (str):      the path for saving weighted matrices
@@ -814,6 +857,7 @@ def main(input_df, general_params = None, data_params = None, matrix_params = No
     convert_phospho = general_params.get("convert_phospho")
     sequence_col = data_params.get("seq_col")
     significance_col = data_params.get("bait_pass_col")
+    significant_str = data_params.get("pass_str")
     score_col = data_params.get("dest_score_col")
     output_statistics = {}
 
@@ -821,8 +865,8 @@ def main(input_df, general_params = None, data_params = None, matrix_params = No
         # Find the optimal weights that produce the lowest FDR/FOR pair
         position_copies = general_params.get("position_copies")
         results_tuple = find_optimal_weights(input_df, slim_length, position_copies, matrices_dict, sequence_col,
-                                             significance_col, score_col, matrix_output_folder, output_folder,
-                                             aa_charac_dict, convert_phospho, chunk_size = 1000,
+                                             significance_col, significant_str, score_col, matrix_output_folder,
+                                             output_folder, aa_charac_dict, convert_phospho, chunk_size = 1000,
                                              save_pickled_matrix_dict = True)
         best_fdr, best_for, best_score_threshold, best_weights, weighted_matrices_dict, scored_df = results_tuple
         position_weights = best_weights
