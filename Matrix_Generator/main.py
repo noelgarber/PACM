@@ -71,19 +71,14 @@ def main(image_params = None, general_params = None, data_params = None, matrix_
         results_tuple (tuple):              (scored_data_df, best_conditional_weights, weighted_matrices_dict, motif_statistics, specificity_weighted_matrix, specificity_statistics)
     '''
 
-    # Define a consistent output folder to be used everywhere
+    # Define output folders
     image_params = image_params or default_image_params.copy()
+    if not image_params.get("output_folder") and not use_cached_data:
+        image_params["output_folder"] = input("Enter the folder to output image quantification data to:  ")
+
     general_params = general_params or default_general_params.copy()
-    image_output_folder = image_params.get("output_folder")
-    matrix_output_folder = general_params.get("output_folder")
-    if not image_output_folder and not matrix_output_folder:
-        output_folder = input("Enter the folder to output data to:  ")
-    elif not image_output_folder:
-        output_folder = matrix_output_folder
-        image_params["output_folder"] = matrix_output_folder
-    else:
-        output_folder = image_output_folder
-        general_params["output_folder"] = image_output_folder
+    if not general_params.get("output_folder"):
+        general_params["output_folder"] = input("Enter the folder to output position-weighted matrices to:  ")
 
     # Quantify SPOT peptide binding data
     if use_cached_data:
@@ -96,12 +91,13 @@ def main(image_params = None, general_params = None, data_params = None, matrix_
         buffer_width = image_params.get("buffer_width")
 
         # Obtain and quantify the data
-        data_df, percentiles_dict = get_data(output_folder, add_peptide_seqs, peptide_seq_cols, buffer_width, verbose)
+        image_output_folder = image_params.get("output_folder")
+        data_df, percentiles_dict = get_data(image_output_folder, add_peptide_seqs, peptide_seq_cols, buffer_width, verbose)
 
         # Optionally save pickled quantified data for future runs
         save_pickled_data = image_params.get("save_pickled_data")
         if save_pickled_data:
-            save_path = os.path.join(output_folder, "cached_ml_training_data.pkl")
+            save_path = os.path.join(image_output_folder, "cached_ml_training_data.pkl")
             with open(save_path, "wb") as f:
                 pickle.dump((data_df, percentiles_dict), f)
 
@@ -110,8 +106,6 @@ def main(image_params = None, general_params = None, data_params = None, matrix_
 
     # Generate pairwise position-weighted matrices
     general_params["percentiles_dict"] = percentiles_dict
-    general_params["output_folder"] = output_folder  # ensure same folder is used
-
     data_params = data_params or default_data_params.copy()
     matrix_params = matrix_params or default_matrix_params.copy()
 
@@ -142,9 +136,9 @@ def main(image_params = None, general_params = None, data_params = None, matrix_
 
     # Save data that has not been saved already
     if generate_context_matrices or generate_specificity_matrix:
-        scored_data_df.to_csv(os.path.join(output_folder, "final_scored_data.csv"))
+        scored_data_df.to_csv(os.path.join(general_params.get("output_folder"), "final_scored_data.csv"))
     if generate_specificity_matrix:
-        specificity_weighted_matrix.to_csv(os.path.join(output_folder, "specificity_weighted_matrix.csv"))
+        specificity_weighted_matrix.to_csv(os.path.join(general_params.get("output_folder"), "specificity_weighted_matrix.csv"))
 
     # Display final report in the command line
     print("--------------------------------------------------------------------")
@@ -207,6 +201,10 @@ if __name__ == "__main__":
             general_params["position_weights"] = weights_array
         data_params = default_data_params.copy()
         matrix_params = default_matrix_params.copy()
+        use_points_function = input("When assigning points, use continuous assignment from rational function? If not, defaults to thresholding. (Y/N)  ") == "Y"
+        matrix_params["points_assignment_mode"] = "continuous" if use_points_function else "thresholds"
+        penalize_negatives = input("Use negative peptides to penalize disfavoured residues? (Y/N)  ") == "Y"
+        matrix_params["penalize_negatives"] = penalize_negatives
     else:
         general_params = None
         optimize_weights = False
