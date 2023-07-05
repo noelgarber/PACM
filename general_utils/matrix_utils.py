@@ -71,7 +71,7 @@ def get_peptide_points(signal_values, sequence_count, sorted_thresholds = None, 
     return points_values, mean_points
 
 def increment_matrix(sequences, matrix_df, sequences_2d = None, sorted_thresholds = None, signal_values = None,
-                     enforced_points = None, points_mode = "use_sigmoid", return_mean_points = False, verbose = False):
+                     enforced_points = None, points_mode = "sigmoid", return_mean_points = False, verbose = False):
     '''
     Function to increment a position-weighted matrix based on sequences and their associated points values
 
@@ -84,9 +84,9 @@ def increment_matrix(sequences, matrix_df, sequences_2d = None, sorted_threshold
         signal_values (array-like): the signal values associated with the sequences
         enforced_points (float):    if not using thresholding, this is the enforced points value used for incrementing;
                                     negative values result in decrementing
-        points_mode (str):          "use_sigmoid" calculates points by signal value, rising to a peak and then
+        points_mode (str):          "sigmoid" calculates points by signal value, rising to a peak and then
                                     decreasing to a plateau at half of the peak value;
-                                    "use_thresholds" uses sorted_thresholds;
+                                    "thresholds" uses sorted_thresholds;
                                     "enforced_points" uses enforced_points as the same points value for all peptides
         return_mean_points (bool):  whether to also return the mean points value for all positive peptides
         verbose (bool):             whether to display debugging info
@@ -103,12 +103,12 @@ def increment_matrix(sequences, matrix_df, sequences_2d = None, sorted_threshold
         return results
 
     # Get the relevant points values for each sequence
-    if points_mode == "use_sigmoid":
+    if points_mode == "sigmoid":
         mean_positive_signal = signal_values[signal_values >= 0].mean()
         points_values, mean_points = get_peptide_points(signal_values, sequence_count, use_sigmoid = True,
                                                         sigmoid_peak_signal = mean_positive_signal,
                                                         sigmoid_peak_points = 4, verbose = verbose)
-    elif points_mode == "use_thresholds":
+    elif points_mode == "thresholds":
         points_values, mean_points = get_peptide_points(signal_values, sequence_count, sorted_thresholds,
                                                         verbose = verbose)
     else:
