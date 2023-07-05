@@ -7,7 +7,7 @@ import time
 import multiprocessing
 from tqdm import trange
 from functools import partial
-from general_utils.general_utils import input_number, save_dataframe, save_weighted_matrices, unravel_seqs
+from general_utils.general_utils import input_number, save_dataframe, save_weighted_matrices, unravel_seqs, check_seq_lengths
 from general_utils.weights_utils import permute_weights
 from general_utils.matrix_utils import increment_matrix, make_empty_matrix, collapse_phospho, apply_always_allowed, add_matrix_weights
 from general_utils.general_vars import aa_charac_dict, amino_acids, amino_acids_phos
@@ -64,19 +64,6 @@ default_matrix_params = {"thresholds_points_dict": None,
                          "clear_filtering_column": False,
                          "penalize_negatives": True}
 
-def check_seq_lengths(seq_series, expected_length):
-    # Helper function to check that a pandas series of peptide sequences is all the same length
-
-    sequence_lengths = seq_series.str.len()
-    if sequence_lengths.nunique() > 1:
-        error_state = ValueError(f"weighted_matrix error: source_dataframe sequences in \"{seq_col}\" vary in length from {sequence_lengths.min()} to {sequence_lengths.max()}, but must be equal.")
-    elif sequence_lengths[0] != expected_length:
-        error_state = ValueError(f"weighted_matrix error: source_dataframe sequences are {sequence_lengths[0]} amino acids long, but motif_length is set to {motif_length}")
-    else:
-        error_state = None
-
-    if error_state:
-        raise error_state
 
 def get_signal_cols(source_df, data_params):
     # Helper function to extract signal value containing columns from the source dataframe

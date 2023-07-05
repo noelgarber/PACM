@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import csv
 import os
 import pickle
@@ -302,3 +303,28 @@ def unravel_seqs(sequences_array, motif_length, convert_phospho = True):
         sequences_2d[sequences_2d=="O"] = "Y"
 
     return sequences_2d
+
+def check_seq_lengths(sequences, expected_length, raise_error = True):
+    # Helper function to check that a pandas series or array of peptide sequences is all the same length
+    
+    if isinstance(sequences, np.ndarray): 
+        sequences = pd.Series(sequences)
+
+    sequence_lengths = sequences.str.len()
+    unique_lengths_count = sequence_lengths.nunique()
+    first_length_matches = sequence_lengths[0] == expected_length
+    
+    correct_uniform_length = True
+    if unique_lengths_count > 1:
+        if raise_error: 
+            raise ValueError(f"weighted_matrix error: source_dataframe sequences in \"{seq_col}\" vary in length from {sequence_lengths.min()} to {sequence_lengths.max()}, but must be equal.")
+        else: 
+            correct_uniform_length = False
+    elif not first_length_matches:
+        if raise_error: 
+            raise ValueError(f"weighted_matrix error: source_dataframe sequences are {sequence_lengths[0]} amino acids long, but motif_length is set to {motif_length}")
+        else: 
+            correct_uniform_length = False
+    
+    if not raise_error: 
+        return correct_uniform_length
