@@ -701,7 +701,7 @@ def apply_predefined_weights(input_df, position_weights, matrices_dict, slim_len
         slim_length (int): 			the length of the motif being studied
         sequence_col (str):         the column in the dataframe that contains peptide sequences
         significance_col (str): 	the column in the dataframe that contains significance calls (Yes/No)
-        truth_val (str):          the value to test against input_df[significance_col]
+        truth_val (str):            the value to test against input_df[significance_col]
         score_col (str):            the name of the column where motif scores are found
         matrix_output_folder (str): the path to the folder where final matrices should be saved
         output_folder (str): 		the path to the folder where the output data should be saved
