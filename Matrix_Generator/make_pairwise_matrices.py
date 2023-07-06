@@ -422,7 +422,11 @@ def apply_motif_scores(input_df, slim_length, weighted_matrix_of_matrices, matri
         output_df = None
 
     # Get sequences only if needed; if sequences_2d is already provided, then sequences is not necessary
-    sequences = input_df[seq_col].values.astype("<U") if sequences_2d is None else None
+    if sequences_2d is None:
+        sequences = input_df[seq_col].values.astype("<U")
+        sequences_2d = unravel_seqs(sequences, slim_length, convert_phospho)
+    else:
+        sequences = None
 
     # Get the motif scores for the peptide sequences
     scores = score_seqs(sequences, slim_length, weighted_matrix_of_matrices, matrix_index, encoded_chemical_classes,
@@ -434,15 +438,16 @@ def apply_motif_scores(input_df, slim_length, weighted_matrix_of_matrices, matri
     output_df[score_col] = scores
 
     if add_residue_cols and not in_place:
-        # Assign residue columns
-        residues_df = input_df[seq_col].apply(list).apply(pd.Series)
-        residue_cols = ["Residue_" + str(i) for i in np.arange(1, slim_length + 1)]
-        residues_df.columns = residue_cols
-        output_df = pd.concat([output_df, residues_df])
-
-        # Define list of columns in order
+        # Define the index where residue columns should be inserted
         current_cols = list(output_df.columns)
         insert_index = current_cols.index(seq_col) + 1
+
+        # Assign residue columns
+        residue_cols = ["#" + str(i) for i in np.arange(1, slim_length + 1)]
+        residues_df = pd.DataFrame(sequences_2d, columns = residue_cols)
+        output_df = pd.concat([output_df, residues_df])
+
+        # Define list of columns in the desired order
         final_columns = current_cols[0:insert_index]
         final_columns.extend(residue_cols)
         final_columns.extend(current_cols[insert_index:])
@@ -570,7 +575,7 @@ def process_weights_chunk(chunk, matrix_arrays_dict, matrix_index, source_df, sl
     chunk_best_source_df = apply_motif_scores(output_df, slim_length, weighted_matrix_of_matrices, matrix_index,
                                               encoded_chemical_classes, encoded_class_count, sequences_2d, score_col,
                                               convert_phospho = convert_phospho, add_residue_cols = True,
-                                              in_place = False, return_array = True)
+                                              in_place = False, return_array = False)
 
     results_tuple = (chunk_best_fdr, chunk_best_for, chunk_best_score_threshold,
                      chunk_best_weights, best_weighted_matrices_dict, chunk_best_source_df)
