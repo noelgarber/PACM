@@ -686,9 +686,14 @@ def find_optimal_weights(input_df, slim_length, position_copies, matrix_datafram
         best_weighted_matrices_dict[key] = df
 
     # Save the weighted matrices and scored data
-    save_weighted_matrices(best_weighted_matrices_dict, matrix_output_folder, save_pickled_matrix_dict)
+    save_weighted_matrices(matrix_dataframes_dict, os.path.join(matrix_output_folder, "Unweighted"), save_pickled_matrix_dict)
+    save_weighted_matrices(best_weighted_matrices_dict, os.path.join(matrix_output_folder, "Weighted"), save_pickled_matrix_dict)
+    with open(os.path.join(matrix_output_folder, "final_weights.txt"), "w") as file:
+        file.write(",".join(map(str, best_weights)))
+
     scored_data_filename = "pairwise_scored_data_thres" + str(best_score_threshold) + ".csv"
     save_dataframe(best_scored_df, output_folder, scored_data_filename)
+
     print(f"Saved weighted matrices and scored data to {output_folder}")
 
     return results
