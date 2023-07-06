@@ -24,7 +24,7 @@ def permute_weights(slim_length, position_copies = None):
     permutations_length = slim_length
     for position, total_copies in position_copies.items():
         permutations_length = permutations_length - (total_copies - 1)
-    permuted_weights = np.array(np.meshgrid(*([[3, 2, 1, 0]] * permutations_length))).T.reshape(-1, permutations_length)
+    permuted_weights = np.array(np.meshgrid(*([[3, 2, 1, 0.5, 0]] * permutations_length))).T.reshape(-1, permutations_length)
 
     # Expand permutations to copied columns
     expanded_weights_list = []
