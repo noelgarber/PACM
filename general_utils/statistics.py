@@ -30,11 +30,16 @@ def get_rates(scores_array, passes_array, score_range_series, return_comprehensi
 
     with np.errstate(divide = "ignore", invalid = "ignore"):
         ppv_values = TP_counts / positive_calls_counts
+        ppv_values[ppv_values==np.inf] = np.nan
         npv_values = TN_counts / negative_calls_counts
+        npv_values[npv_values==np.inf] = np.nan
+
+    fdr_values = 1 - ppv_values
+    for_values = 1 - npv_values
 
     # Make an array where each row is [ppv_val, npv_val]
     if not return_comprehensive:
-        rates_arr = np.stack([(1 - ppv_values), 1 - (npv_values)], axis=1)
+        rates_arr = np.stack([fdr_values, for_values], axis=1)
         return rates_arr
 
     # Create the comprehensive dataframe
@@ -49,8 +54,8 @@ def get_rates(scores_array, passes_array, score_range_series, return_comprehensi
 
     df["PPV"] = ppv_values
     df["NPV"] = npv_values
-    df["FDR"] = 1 - ppv_values
-    df["FOR"] = 1 - npv_values
+    df["FDR"] = fdr_values
+    df["FOR"] = for_values
 
     return df
 
@@ -85,16 +90,22 @@ def optimize_threshold_fdr(input_df, score_range_series = None, sig_col = "One_P
     if score_range_series is None:
         score_range_series = get_score_ranges(input_df, score_col, range_count, verbose)
 
-    # Find the row where the FDR/FOR ratio is closest to 1, and use that for the FDR
+    # Find the row where the absolute difference between FDR and FOR is closest to 0, and use that for the FDR
     fdr_for_array = get_rates(scores_array, passes_bools, score_range_series, return_comprehensive = False)
 
-    with np.errstate(divide="ignore"):
-        ratios = fdr_for_array[:,0] / fdr_for_array[:,1]
-    closest_index = np.argmin(np.abs(ratios - 1))
+    min_rate_vals = fdr_for_array.min(axis=1) # real values range from 0.0 to 1.0
+    max_rate_vals = fdr_for_array.max(axis=1) # real values range from 0.0 to 1.0
+    deltas = max_rate_vals - min_rate_vals
+    deltas_clean = np.nan_to_num(deltas, nan=np.inf)
+
+    closest_index = np.argmin(deltas_clean)
 
     best_fdr = fdr_for_array[closest_index, 0]
     best_for = fdr_for_array[closest_index, 1]
     best_score = score_range_series[closest_index]
+
+    if verbose:
+        print(f"\toptimize_threshold_fdr() found best score threshold ({best_score}) yielded FDR={best_fdr} and FOR={best_for}")
 
     return (best_score, best_fdr, best_for)
 
