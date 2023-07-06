@@ -621,7 +621,9 @@ def process_weights(weights_array_chunks, matrix_arrays_dict, matrix_index, slim
     with trange(len(weights_array_chunks), desc="Processing weights") as pbar:
         for chunk_results in pool.imap_unordered(process_partial, weights_array_chunks):
             if chunk_results[0] < best_fdr:
+                best_fdr = chunk_results[0]
                 results = chunk_results
+                print(f"\tNew record: FDR={results[0]} | FOR={results[1]} | weights={results[3]}")
 
             pbar.update()
 
@@ -838,7 +840,7 @@ def main(input_df, general_params = None, data_params = None, matrix_params = No
         position_copies = general_params.get("position_copies")
         results_tuple = find_optimal_weights(input_df, slim_length, position_copies, matrices_dict, sequence_col,
                                              significance_col, significant_str, score_col, matrix_output_folder,
-                                             output_folder, aa_charac_dict, convert_phospho, chunk_size = 1000,
+                                             output_folder, aa_charac_dict, convert_phospho, chunk_size = 10000,
                                              save_pickled_matrix_dict = True)
         best_fdr, best_for, best_score_threshold, best_weights, weighted_matrices_dict, scored_df = results_tuple
         position_weights = best_weights
