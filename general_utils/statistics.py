@@ -96,9 +96,7 @@ def optimize_threshold_fdr(input_df, score_range_series = None, sig_col = "One_P
     min_rate_vals = fdr_for_array.min(axis=1) # real values range from 0.0 to 1.0
     max_rate_vals = fdr_for_array.max(axis=1) # real values range from 0.0 to 1.0
     deltas = max_rate_vals - min_rate_vals
-    deltas_clean = np.nan_to_num(deltas, nan=np.inf)
-
-    closest_index = np.argmin(deltas_clean)
+    closest_index = np.nanargmin(deltas)
 
     best_fdr = fdr_for_array[closest_index, 0]
     best_for = fdr_for_array[closest_index, 1]

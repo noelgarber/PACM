@@ -561,10 +561,10 @@ def process_weights_chunk(chunk, matrix_arrays_dict, matrix_index, source_df, sl
 
         optimal_values.append((current_best_score, current_best_fdr, current_best_for))
 
-    # Find the chunk index for the weights array that produces the lowest optimal FDR value
+    # Find the chunk index for the weights array that produces the lowest optimal FDR & FOR values (using the mean)
     optimal_values_array = np.array(optimal_values)
-    optimal_values_array[np.isnan(optimal_values_array)] = np.inf
-    best_index = optimal_values_array[:,1].argmin()
+    mean_rates_array = optimal_values_array[:,1:].mean(axis=1)
+    best_index = np.nanargmin(mean_rates_array)
 
     chunk_best_score_threshold, chunk_best_fdr, chunk_best_for = optimal_values_array[best_index]
     chunk_best_weights = chunk[best_index]
@@ -616,12 +616,13 @@ def process_weights(weights_array_chunks, matrix_arrays_dict, matrix_index, slim
                               convert_phospho = convert_phospho)
 
     results = None
-    best_fdr = 9999
+    best_rate_mean = 9999
 
     with trange(len(weights_array_chunks), desc="Processing weights") as pbar:
         for chunk_results in pool.imap_unordered(process_partial, weights_array_chunks):
-            if chunk_results[0] < best_fdr:
-                best_fdr = chunk_results[0]
+            rate_mean = (chunk_results[0] + chunk_results[1]) / 2
+            if rate_mean < best_rate_mean:
+                best_rate_mean = rate_mean
                 results = chunk_results
                 print(f"\tNew record: FDR={results[0]} | FOR={results[1]} | weights={results[3]}")
 

@@ -254,7 +254,7 @@ def least_different(input_df, comparator_set_1 = None, comparator_set_2 = None, 
     # Get least different values and bait pairs
     log2fc_array = input_df[log2fc_cols].to_numpy()
     log2fc_array[np.isnan(log2fc_array)] = np.inf
-    least_different_indices = np.argmin(log2fc_array, axis=1)
+    least_different_indices = np.nanargmin(log2fc_array, axis=1)
     least_different_values = np.min(log2fc_array, axis=1)
     least_different_cols = np.array(log2fc_cols)[least_different_indices]
     least_different_baits = [col.rsplit("_", 1)[0] for col in least_different_cols]
