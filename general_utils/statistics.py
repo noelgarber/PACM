@@ -2,6 +2,7 @@
 
 import numpy as np
 import pandas as pd
+import warnings
 from general_utils.general_utils import print_whole_df
 
 def get_score_ranges(input_df, score_col, range_count = 100, verbose = False):
@@ -96,7 +97,10 @@ def optimize_threshold_fdr(input_df, score_range_series = None, sig_col = "One_P
     min_rate_vals = fdr_for_array.min(axis=1) # real values range from 0.0 to 1.0
     max_rate_vals = fdr_for_array.max(axis=1) # real values range from 0.0 to 1.0
     deltas = max_rate_vals - min_rate_vals
-    closest_index = np.nanargmin(deltas)
+    if not np.isnan(deltas).all():
+        closest_index = np.nanargmin(deltas)
+    else:
+        closest_index = np.argmin(deltas)
 
     best_fdr = fdr_for_array[closest_index, 0]
     best_for = fdr_for_array[closest_index, 1]
@@ -164,3 +168,32 @@ def apply_threshold(input_df, score_range_series = None, sig_col = "One_Passes",
     print("Applied hit calls based on threshold.")
 
     return (output_df, selected_threshold, predictive_value_df)
+
+def fdr_for_optimizer(rates_array, allowed_rate_divergence = 0.2):
+    '''
+    Function that takes a numpy array of FDRs and FORs and finds the optimal row index for the best pair
+
+    Args:
+        rates_array (np.ndarray):        array of shape [pair_count, 2] where the 1st col has FDRs and the 2nd has FORs
+        allowed_rate_divergence (float): allowed variance between FDR and FOR to still be considered an optimal pair
+
+    Returns:
+        best_index (int):                the row index where the FDR/FOR pair is optimal
+    '''
+
+    mean_rates = rates_array.mean(axis=1)
+
+    rate_deltas = np.abs(rates_array[:, 0] - rates_array[:, 1])
+    passes_divergence = rate_deltas <= allowed_rate_divergence
+
+    if passes_divergence.any():
+        mean_rates[~passes_divergence] = np.inf
+        best_index = np.nanargmin(mean_rates)
+    elif np.isnan(mean_rates).all():
+        warnings.warn(f"RuntimeWarning: fdr_for_optimizer got all-NaN array when calculating mean_rates; best_index cannot be calculated")
+        best_index = None
+    else:
+        warnings.warn(f"RuntimeWarning: fdr_for_optimizer could not find an FDR/FOR pair that satisfied allowed_rate_divergence = {allowed_rate_divergence}")
+        best_index = np.nanargmin(mean_rates)
+
+    return best_index
