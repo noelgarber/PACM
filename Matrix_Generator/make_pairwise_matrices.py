@@ -11,14 +11,11 @@ from general_utils.general_vars import aa_charac_dict
 from general_utils.user_helper_functions import get_position_weights
 from general_utils.statistics import apply_threshold
 
-'''------------------------------------------------------------------------------------------------------------------
-                        Define alternative method for applying predefined, unoptimized weights
-   ------------------------------------------------------------------------------------------------------------------'''
-
 def apply_predefined_weights(input_df, position_weights, matrices_dict, slim_length, sequence_col, significance_col,
                              truth_val, score_col, matrix_output_folder, output_folder, make_calls):
     '''
-    Function that applies and assesses a given set of weights against matrices and source data
+    Function that applies and assesses a given set of weights against matrices and source data, for when weights will
+    not be optimized automatically.
 
     Args:
         input_df (pd.DataFrame): 	the dataframe containing densitometry values for the peptides being analyzed
@@ -67,6 +64,7 @@ def apply_predefined_weights(input_df, position_weights, matrices_dict, slim_len
     save_dataframe(output_df, output_folder, scored_data_filename)
 
     return output_df, weighted_matrices_dict, predictive_value_df
+
 
 default_general_params = {"percentiles_dict": None,
                           "motif_length": None,
