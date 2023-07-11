@@ -60,7 +60,7 @@ def process_weights_chunk(chunk, conditional_matrices, source_df, slim_length, s
                                           convert_phospho = True, return_array = True, use_weighted = True)
 
         # Determine the optimal threshold score that gives balanced FDR/FOR values, which are inversely correlated
-        score_range_series = np.linspace(scores_array.min(), scores_array.max(), num=100)
+        score_range_series = np.linspace(scores_array.min(), scores_array.max(), num=500)
         best_results = optimize_threshold_fdr(None, score_range_series, passes_bools = passes_bools,
                                               scores_array = scores_array)
         current_best_score, current_best_fdr, current_best_for = best_results
