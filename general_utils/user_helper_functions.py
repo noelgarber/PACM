@@ -121,6 +121,19 @@ def get_position_copies(slim_length):
 
     return position_copies
 
+def get_possible_weights(slim_length):
+    # Simple function to prompt the user for allowed values at each position
+
+    print("Please enter the allowed weights at each position as comma-delimited values.")
+    possible_weights = []
+    for position in np.arange(1, slim_length + 1):
+        weights = input(f"Position #{position} weights:  ")
+        weights = weights.split(",")
+        weights = np.array(weights, dtype=float)
+        possible_weights.append(weights)
+
+    return possible_weights
+
 def get_comparator_baits():
     '''
     Function to prompt the user for the sets of baits to compare; allows pooling of baits for making specificity matrix
