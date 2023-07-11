@@ -121,7 +121,7 @@ def main(image_params = None, general_params = None, data_params = None, matrix_
 
     # Get specificity matrix params and ensure consistency with matrix_params
     specificity_params = specificity_params or default_specificity_params.copy()
-    specificity_params["position_copies"] = general_params["position_copies"]
+    specificity_params["possible_weights"] = general_params["possible_weights"]
 
     # Generate specificity matrix and back-calculate scores
     if not generate_context_matrices:
@@ -192,7 +192,7 @@ if __name__ == "__main__":
     generate_context_matrices = input("Generate context-aware position-weighted matrices? (Y/N)  ") == "Y"
     if generate_context_matrices:
         general_params = default_general_params.copy()
-        general_params["slim_length"] = input_number("Please enter the length of the short linear motif being studied:  ", "int")
+        general_params["motif_length"] = input_number("Please enter the length of the short linear motif being studied:  ", "int")
         optimize_weights = input("Optimize context-aware matrix weights? (Y/N)  ") == "Y"
         general_params["optimize_weights"] = optimize_weights
         if not optimize_weights:
