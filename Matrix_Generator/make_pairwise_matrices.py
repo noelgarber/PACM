@@ -10,6 +10,7 @@ from general_utils.matrix_utils import add_matrix_weights
 from general_utils.general_vars import aa_charac_dict
 from general_utils.user_helper_functions import get_position_weights
 from general_utils.statistics import apply_threshold
+from parallel_weight_optimization import find_optimal_weights
 
 def apply_predefined_weights(input_df, position_weights, matrices_dict, slim_length, sequence_col, significance_col,
                              truth_val, score_col, matrix_output_folder, output_folder, make_calls):
