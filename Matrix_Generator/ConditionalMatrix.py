@@ -224,6 +224,7 @@ class ConditionalMatrices:
         self.matrices_dict = {}
 
         # For generating a 3D matrix, create an empty list to hold the matrices to stack, and the mapping
+        self.residue_charac_dict = residue_charac_dict
         self.chemical_class_count = len(residue_charac_dict.keys())
         self.encoded_chemical_classes = {}
         self.chemical_class_decoder = {}
@@ -274,9 +275,9 @@ class ConditionalMatrices:
         self.weights_array = weights_array
 
         if not only_3d:
-            weighted_matrices_dict = {}
-            weighted_arrays_dict = {}
+            self.weighted_matrices_dict = {}
+            self.weighted_arrays_dict = {}
             for key, matrix_df in self.matrices_dict.items():
                 weighted_matrix = matrix_df * weights_array
-                weighted_matrices_dict[key] = weighted_matrix
-                weighted_arrays_dict[key] = weighted_matrix.to_numpy()
+                self.weighted_matrices_dict[key] = weighted_matrix
+                self.weighted_arrays_dict[key] = weighted_matrix.to_numpy()
