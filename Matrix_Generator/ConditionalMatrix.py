@@ -117,7 +117,8 @@ class ConditionalMatrix:
         if clear_filtering_column:
             matrix_df["#" + str(position_for_filtering)] = 0
 
-        # Convert matrix to floating point values
+        # Remove negatives
+        self.matrix_df[self.matrix_df < 0] = 0
         self.matrix_df = self.matrix_df.astype("float32")
 
     def qualifying_entries_count(self, source_df, seq_col, position_for_filtering, residues_included_at_filter_position):
