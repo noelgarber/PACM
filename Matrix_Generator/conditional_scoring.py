@@ -4,7 +4,8 @@ import numpy as np
 import pandas as pd
 from general_utils.general_utils import unravel_seqs
 
-def score_seqs(sequences, slim_length, conditional_matrices, sequences_2d = None, convert_phospho = True):
+def score_seqs(sequences, slim_length, conditional_matrices, sequences_2d = None, convert_phospho = True,
+               use_weighted = False):
     '''
     Vectorized function to score amino acid sequences based on the dictionary of context-aware weighted matrices
 
@@ -15,6 +16,7 @@ def score_seqs(sequences, slim_length, conditional_matrices, sequences_2d = None
         sequences_2d (np.ndarray):                  unravelled peptide sequences; optionally provide this upfront for
                                                     performance improvement in loops
         convert_phospho (bool):                     whether to convert phospho-residues to non-phospho before lookups
+        use_weighted (bool):                        whether to use conditional_matrices.stacked_weighted_matrices
 
     Returns:
         final_points_array (np.ndarray):           the total motif scores for the input sequences
@@ -65,7 +67,10 @@ def score_seqs(sequences, slim_length, conditional_matrices, sequences_2d = None
     column_indices_tiled = np.tile(column_indices, len(sequences_2d))
 
     # Extract values from weighted_matrix_of_matrices
-    weighted_matrix_of_matrices = conditional_matrices.stacked_weighted_matrices
+    if use_weighted:
+        weighted_matrix_of_matrices = conditional_matrices.stacked_weighted_matrices
+    else:
+        weighted_matrix_of_matrices = conditional_matrices.stacked_matrices
     left_matrix_values_flattened = weighted_matrix_of_matrices[left_encoded_matrix_refs_flattened, aa_row_indices_flattened, column_indices_tiled]
     right_matrix_values_flattened = weighted_matrix_of_matrices[right_encoded_matrix_refs_flattened, aa_row_indices_flattened, column_indices_tiled]
 
@@ -82,7 +87,7 @@ def score_seqs(sequences, slim_length, conditional_matrices, sequences_2d = None
 
 def apply_motif_scores(input_df, slim_length, conditional_matrices, sequences_2d = None, seq_col = "No_Phos_Sequence",
                        score_col = "SLiM_Score", convert_phospho = True, add_residue_cols = False, in_place = False,
-                       return_array = True):
+                       return_array = True, use_weighted = False):
     '''
     Function to apply the score_seqs() function to all sequences in the source df and add residue cols for sorting
 
@@ -118,7 +123,7 @@ def apply_motif_scores(input_df, slim_length, conditional_matrices, sequences_2d
         sequences = None
 
     # Get the motif scores for the peptide sequences
-    scores = score_seqs(sequences, slim_length, conditional_matrices, sequences_2d, convert_phospho)
+    scores = score_seqs(sequences, slim_length, conditional_matrices, sequences_2d, convert_phospho, use_weighted)
     if return_array:
         return scores
 
