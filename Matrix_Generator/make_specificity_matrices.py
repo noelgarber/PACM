@@ -228,8 +228,8 @@ def get_specificity_scores(sequences, log2fc_values, unweighted_matrix, position
     # Perform linear regression also on only the extrema to get R2 without influence from middle values
     extrema_model = LinearRegression()
     extrema_bools = np.abs(y_actual) > abs_extrema_threshold
-    x_actual_extrema = x_actual[extrema_bools]
-    y_actual_extrema = y_actual[extrema_bools]
+    x_actual_extrema = x_actual[extrema_bools].reshape(-1, 1)
+    y_actual_extrema = y_actual[extrema_bools].reshape(-1, 1)
     extrema_model.fit(x_actual_extrema, y_actual_extrema)
     extrema_coef = extrema_model.coef_[0][0]
     extrema_intercept = extrema_model.intercept_[0]
@@ -277,7 +277,7 @@ def process_weights_chunk(chunk, significant_sequences, significant_log2fc, unwe
                 optimized_weights = permuted_weights
                 optimized_r2 = current_r2
                 optimized_r2_extrema = current_r2_extrema
-    elif fit_mode == "all"
+    elif fit_mode == "all":
         for permuted_weights in chunk:
             _, _, _, current_r2, _, current_r2_extrema = get_specificity_scores(significant_sequences,
                                                                                 significant_log2fc, unweighted_matrix,
