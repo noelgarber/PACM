@@ -173,7 +173,8 @@ def make_specificity_matrix(thresholds, matching_points = (2,1,-1,-2), bias_mult
                            Define function to apply/optimize weights and back-calculate scores 
    ------------------------------------------------------------------------------------------------------------------'''
 
-def get_specificity_scores(sequences, log2fc_values, unweighted_matrix, position_weights = None):
+def get_specificity_scores(sequences, log2fc_values, unweighted_matrix, position_weights = None,
+                           abs_extrema_threshold = 0.5):
     '''
     Function to back-calculate specificity scores on peptide sequences based on the generated specificity matrix
 
@@ -182,6 +183,7 @@ def get_specificity_scores(sequences, log2fc_values, unweighted_matrix, position
         log2fc_values (np.ndarray):                 the log2fc values for the sequences
         unweighted_matrix (pd.DataFrame):           the unweighted specificity matrix dataframe for getting residue values
         position_weights (np.ndarray):              an array of weights for the columns in the matrix dataframe
+        abs_extrema_threshold (float):              the threshold for calling extrema, used for calculating extrema R2
 
     Returns:
         score_values (np.ndarray):                  the specificity scores for the given sequences
@@ -216,18 +218,34 @@ def get_specificity_scores(sequences, log2fc_values, unweighted_matrix, position
     x_actual = score_values[valid_indices].reshape(-1, 1)
     y_actual = log2fc_values[valid_indices].reshape(-1, 1)
     model.fit(x_actual, y_actual)
-    coef = model.coef_
-    intercept = model.intercept_
+    coef = model.coef_[0][0]
+    intercept = model.intercept_[0]
     y_pred = model.predict(x_actual)
     r2 = r2_score(y_actual, y_pred)
+    intercept_str = str(intercept) if intercept < 0 else "+" + str(intercept)
+    equation = "y=" + str(coef) + intercept_str
 
-    return (score_values, weighted_specificity_matrix, coef, intercept, r2)
+    # Perform linear regression also on only the extrema to get R2 without influence from middle values
+    extrema_model = LinearRegression()
+    extrema_bools = np.abs(y_actual) > abs_extrema_threshold
+    x_actual_extrema = x_actual[extrema_bools]
+    y_actual_extrema = y_actual[extrema_bools]
+    extrema_model.fit(x_actual_extrema, y_actual_extrema)
+    extrema_coef = extrema_model.coef_[0][0]
+    extrema_intercept = extrema_model.intercept_[0]
+    y_pred_extrema = extrema_model.predict(x_actual_extrema)
+    r2_extrema = r2_score(y_actual_extrema, y_pred_extrema)
+    extrema_intercept_str = str(extrema_intercept) if extrema_intercept < 0 else "+" + str(extrema_intercept)
+    equation_extrema = "y=" + str(extrema_coef) + extrema_intercept_str
+
+    return (score_values, weighted_specificity_matrix, equation, r2, equation_extrema, r2_extrema)
 
 '''------------------------------------------------------------------------------------------------------------------
                      Define functions for parallelized optimization of specificity matrix weights
    ------------------------------------------------------------------------------------------------------------------'''
 
-def process_weights_chunk(chunk, significant_sequences, significant_log2fc, unweighted_matrix):
+def process_weights_chunk(chunk, significant_sequences, significant_log2fc, unweighted_matrix, fit_mode = "extrema",
+                          abs_extrema_threshold = 0.5):
     '''
     Lower helper function for parallelization of position weight optimization for the specificity matrix
 
@@ -236,6 +254,9 @@ def process_weights_chunk(chunk, significant_sequences, significant_log2fc, unwe
         significant_sequences (np.ndarray): 1D array of sequences of equal length that have passed significance testing
         significant_log2fc (np.ndarray):    1D array of matching log2fc values for each sequence
         unweighted_matrix (pd.DataFrame):   the unweighted specificity matrix onto which weights will be applied
+        fit_mode (str):                     if "extrema", optimizes r2 with respect to data above abs_extrema_threshold;
+                                            if "all", optimizes r2 with respect to all data points
+        abs_extrema_threshold (float):      only required if fit_mode is "extrema"
 
     Returns:
         results_tuple (tuple):  best_weights is the array of optimal weights out of the current chunk
@@ -243,18 +264,35 @@ def process_weights_chunk(chunk, significant_sequences, significant_log2fc, unwe
     '''
 
     sequence_length = len(chunk[0])
-    best_r2 = 0.0
-    best_weights = np.ones(sequence_length)
-    for permuted_weights in chunk:
-        _, _, _, _, current_r2 = get_specificity_scores(significant_sequences, significant_log2fc,
-                                                        unweighted_matrix, permuted_weights)
-        if current_r2 > best_r2:
-            best_weights = permuted_weights
-            best_r2 = current_r2
+    optimized_r2 = 0.0
+    optimized_r2_extrema = 0.0
+    optimized_weights = np.ones(sequence_length)
 
-    return (best_weights, best_r2)
+    if fit_mode == "extrema":
+        for permuted_weights in chunk:
+            _, _, _, current_r2, _, current_r2_extrema = get_specificity_scores(significant_sequences,
+                                                                                significant_log2fc, unweighted_matrix,
+                                                                                permuted_weights, abs_extrema_threshold)
+            if current_r2 > optimized_r2:
+                optimized_weights = permuted_weights
+                optimized_r2 = current_r2
+                optimized_r2_extrema = current_r2_extrema
+    elif fit_mode == "all"
+        for permuted_weights in chunk:
+            _, _, _, current_r2, _, current_r2_extrema = get_specificity_scores(significant_sequences,
+                                                                                significant_log2fc, unweighted_matrix,
+                                                                                permuted_weights, abs_extrema_threshold)
+            if current_r2_extrema > optimized_r2_extrema:
+                optimized_weights = permuted_weights
+                optimized_r2 = current_r2
+                optimized_r2_extrema = current_r2_extrema
+    else:
+        raise Exception(f"process_weights_chunk fit_mode was set to {fit_mode}, but either `extrema` or `all` was expected")
 
-def process_weights(weights_array_chunks, significant_sequences, significant_log2fc, unweighted_matrix):
+    return (optimized_weights, optimized_r2, optimized_r2_extrema)
+
+def process_weights(weights_array_chunks, significant_sequences, significant_log2fc, unweighted_matrix,
+                    fit_mode = "extrema", abs_extrema_threshold = 0.5):
     '''
     Upper helper function for parallelization of position weight optimization; processes weights by chunking
 
@@ -263,6 +301,9 @@ def process_weights(weights_array_chunks, significant_sequences, significant_log
         significant_sequences (np.ndarray): 1D array of sequences of equal length that have passed significance testing
         significant_log2fc (np.ndarray):    1D array of matching log2fc values for each sequence
         unweighted_matrix (pd.DataFrame):   the unweighted specificity matrix onto which weights will be applied
+        fit_mode (str):                     if "extrema", optimizes r2 with respect to data above abs_extrema_threshold;
+                                            if "all", optimizes r2 with respect to all data points
+        abs_extrema_threshold (float):      only required if fit_mode is "extrema"
 
     Returns:
         results_list (list):     the list of results sets for all the weights arrays
@@ -270,26 +311,33 @@ def process_weights(weights_array_chunks, significant_sequences, significant_log
 
     pool = multiprocessing.Pool()
     process_partial = partial(process_weights_chunk, significant_sequences = significant_sequences,
-                              significant_log2fc = significant_log2fc, unweighted_matrix = unweighted_matrix)
+                              significant_log2fc = significant_log2fc, unweighted_matrix = unweighted_matrix,
+                              fit_mode = fit_mode, abs_extrema_threshold = abs_extrema_threshold)
+
+    temp_optimization_val = 0
 
     best_weights = None
     best_r2 = 0
+    best_r2_extrema = 0
+
+    r2_optimization_index = 2 if fit_mode == "extrema" else 1
 
     with trange(len(weights_array_chunks), desc="Processing specificity matrix weights") as pbar:
         for chunk_results in pool.imap_unordered(process_partial, weights_array_chunks):
-            if 1 >= chunk_results[1] > best_r2:
-                best_weights = chunk_results[0]
-                best_r2 = chunk_results[1]
+            if 1 >= chunk_results[r2_optimization_index] > temp_optimization_val:
+                best_weights, best_r2, best_r2_extrema = chunk_results
+                temp_optimization_val = chunk_results[r2_optimization_index]
 
             pbar.update()
 
     pool.close()
     pool.join()
 
-    return best_weights, best_r2
+    return best_weights, best_r2, best_r2_extrema
 
 def find_optimal_weights(significant_sequences, significant_log2fc, unweighted_matrix, slim_length,
-                         output_folder, possible_weights = None, chunk_size = 1000):
+                         output_folder, possible_weights = None, chunk_size = 1000, fit_mode = "extrema",
+                         abs_extrema_threshold = 0.5):
     '''
     Parent function for finding optimal position weights to generate an optimally weighted specificity matrix
 
@@ -301,28 +349,31 @@ def find_optimal_weights(significant_sequences, significant_log2fc, unweighted_m
         output_folder (str):                the path for saving the weighted specificity matrix
         possible_weights (list):            list of arrays of possible weights at each position of the motif
         chunk_size (int):                   the number of position weights to process at a time
+        fit_mode (str):                     if "extrema", optimizes r2 with respect to data above abs_extrema_threshold;
+                                            if "all", optimizes r2 with respect to all data points
+        abs_extrema_threshold (float):      only required if fit_mode is "extrema"
 
     Returns:
         results_tuple (tuple):  (best_fdr, best_for, best_score_threshold, best_weights, best_weighted_matrices_dict, best_dens_df)
     '''
 
     # Get the permuted weights and break into chunks for parallelization
-    expanded_weights_array = permute_weights(slim_length, possible_weights)
-    weights_array_chunks = [expanded_weights_array[i:i + chunk_size] for i in range(0, len(expanded_weights_array), chunk_size)]
+    permuted_weights = permute_weights(slim_length, possible_weights)
+    weights_array_chunks = [permuted_weights[i:i + chunk_size] for i in range(0, len(permuted_weights), chunk_size)]
 
     # Run the parallelized optimization process
-    best_weights, best_r2 = process_weights(weights_array_chunks, significant_sequences, significant_log2fc, unweighted_matrix)
-    results = get_specificity_scores(significant_sequences, significant_log2fc, unweighted_matrix, best_weights)
-    score_values, weighted_specificity_matrix, coef, intercept, r2 = results
-    sign = "+" if intercept >= 0 else ""
-    equation = "y=" + str(coef) + "x" + sign + str(intercept)
-    print("\t---\n", f"\tOptimal weights of {best_weights} gave a score/log2fc R2 = {best_r2} for the equation {equation}")
+    best_weights, best_r2, best_r2_extrema = process_weights(weights_array_chunks, significant_sequences,
+                                                             significant_log2fc, unweighted_matrix,
+                                                             fit_mode, abs_extrema_threshold)
+    results = get_specificity_scores(significant_sequences, significant_log2fc, unweighted_matrix, best_weights,
+                                     abs_extrema_threshold)
+    score_values, weighted_specificity_matrix, equation, r2, equation_extrema, r2_extrema = results
 
     # Save the weighted matrices and scored data
     matrix_output_path = os.path.join(output_folder, "specificity_weighted_matrix.csv")
     weighted_specificity_matrix.to_csv(matrix_output_path)
 
-    return (best_weights, score_values, weighted_specificity_matrix, equation, coef, intercept, r2)
+    return (best_weights, score_values, weighted_specificity_matrix, equation, r2, equation_extrema, r2_extrema)
 
 '''---------------------------------------------------------------------------------------------------------------------
                                       Define main functions and default parameters
@@ -340,7 +391,10 @@ default_specificity_params = {"thresholds": None,
                               "predefined_weights": None,
                               "optimize_weights": True,
                               "possible_weights": None,
-                              "output_folder": None}
+                              "output_folder": None,
+                              "chunk_size": 1000,
+                              "fit_mode": "extrema",
+                              "abs_extrema_threshold": 0.5}
 
 def main(source_df, comparator_info = None, specificity_params = None):
     '''
@@ -362,6 +416,12 @@ def main(source_df, comparator_info = None, specificity_params = None):
                                       --> optimize_weights (bool): whether to optimize weights from a permuted array
                                       --> possible_weights (list): list of arrays of possible weights at each position
                                       --> output_folder (str): the folder to save matrix and scored data into
+                                      --> chunk_size (int): the number of weights arrays to process at a time during
+                                          parallelized weights optimization
+                                      --> fit_mode (str): refers to whether to focus on fitting extrema ("extrema") or
+                                          to treat all the source data equally ("all")
+                                      --> abs_extrema_threshold (float): the absolute threshold for a log2fc value to be
+                                          considered part of the extrema; only required when fit_mode is "extrema"
 
     Returns:
         specificity_results (tuple):  (output_df, predefined_weights, score_values, weighted_matrix,
@@ -402,6 +462,7 @@ def main(source_df, comparator_info = None, specificity_params = None):
                                                 include_phospho = include_phospho)
 
     optimize_weights = specificity_params.get("optimize_weights")
+    abs_extrema_threshold = specificity_params.get("abs_extrema_threshold")
     significant_sequences = sequences[significance_array]
     significant_least_different = least_different_values[significance_array]
     sequence_length = len(sequences[0])
@@ -412,12 +473,11 @@ def main(source_df, comparator_info = None, specificity_params = None):
     if optimize_weights:
         # Determine optimal weights by maximizing the R2 value against a permuted array of weights arrays
         possible_weights = specificity_params.get("possible_weights")
+        chunk_size = specificity_params.get("chunk_size")
+        fit_mode = specificity_params.get("fit_mode")
         specificity_results = find_optimal_weights(significant_sequences, significant_least_different,
                                                    unweighted_matrix, sequence_length, output_folder, possible_weights,
-                                                   chunk_size = 1000)
-        best_weights, score_values, weighted_specificity_matrix, equation, coef, intercept, r2 = specificity_results
-        print(f"Optimal matrix weights, {best_weights}, gave an R2 value of {r2} for the equation {equation}")
-
+                                                   chunk_size, fit_mode, abs_extrema_threshold)
     else:
         # Use predefined weights, checked for correct dimensions and type
         predefined_weights = specificity_params.get("predefined_weights")
@@ -429,16 +489,20 @@ def main(source_df, comparator_info = None, specificity_params = None):
         if len(predefined_weights) != sequence_length:
             raise ValueError(f"predefined_weights length ({len(predefined_weights)}) does not match sequence_length ({sequence_length})")
 
-        results = get_specificity_scores(significant_sequences, significant_least_different, unweighted_matrix, predefined_weights)
-        score_values, weighted_matrix, coef, intercept, r2 = results
-        sign = "+" if intercept >= 0 else ""
-        equation = "y=" + str(coef) + "x" + sign + str(intercept)
-        specificity_results = (predefined_weights, score_values, weighted_matrix, equation, coef, intercept, r2)
+        results = get_specificity_scores(significant_sequences, significant_least_different, unweighted_matrix,
+                                         predefined_weights, abs_extrema_threshold)
+        score_values, weighted_specificity_matrix, equation, r2, equation_extrema, r2_extrema = results
+        specificity_results = (predefined_weights, score_values, weighted_specificity_matrix, equation, r2, equation_extrema, r2_extrema)
 
-        print(f"The given matrix weights, {predefined_weights}, gave an R2 value of {final_r2} for the equation y={final_coef}x+{final_intercept}")
+    best_weights, score_values, weighted_specificity_matrix = specificity_results[0:3]
+    equation, r2, equation_extrema, r2_extrema = specificity_results[3:]
+    first_word = "Optimal" if optimize_weights else "Predefined"
+    print(f"{first_word} matrix weights, {best_weights}, gave the following linear model statistics: ",
+          f"\n\tAll score/log2fc pairs: R2 = {r2}, {equation}",
+          f"\n\tOnly extrema where |log2fc|>{abs_extrema_threshold}: R2 = {r2_extrema}, {equation_extrema}")
 
     # Apply score values to output dataframe
-    score_values_all = np.zeros(shape=sequences.shape, dtype=float)
+    score_values_all = np.full(sequences.shape, np.nan, dtype=float)
     score_values_all[significance_array] = score_values
     output_df["Specificity_Score"] = score_values_all
 
