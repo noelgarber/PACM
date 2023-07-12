@@ -240,24 +240,29 @@ class ConditionalMatrices:
 
             # Iterate over columns for the weighted matrix (position numbers)
             for filter_position in np.arange(1, motif_length + 1):
-               # Assign parameters for the current type-position rule
-               current_matrix_params = matrix_params.copy()
-               current_matrix_params["included_residues"] = member_list
-               current_matrix_params["position_for_filtering"] = filter_position
+                # Assign parameters for the current type-position rule
+                current_matrix_params = matrix_params.copy()
+                current_matrix_params["included_residues"] = member_list
+                current_matrix_params["position_for_filtering"] = filter_position
 
-               # Generate the weighted matrix
-               conditional_matrix = ConditionalMatrix(motif_length, source_df, data_params, current_matrix_params)
-               current_matrix = conditional_matrix.matrix_df
+                # Generate the weighted matrix
+                conditional_matrix = ConditionalMatrix(motif_length, source_df, data_params, current_matrix_params)
+                current_matrix = conditional_matrix.matrix_df
 
-               # Standardize the weighted matrix so that the max value is 1
-               max_values = np.max(current_matrix.values, axis=0)
-               max_values = np.maximum(max_values, 1)  # prevents divide-by-zero errors
-               current_matrix /= max_values
+                # Standardize the weighted matrix so that the max value is 1
+                max_values = np.max(current_matrix.values, axis=0)
+                max_values = np.maximum(max_values, 1)  # prevents divide-by-zero errors
+                current_matrix /= max_values
 
-               # Assign the weighted matrix to the dictionary
-               dict_key_name = "#" + str(filter_position) + "=" + chemical_characteristic
-               self.matrices_dict[dict_key_name] = current_matrix
-               matrices_list.append(current_matrix)
+                # Assign the weighted matrix to the dictionary
+                dict_key_name = "#" + str(filter_position) + "=" + chemical_characteristic
+                self.matrices_dict[dict_key_name] = current_matrix
+                matrices_list.append(current_matrix)
+
+                # Display a warning message if insufficient seqs were passed
+                sufficient_seqs = conditional_matrix.sufficient_seqs
+                if not sufficient_seqs:
+                    print(f"For matrix rule {dict_key_name}, insufficient source seqs were passed; defaulting to all seqs")
 
         # Make an array representation of matrices_dict
         self.index = matrices_list[0].index
