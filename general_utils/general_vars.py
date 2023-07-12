@@ -1,13 +1,18 @@
-# Declare the amino acid chemical characteristics dictionary
+'''
+Amino acid chemical characteristics dictionary
+    --> Proline is treated separately due to being able to induce kinking
+    --> Glycine is treated separately due to being able to induce high conformational flexibility
+    --> Histidine is treated as a polar uncharged amino acid because it is rarely protonated at physiological pH
+'''
 aa_charac_dict = {
     "Acidic": ["D", "E"],
-    "Basic": ["K", "R", "H"],
+    "Basic": ["K", "R"],
     "ST": ["S", "T", "B", "J"],
-    "Aromatic": ["F", "Y", "O"],
-    "Aliphatic": ["A", "V", "I", "L"],
-    "Other_Hydrophobic": ["W", "M"],
-    "Polar_Uncharged": ["N", "Q", "C"],
-    "Special_Cases": ["P", "G"]
+    "Aromatic": ["F", "Y", "W", "O"],
+    "Aliphatic": ["A", "V", "I", "L", "M"],
+    "Polar": ["N", "Q", "H", "C"],
+    "Proline": ["P"],
+    "Glycine": ["G"]
 }
 
 # Declare the sorted list of amino acids
