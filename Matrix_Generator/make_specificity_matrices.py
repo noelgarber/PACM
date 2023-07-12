@@ -327,6 +327,7 @@ def process_weights(weights_array_chunks, significant_sequences, significant_log
             if 1 >= chunk_results[r2_optimization_index] > temp_optimization_val:
                 best_weights, best_r2, best_r2_extrema = chunk_results
                 temp_optimization_val = chunk_results[r2_optimization_index]
+                print(f"New record: R2={best_r2} (extrema R2={best_r2_extrema}) for weights: {best_weights}")
 
             pbar.update()
 
@@ -392,7 +393,7 @@ default_specificity_params = {"thresholds": None,
                               "optimize_weights": True,
                               "possible_weights": None,
                               "output_folder": None,
-                              "chunk_size": 1000,
+                              "chunk_size": 10000,
                               "fit_mode": "extrema",
                               "abs_extrema_threshold": 0.5}
 
