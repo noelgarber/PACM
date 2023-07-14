@@ -58,7 +58,7 @@ def process_thresholds_chunk(thresholds_chunk, scores_2d, passes_bools, allowed_
     # Find the chunk index for the weights array that produces the lowest optimal FDR & FOR values (using the mean)
     best_index = fdr_for_optimizer(optimal_values_array, allowed_rate_divergence, return_none_unsuccessful = True)
     if best_index is None:
-        return None
+        return [None, None, None]
 
     chunk_best_fdr, chunk_best_for = optimal_values_array[best_index]
     chunk_best_thresholds = thresholds_chunk[best_index]
@@ -122,9 +122,8 @@ def process_thresholds(threshold_chunks, conditional_matrices, slim_length, sour
 
     with trange(len(threshold_chunks), desc=progress_bar_description) as pbar:
         for chunk_results in pool.imap_unordered(process_partial, threshold_chunks):
-            if chunk_results is not None:
-                rate_delta = abs(chunk_results[0] - chunk_results[1])
-                if chunk_results[0] < best_fdr and chunk_results[1] < best_for and rate_delta<=allowed_rate_divergence:
+            if chunk_results[0] is not None:
+                if chunk_results[0] < best_fdr and chunk_results[1] < best_for:
                     best_fdr = chunk_results[0]
                     best_for = chunk_results[1]
                     results = chunk_results
@@ -138,19 +137,22 @@ def process_thresholds(threshold_chunks, conditional_matrices, slim_length, sour
     pool.join()
 
     # Apply final scores to output_df
-    best_thresholds = results[2]
-    residue_passes_thresholds = scores_2d >= best_thresholds
-    chunk_best_source_df = apply_motif_scores(output_df, slim_length, conditional_matrices, sequences_2d, score_col,
-                                              convert_phospho = convert_phospho, add_residue_cols = True,
-                                              in_place = False, return_array = False, use_weighted = False,
-                                              return_2d = True, residue_calls_2d = residue_passes_thresholds)
+    if results[2] is not None:
+        best_thresholds = results[2]
+        residue_passes_thresholds = scores_2d >= best_thresholds
+        chunk_best_source_df = apply_motif_scores(output_df, slim_length, conditional_matrices, sequences_2d, score_col,
+                                                  convert_phospho = convert_phospho, add_residue_cols = True,
+                                                  in_place = False, return_array = False, use_weighted = False,
+                                                  return_2d = True, residue_calls_2d = residue_passes_thresholds)
+    else:
+        chunk_best_source_df = None
 
     results.append(chunk_best_source_df)
 
     return results
 
 def find_optimal_thresholds(input_df, slim_length, conditional_matrices, sequence_col, significance_col, significant_str,
-                            score_col, matrix_output_folder, output_folder, steps = 50,
+                            score_col, matrix_output_folder, output_folder, position_thresholds = None,
                             convert_phospho = True, save_pickled_matrix_dict = True):
     '''
     Parent function for finding optimal position weights to generate optimally weighted matrices
@@ -163,7 +165,7 @@ def find_optimal_thresholds(input_df, slim_length, conditional_matrices, sequenc
         significance_col (str):                      col name where significance information is found
         significant_str (str):                       value in significance_col that denotes significance, e.g. "Yes"
         score_col (str):                             col name where motif scores are found
-        steps (int):                                 the steps between 0 and 1 for where to set residue score thres
+        position_thresholds (np.ndarray):            possible values at each position for residue thresholding
         matrix_output_folder (str):                  path for saving weighted matrices
         output_folder (str):                         path for saving the scored data
         convert_phospho (bool):                      whether to convert phospho-residues to non-phospho before lookups
@@ -176,7 +178,8 @@ def find_optimal_thresholds(input_df, slim_length, conditional_matrices, sequenc
     output_df = input_df.copy()
 
     # Permute thresholds; manage memory to ensure the available maximum is not exceeded
-    position_thresholds = np.linspace(start=0, stop=1, num=steps, dtype=np.float16)
+    if position_thresholds is None:
+        position_thresholds = np.array([0.8,0.0,0.6,0.2,0.4])
     thresholds_count = len(position_thresholds)
 
     available_memory = psutil.virtual_memory().available  # in bytes
@@ -187,6 +190,7 @@ def find_optimal_thresholds(input_df, slim_length, conditional_matrices, sequenc
                                                                                         memory_limit, element_bits = 16,
                                                                                         meshgrid_bits = 64)
     print(f"Expected memory usage: ~{expected_usage / 10**9} GB")
+    print(f"Split: {iteration_positions} iterated permuted positions and {partial_slim_length} non-iterated permuted positions")
 
     # Permute non-iterated and iterated positions
     cpus = os.cpu_count()
@@ -219,7 +223,7 @@ def find_optimal_thresholds(input_df, slim_length, conditional_matrices, sequenc
             group = (i, iteration_count)
             group_results = process_thresholds(batch_chunks, conditional_matrices, slim_length, output_df, sequence_col,
                                                significance_col, significant_str, score_col,
-                                               allowed_rate_divergence = 0.1, convert_phospho = convert_phospho,
+                                               allowed_rate_divergence = 0.15, convert_phospho = convert_phospho,
                                                group = group)
 
             # Delete unnecessary objects to save memory
@@ -228,7 +232,7 @@ def find_optimal_thresholds(input_df, slim_length, conditional_matrices, sequenc
             # Evaluate FDR and FOR against current best mean rate value
             fdr_val, for_val, residue_thresholds, scored_df = group_results
             if fdr_val is not None and for_val is not None:
-                if fdr_val < best_fdr and for_val < best_for:
+                if fdr_val <= best_fdr and for_val < best_for:
                     best_fdr = fdr_val
                     best_for = for_val
                     results = group_results

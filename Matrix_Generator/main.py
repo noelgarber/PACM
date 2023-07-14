@@ -110,11 +110,12 @@ def main(image_params = None, general_params = None, data_params = None, matrix_
     matrix_params = matrix_params or default_matrix_params.copy()
 
     if generate_context_matrices:
-        threshold_steps = general_params.get("threshold_steps")
-        use_default_steps = input(f"For generating context-aware matrices, use default step size ({threshold_steps})? (Y/N)  ") == "Y"
-        if not use_default_steps:
-            threshold_steps = input_number("\tPlease enter the steps count for threshold optimization as an integer:  ", "int")
-            general_params["threshold_steps"] = threshold_steps
+        position_thresholds = general_params.get("position_thresholds")
+        position_thresholds_str = ",".join(position_thresholds.astype(str))
+        use_default_thresholds = input(f"For generating context-aware matrices, use default possible threshold values during optimization ({position_thresholds_str})? (Y/N)  ") == "Y"
+        if not use_default_thresholds:
+            position_thresholds = input("Enter comma-delimited possible threshold values:  ").split(",")
+            general_params["position_thresholds"] = position_thresholds
 
         pairwise_results = make_pairwise_matrices(data_df, general_params, data_params, matrix_params)
         best_fdr, best_for, best_residue_thresholds, scored_data_df = pairwise_results

@@ -14,7 +14,8 @@ default_general_params = {"percentiles_dict": None,
                           "make_calls": True,
                           "threshold_steps": 10,
                           "aa_charac_dict": aa_charac_dict,
-                          "convert_phospho": True}
+                          "convert_phospho": True,
+                          "position_thresholds": np.array([0.4,0.8,0.0,0.6,0.2])}
 
 def main(input_df, general_params = None, data_params = None, matrix_params = None):
     '''
@@ -82,9 +83,9 @@ def main(input_df, general_params = None, data_params = None, matrix_params = No
 
     # Find the optimal residue points thresholds that produce the lowest FDR/FOR pair
     convert_phospho = general_params.get("convert_phospho")
-    threshold_steps = general_params.get("threshold_steps")
+    position_thresholds = general_params.get("position_thresholds")
     results = find_optimal_thresholds(input_df, motif_length, conditional_matrices, sequence_col, significance_col,
-                                      significant_str, score_col, matrix_output_folder, output_folder, threshold_steps,
-                                      convert_phospho, save_pickled_matrix_dict = True)
+                                      significant_str, score_col, matrix_output_folder, output_folder,
+                                      position_thresholds, convert_phospho, save_pickled_matrix_dict = True)
 
     return results
