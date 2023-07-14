@@ -56,7 +56,7 @@ def process_thresholds_chunk(thresholds_chunk, conditional_matrices, source_df, 
     # Test whether residues and whole peptides pass thresholds
     residue_passes_thresholds = thresholds_chunk[:,np.newaxis,:] <= scores_2d
     peptide_passes_thresholds = residue_passes_thresholds.all(axis=2) # shape = (permutations_count, peptide_count)
-    del residue_passes_thresholds, thresholds_chunk # save memory by explicitly deleting large arrays
+    del residue_passes_thresholds # save memory by explicitly deleting large arrays
 
     # Calculate arguments for finding FDR and FOR
     FP_bools = np.logical_and(peptide_passes_thresholds, ~passes_bools) # passes_bools is automatically broadcasted
@@ -71,8 +71,9 @@ def process_thresholds_chunk(thresholds_chunk, conditional_matrices, source_df, 
     negative_calls = (~peptide_passes_thresholds).sum(axis=1)
 
     # Calculate FDR and FOR for each thresholds array in thresholds_chunk
-    current_best_fdr = np.where(positive_calls > 0, FP_count / positive_calls, np.inf)
-    current_best_for = np.where(negative_calls > 0, FN_count / negative_calls, np.inf)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        current_best_fdr = np.where(positive_calls > 0, FP_count / positive_calls, np.inf)
+        current_best_for = np.where(negative_calls > 0, FN_count / negative_calls, np.inf)
     del FP_count, FN_count, positive_calls, negative_calls
 
     optimal_values_array = np.column_stack((current_best_fdr, current_best_for))
@@ -82,7 +83,7 @@ def process_thresholds_chunk(thresholds_chunk, conditional_matrices, source_df, 
     best_index = fdr_for_optimizer(optimal_values_array, allowed_rate_divergence)
     chunk_best_fdr, chunk_best_for = optimal_values_array[best_index]
     chunk_best_thresholds = thresholds_chunk[best_index]
-    del optimal_values_array
+    del optimal_values_array, thresholds_chunk
 
     # Get the matching dict of weighted matrices and use it to apply final scores to output_df
     residue_passes_thresholds = scores_2d >= chunk_best_thresholds
@@ -128,8 +129,10 @@ def process_thresholds(threshold_chunks, conditional_matrices, slim_length, sour
 
     if group is not None:
         progress_bar_description = f"Processing thresholds for group {group[0]} of {group[1]}"
+        record_str = "New group record"
     else:
-        progress_bar_description =
+        progress_bar_description = f"Processing thresholds"
+        record_str = "New record"
 
     with trange(len(threshold_chunks), desc=progress_bar_description) as pbar:
         for chunk_results in pool.imap_unordered(process_partial, threshold_chunks):
@@ -138,7 +141,7 @@ def process_thresholds(threshold_chunks, conditional_matrices, slim_length, sour
             if rate_mean < best_rate_mean and rate_delta <= allowed_rate_divergence:
                 best_rate_mean = rate_mean
                 results = chunk_results
-                print(f"\tNew record: FDR={results[0]} | FOR={results[1]} | thresholds={results[2]}")
+                print(f"\t{record_str}: FDR={results[0]} | FOR={results[1]} | thresholds={results[2]}")
 
             pbar.update()
 
@@ -194,14 +197,14 @@ def find_optimal_thresholds(input_df, slim_length, conditional_matrices, sequenc
         chunk_size = math.ceil(chunk_size)
 
         iteration_count = len(iterated_permuted_arrays)
-        print(f"Starting parallel threshold optimization with chunk size={chunk_size}",
-              f"\tProcessing in {iteration_count} iterated groups due to memory constraints")
+        print(f"Starting parallel threshold optimization with chunk size={chunk_size:,}",
+              f"\n\tProcessing in {iteration_count:,} iterated groups due to memory constraints")
 
         best_rate_mean = 9999
         results = [None, None, None, None]
         for i, iterable_permuted_array in enumerate(iterated_permuted_arrays):
             iterable_permuted_arrays = np.tile(iterable_permuted_array, (partial_arrays.shape[0], 1))
-            permuted_batch = np.concatenate([iterable_permuted_arrays, partial_arrays])
+            permuted_batch = np.concatenate([iterable_permuted_arrays, partial_arrays], axis=1)
 
             # Separate the permuted arrays into chunks for parallel processing
             batch_chunks = [permuted_batch[i:i + chunk_size] for i in range(0, len(permuted_batch), chunk_size)]
