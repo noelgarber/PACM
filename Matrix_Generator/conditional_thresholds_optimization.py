@@ -80,7 +80,10 @@ def process_thresholds_chunk(thresholds_chunk, conditional_matrices, source_df, 
     del current_best_fdr, current_best_for
 
     # Find the chunk index for the weights array that produces the lowest optimal FDR & FOR values (using the mean)
-    best_index = fdr_for_optimizer(optimal_values_array, allowed_rate_divergence)
+    best_index = fdr_for_optimizer(optimal_values_array, allowed_rate_divergence, return_none_unsuccessful = True)
+    if best_index is None:
+        return None
+
     chunk_best_fdr, chunk_best_for = optimal_values_array[best_index]
     chunk_best_thresholds = thresholds_chunk[best_index]
     del optimal_values_array, thresholds_chunk
@@ -92,7 +95,9 @@ def process_thresholds_chunk(thresholds_chunk, conditional_matrices, source_df, 
                                               in_place = False, return_array = False, use_weighted = False,
                                               return_2d = True, residue_calls_2d = residue_passes_thresholds)
 
-    return (chunk_best_fdr, chunk_best_for, chunk_best_thresholds, chunk_best_source_df)
+    results = (chunk_best_fdr, chunk_best_for, chunk_best_thresholds, chunk_best_source_df)
+
+    return results
 
 def process_thresholds(threshold_chunks, conditional_matrices, slim_length, source_df, sequence_col, significance_col,
                        significant_str, score_col, allowed_rate_divergence = 0.2, convert_phospho = True, group = None):
@@ -136,12 +141,15 @@ def process_thresholds(threshold_chunks, conditional_matrices, slim_length, sour
 
     with trange(len(threshold_chunks), desc=progress_bar_description) as pbar:
         for chunk_results in pool.imap_unordered(process_partial, threshold_chunks):
-            rate_mean = (chunk_results[0] + chunk_results[1]) / 2
-            rate_delta = abs(chunk_results[0] - chunk_results[1])
-            if rate_mean < best_rate_mean and rate_delta <= allowed_rate_divergence:
-                best_rate_mean = rate_mean
-                results = chunk_results
-                print(f"\t{record_str}: FDR={results[0]} | FOR={results[1]} | thresholds={results[2]}")
+            if chunk_results is not None:
+                rate_mean = (chunk_results[0] + chunk_results[1]) / 2
+                rate_delta = abs(chunk_results[0] - chunk_results[1])
+                if rate_mean < best_rate_mean and rate_delta <= allowed_rate_divergence:
+                    best_rate_mean = rate_mean
+                    results = chunk_results
+                    if group is None:
+                        thresholds_str = "[" + ",".join([str(val) for val in results[2]]) + "]"
+                        print(f"\t{record_str}: FDR={results[0]} | FOR={results[1]} | thresholds: {thresholds_str}")
 
             pbar.update()
 
@@ -214,8 +222,9 @@ def find_optimal_thresholds(input_df, slim_length, conditional_matrices, sequenc
 
             group = (i, iteration_count)
             group_results = process_thresholds(batch_chunks, conditional_matrices, slim_length, output_df, sequence_col,
-                                         significance_col, significant_str, score_col, allowed_rate_divergence = 0.2,
-                                         convert_phospho = convert_phospho, group = group)
+                                               significance_col, significant_str, score_col,
+                                               allowed_rate_divergence = 0.2, convert_phospho = convert_phospho,
+                                               group = group)
 
             # Delete unnecessary objects to save memory
             del batch_chunks, iterable_permuted_arrays, permuted_batch
@@ -225,6 +234,8 @@ def find_optimal_thresholds(input_df, slim_length, conditional_matrices, sequenc
             rate_mean = (fdr_val + for_val) / 2
             if rate_mean < best_rate_mean:
                 results = group_results
+                thresholds_str = "[" + ",".join([str(val) for val in results[2]]) + "]"
+                print(f"\tNew record: FDR={results[0]} | FOR={results[1]} | thresholds: {thresholds_str}")
 
     else:
         permuted_arrays = permute_array(position_thresholds, slim_length)

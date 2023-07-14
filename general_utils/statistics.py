@@ -169,7 +169,7 @@ def apply_threshold(input_df, score_range_series = None, sig_col = "One_Passes",
 
     return (output_df, selected_threshold, predictive_value_df)
 
-def fdr_for_optimizer(rates_array, allowed_rate_divergence = 0.2):
+def fdr_for_optimizer(rates_array, allowed_rate_divergence = 0.2, return_none_unsuccessful = True):
     '''
     Function that takes a numpy array of FDRs and FORs and finds the optimal row index for the best pair
 
@@ -189,6 +189,8 @@ def fdr_for_optimizer(rates_array, allowed_rate_divergence = 0.2):
     if passes_divergence.any():
         mean_rates[~passes_divergence] = np.inf
         best_index = np.nanargmin(mean_rates)
+    elif return_none_unsuccessful:
+        best_index = None
     elif np.isnan(mean_rates).all():
         warnings.warn(f"RuntimeWarning: fdr_for_optimizer got all-NaN array when calculating mean_rates; best_index cannot be calculated")
         best_index = None
