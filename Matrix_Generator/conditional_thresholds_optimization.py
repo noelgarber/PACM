@@ -15,43 +15,19 @@ from general_utils.general_utils import save_dataframe, save_weighted_matrices, 
 from general_utils.statistics import fdr_for_optimizer
 from general_utils.permutation_utils import permutation_split_memory
 
-def process_thresholds_chunk(thresholds_chunk, conditional_matrices, source_df, slim_length, seq_col,
-                             significance_col, score_col, significant_str = "Yes", allowed_rate_divergence = 0.2,
-                             convert_phospho = True):
+def process_thresholds_chunk(thresholds_chunk, scores_2d, passes_bools, allowed_rate_divergence = 0.2):
     '''
-    Lower helper function for parallelization of position weight optimization; processes chunks of permuted weights
-
-    Note that matrix_arrays_dict, unlike matrices_dict which appears elsewhere, contains numpy arrays instead of
-    pandas dataframes. This greatly improves performance, but requires the matching pd.Index to be passed separately.
+    Lower helper function for parallelization of position score threshold optimization; processes chunks of thresholds
 
     Args:
-        thresholds_chunk (np.ndarray):              the chunk of permuted thresholds currently being processed
-        conditional_matrices (ConditionalMatrices): unweighted conditional position-weighted matrices
-        source_df (pd.DataFrame):                   contains source peptide-protein binding data
-        slim_length (int):                          length of the motif being studied
-        seq_col (str):                              col name where sequences are stored
-        significance_col (str):                     col name where significance information is found
-        score_col (str):                            col name where motif scores are found
-        significant_str (str):                      string representing a pass in source_df[significance_col]
-        allowed_rate_divergence (float):            max allowed difference between FDR and FOR pairs
-        convert_phospho (bool):                     whether to convert phospho-residues to non-phospho before lookups
+        thresholds_chunk (np.ndarray):    the chunk of permuted thresholds currently being processed
+        scores_2d (np.ndarray):           unweighted matrix score values for each residue in sequences_2d
+        passes_bools (np.ndarray):        boolean array of calls on whether each peptide is positive or not
+        allowed_rate_divergence (float):  max allowed difference between FDR and FOR pairs
 
     Returns:
-        results_tuple (tuple):  (chunk_best_fdr, chunk_best_for, chunk_best_thresholds, chunk_best_source_df)
+        results (list):                   (chunk_best_fdr, chunk_best_for, chunk_best_thresholds)
     '''
-
-    output_df = source_df.copy()
-
-    passes_bools = source_df[significance_col].to_numpy() == significant_str
-
-    # Convert sequences to a 2D array upfront for performance improvement
-    sequences = source_df[seq_col].to_numpy()
-    sequences_2d = unravel_seqs(sequences, slim_length, convert_phospho)
-
-    # Get the motif scores for whole peptides and the residues constituting them, using unwweighted conditional matrices
-    scores_array, scores_2d = apply_motif_scores(output_df, slim_length, conditional_matrices, sequences_2d,
-                                                 convert_phospho = True, return_array = True, use_weighted = False,
-                                                 return_2d = True)
 
     # Test whether residues and whole peptides pass thresholds
     residue_passes_thresholds = thresholds_chunk[:,np.newaxis,:] <= scores_2d
@@ -88,14 +64,7 @@ def process_thresholds_chunk(thresholds_chunk, conditional_matrices, source_df, 
     chunk_best_thresholds = thresholds_chunk[best_index]
     del optimal_values_array, thresholds_chunk
 
-    # Get the matching dict of weighted matrices and use it to apply final scores to output_df
-    residue_passes_thresholds = scores_2d >= chunk_best_thresholds
-    chunk_best_source_df = apply_motif_scores(output_df, slim_length, conditional_matrices, sequences_2d, score_col,
-                                              convert_phospho = convert_phospho, add_residue_cols = True,
-                                              in_place = False, return_array = False, use_weighted = False,
-                                              return_2d = True, residue_calls_2d = residue_passes_thresholds)
-
-    results = (chunk_best_fdr, chunk_best_for, chunk_best_thresholds, chunk_best_source_df)
+    results = [chunk_best_fdr, chunk_best_for, chunk_best_thresholds]
 
     return results
 
@@ -121,16 +90,28 @@ def process_thresholds(threshold_chunks, conditional_matrices, slim_length, sour
         results_list (list):     the list of results sets for all the weights arrays
     '''
 
+    output_df = source_df.copy()
+
+    # Get sequences as 2D array
+    sequences = source_df[sequence_col].to_numpy()
+    sequences_2d = unravel_seqs(sequences, slim_length, convert_phospho)
+
+    # Get boolean array of peptides based on whether they bind the target protein or not
+    passes_bools = source_df[significance_col].to_numpy() == significant_str
+
+    # Get the motif scores for whole peptides and the residues constituting them, using unwweighted conditional matrices
+    scores_array, scores_2d = apply_motif_scores(output_df, slim_length, conditional_matrices, sequences_2d,
+                                                 convert_phospho = True, return_array = True, use_weighted = False,
+                                                 return_2d = True)
+
     pool = multiprocessing.Pool()
 
-    process_partial = partial(process_thresholds_chunk, conditional_matrices = conditional_matrices,
-                              source_df = source_df, slim_length = slim_length, seq_col = sequence_col,
-                              significance_col = significance_col, score_col = score_col,
-                              significant_str = significant_str, allowed_rate_divergence = allowed_rate_divergence,
-                              convert_phospho = convert_phospho)
+    process_partial = partial(process_thresholds_chunk, scores_2d = scores_2d, passes_bools = passes_bools,
+                              allowed_rate_divergence = allowed_rate_divergence)
 
-    results = None
-    best_rate_mean = 9999
+    results = [None, None, None]
+    best_fdr = 1
+    best_for = 1
 
     if group is not None:
         progress_bar_description = f"Processing thresholds for group {group[0]} of {group[1]}"
@@ -142,10 +123,10 @@ def process_thresholds(threshold_chunks, conditional_matrices, slim_length, sour
     with trange(len(threshold_chunks), desc=progress_bar_description) as pbar:
         for chunk_results in pool.imap_unordered(process_partial, threshold_chunks):
             if chunk_results is not None:
-                rate_mean = (chunk_results[0] + chunk_results[1]) / 2
                 rate_delta = abs(chunk_results[0] - chunk_results[1])
-                if rate_mean < best_rate_mean and rate_delta <= allowed_rate_divergence:
-                    best_rate_mean = rate_mean
+                if chunk_results[0] < best_fdr and chunk_results[1] < best_for and rate_delta<=allowed_rate_divergence:
+                    best_fdr = chunk_results[0]
+                    best_for = chunk_results[1]
                     results = chunk_results
                     if group is None:
                         thresholds_str = "[" + ",".join([str(val) for val in results[2]]) + "]"
@@ -155,6 +136,16 @@ def process_thresholds(threshold_chunks, conditional_matrices, slim_length, sour
 
     pool.close()
     pool.join()
+
+    # Apply final scores to output_df
+    best_thresholds = results[2]
+    residue_passes_thresholds = scores_2d >= best_thresholds
+    chunk_best_source_df = apply_motif_scores(output_df, slim_length, conditional_matrices, sequences_2d, score_col,
+                                              convert_phospho = convert_phospho, add_residue_cols = True,
+                                              in_place = False, return_array = False, use_weighted = False,
+                                              return_2d = True, residue_calls_2d = residue_passes_thresholds)
+
+    results.append(chunk_best_source_df)
 
     return results
 
@@ -189,10 +180,13 @@ def find_optimal_thresholds(input_df, slim_length, conditional_matrices, sequenc
     thresholds_count = len(position_thresholds)
 
     available_memory = psutil.virtual_memory().available  # in bytes
-    memory_limit = 0.5 * available_memory
+    memory_limit = 0.9 * available_memory
+    print(f"Memory limit: {memory_limit / 10**9} GB")
 
-    iteration_positions, partial_slim_length = permutation_split_memory(thresholds_count, slim_length, memory_limit,
-                                                                      element_bits = 16, meshgrid_bits = 64)
+    iteration_positions, partial_slim_length, expected_usage = permutation_split_memory(thresholds_count, slim_length,
+                                                                                        memory_limit, element_bits = 16,
+                                                                                        meshgrid_bits = 64)
+    print(f"Expected memory usage: ~{expected_usage / 10**9} GB")
 
     # Permute non-iterated and iterated positions
     cpus = os.cpu_count()
@@ -208,7 +202,9 @@ def find_optimal_thresholds(input_df, slim_length, conditional_matrices, sequenc
         print(f"Starting parallel threshold optimization with chunk size={chunk_size:,}",
               f"\n\tProcessing in {iteration_count:,} iterated groups due to memory constraints")
 
-        best_rate_mean = 9999
+        best_fdr = 1
+        best_for = 1
+
         results = [None, None, None, None]
         for i, iterable_permuted_array in enumerate(iterated_permuted_arrays):
             iterable_permuted_arrays = np.tile(iterable_permuted_array, (partial_arrays.shape[0], 1))
@@ -223,7 +219,7 @@ def find_optimal_thresholds(input_df, slim_length, conditional_matrices, sequenc
             group = (i, iteration_count)
             group_results = process_thresholds(batch_chunks, conditional_matrices, slim_length, output_df, sequence_col,
                                                significance_col, significant_str, score_col,
-                                               allowed_rate_divergence = 0.2, convert_phospho = convert_phospho,
+                                               allowed_rate_divergence = 0.1, convert_phospho = convert_phospho,
                                                group = group)
 
             # Delete unnecessary objects to save memory
@@ -231,11 +227,13 @@ def find_optimal_thresholds(input_df, slim_length, conditional_matrices, sequenc
 
             # Evaluate FDR and FOR against current best mean rate value
             fdr_val, for_val, residue_thresholds, scored_df = group_results
-            rate_mean = (fdr_val + for_val) / 2
-            if rate_mean < best_rate_mean:
-                results = group_results
-                thresholds_str = "[" + ",".join([str(val) for val in results[2]]) + "]"
-                print(f"\tNew record: FDR={results[0]} | FOR={results[1]} | thresholds: {thresholds_str}")
+            if fdr_val is not None and for_val is not None:
+                if fdr_val < best_fdr and for_val < best_for:
+                    best_fdr = fdr_val
+                    best_for = for_val
+                    results = group_results
+                    thresholds_str = "[" + ",".join([str(val) for val in results[2]]) + "]"
+                    print(f"\tNew record: FDR={results[0]} | FOR={results[1]} | thresholds: {thresholds_str}")
 
     else:
         permuted_arrays = permute_array(position_thresholds, slim_length)
@@ -251,7 +249,7 @@ def find_optimal_thresholds(input_df, slim_length, conditional_matrices, sequenc
             chunks.append(permuted_batch[-(len(permuted_batch) % chunk_size):])
 
         results = process_thresholds(chunks, conditional_matrices, slim_length, output_df, sequence_col,
-                                     significance_col, significant_str, score_col, allowed_rate_divergence = 0.2,
+                                     significance_col, significant_str, score_col, allowed_rate_divergence = 0.1,
                                      convert_phospho = convert_phospho)
 
         # Delete unnecessary objects to save memory

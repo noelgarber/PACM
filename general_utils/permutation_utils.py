@@ -48,11 +48,11 @@ def permutation_split_memory(position_elements, positions, memory_limit, element
         iteration_meshgrid_size = iteration_elements_count * meshgrid_bits / 8
 
         # Get size of array resulting from concatenating one row of iterable threshold part to partial thresholds array
-        concatenated_iteration_elements = partial_permutations_count * positions
-        concatenated_iteration_size = concatenated_iteration_elements * element_bits / 8
+        #concatenated_iteration_elements = partial_permutations_count * positions
+        #concatenated_iteration_size = concatenated_iteration_elements * element_bits / 8
 
         total_size = np.sum([partial_permuted_size, partial_meshgrid_size,
-                             iteration_permuted_size, iteration_meshgrid_size,
-                             concatenated_iteration_size])
+                             iteration_permuted_size, iteration_meshgrid_size])
+                             # concatenated_iteration_size])
 
-    return iteration_positions, partial_positions
+    return iteration_positions, partial_positions, total_size
