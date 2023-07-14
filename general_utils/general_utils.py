@@ -322,9 +322,23 @@ def check_seq_lengths(sequences, expected_length, raise_error = True):
             correct_uniform_length = False
     elif not first_length_matches:
         if raise_error: 
-            raise ValueError(f"weighted_matrix error: source_dataframe sequences are {sequence_lengths[0]} amino acids long, but motif_length is set to {motif_length}")
+            raise ValueError(f"weighted_matrix error: source_dataframe sequences are {sequence_lengths[0]} amino acids long, but motif_length is set to {expected_length}")
         else: 
             correct_uniform_length = False
     
     if not raise_error: 
         return correct_uniform_length
+
+def permute_array(array, positions_count, dtype = np.float16):
+    # Simple helper function that outputs an array of shape (permutations_count, positions_count)
+
+    tiled_thresholds = np.tile(array, (positions_count, 1))
+    permutations_count = np.prod([len(arr) for arr in tiled_thresholds])
+
+    thresholds_arrays = np.zeros((permutations_count, positions_count), dtype)
+
+    meshgrid_arrays = np.meshgrid(*tiled_thresholds)
+    for i, arr in enumerate(meshgrid_arrays):
+        thresholds_arrays[:, i] = arr.ravel()
+
+    return thresholds_arrays
