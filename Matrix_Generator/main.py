@@ -110,8 +110,14 @@ def main(image_params = None, general_params = None, data_params = None, matrix_
     matrix_params = matrix_params or default_matrix_params.copy()
 
     if generate_context_matrices:
-        pairwise_results = make_pairwise_matrices(data_df, general_params, data_params, matrix_params, verbose)
-        scored_data_df, conditional_matrix_weights, weighted_matrices_dict, motif_statistics = pairwise_results
+        threshold_steps = general_params.get("threshold_steps")
+        use_default_steps = input(f"For generating context-aware matrices, use default step size ({threshold_steps})? (Y/N)  ") == "Y"
+        if not use_default_steps:
+            threshold_steps = input_number("\tPlease enter the steps count for threshold optimization as an integer:  ", "int")
+            general_params["threshold_steps"] = threshold_steps
+
+        pairwise_results = make_pairwise_matrices(data_df, general_params, data_params, matrix_params)
+        best_fdr, best_for, best_residue_thresholds, scored_data_df = pairwise_results
 
     # Get specificity matrix comparator info and ensure consistency with data_params
     comparator_info = comparator_info or default_comparator_info.copy()
@@ -145,9 +151,8 @@ def main(image_params = None, general_params = None, data_params = None, matrix_
     print("                       Final Analysis Report                        ")
     if generate_context_matrices:
         print("                     -------------------------                      ")
-        print("Context-aware position-weighted matrix weights:", conditional_matrix_weights)
-        print("Detected motif statistics: ")
-        print(motif_statistics)
+        print("Context-aware position-weighted matrix residue thresholds:", best_residue_thresholds)
+        print(f"Detected motif statistics: FDR = {best_fdr}, FOR = {best_for}")
     if generate_specificity_matrix:
         print("                     -------------------------                      ")
         print("Specificity position-weighted matrix weights:", specificity_weights)
@@ -157,10 +162,10 @@ def main(image_params = None, general_params = None, data_params = None, matrix_
 
 
     if generate_context_matrices and generate_specificity_matrix:
-        return (scored_data_df, conditional_matrix_weights, weighted_matrices_dict, motif_statistics,
+        return (scored_data_df, best_residue_thresholds, best_fdr, best_for,
                 specificity_weights, specificity_weighted_matrix, specificity_statistics)
     elif generate_context_matrices:
-        return (scored_data_df, conditional_matrix_weights, weighted_matrices_dict, motif_statistics)
+        return (scored_data_df, best_residue_thresholds, best_fdr, best_for)
     elif generate_specificity_matrix:
         return (scored_data_df, specificity_weights, specificity_weighted_matrix, specificity_statistics)
 
@@ -193,12 +198,6 @@ if __name__ == "__main__":
     if generate_context_matrices:
         general_params = default_general_params.copy()
         general_params["motif_length"] = input_number("Please enter the length of the short linear motif being studied:  ", "int")
-        optimize_weights = input("Optimize context-aware matrix weights? (Y/N)  ") == "Y"
-        general_params["optimize_weights"] = optimize_weights
-        if not optimize_weights:
-            weights_list = input("Enter a comma-delimited list of predefined weights:  ")
-            weights_array = np.array(weights_list.split(",")).astype(float)
-            general_params["position_weights"] = weights_array
         data_params = default_data_params.copy()
         matrix_params = default_matrix_params.copy()
         use_points_function = input("When assigning points, use continuous assignment from rational function? If not, defaults to thresholding. (Y/N)  ") == "Y"
@@ -207,7 +206,6 @@ if __name__ == "__main__":
         matrix_params["penalize_negatives"] = penalize_negatives
     else:
         general_params = None
-        optimize_weights = False
         data_params = None
         matrix_params = None
 

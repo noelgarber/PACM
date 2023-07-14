@@ -5,7 +5,7 @@ import pandas as pd
 from general_utils.general_utils import unravel_seqs
 
 def score_seqs(sequences, slim_length, conditional_matrices, sequences_2d = None, convert_phospho = True,
-               use_weighted = False):
+               use_weighted = False, return_2d = True):
     '''
     Vectorized function to score amino acid sequences based on the dictionary of context-aware weighted matrices
 
@@ -17,6 +17,8 @@ def score_seqs(sequences, slim_length, conditional_matrices, sequences_2d = None
                                                     performance improvement in loops
         convert_phospho (bool):                     whether to convert phospho-residues to non-phospho before lookups
         use_weighted (bool):                        whether to use conditional_matrices.stacked_weighted_matrices
+        return_2d (bool):                           whether to return an array of arrays of points values at each
+                                                    position of each peptide in addition to the 1d array
 
     Returns:
         final_points_array (np.ndarray):           the total motif scores for the input sequences
@@ -80,14 +82,17 @@ def score_seqs(sequences, slim_length, conditional_matrices, sequences_2d = None
     right_matrix_values_2d = right_matrix_values_flattened.reshape(shape_2d)
 
     # Get the final scores by summing values of each row
-    final_points_array = left_matrix_values_2d.sum(axis=1) + right_matrix_values_2d.sum(axis=1)
+    final_points_2d = left_matrix_values_2d + right_matrix_values_2d
+    final_points_array = final_points_2d.sum(axis=1)
 
-    return final_points_array
-
+    if return_2d:
+        return final_points_array, final_points_2d
+    else:
+        return final_points_array
 
 def apply_motif_scores(input_df, slim_length, conditional_matrices, sequences_2d = None, seq_col = "No_Phos_Sequence",
                        score_col = "SLiM_Score", convert_phospho = True, add_residue_cols = False, in_place = False,
-                       return_array = True, use_weighted = False):
+                       return_array = True, use_weighted = False, return_2d = True, residue_calls_2d = None):
     '''
     Function to apply the score_seqs() function to all sequences in the source df and add residue cols for sorting
 
@@ -102,6 +107,11 @@ def apply_motif_scores(input_df, slim_length, conditional_matrices, sequences_2d
         convert_phospho (bool):                    whether to convert phospho-residues to non-phospho before lookups
         add_residue_cols (bool):                   whether to add columns containing individual residue letters
         in_place (bool):                           whether to apply operations in-place; add_residue_cols not supported
+        return_array (bool):                       whether to only return the array of points values
+        use_weighted (bool):                       whether to use conditional_matrices.stacked_weighted_matrices
+        return_2d (bool):                          whether to return an array of arrays of points values at each
+                                                   position of each peptide in addition to the 1d array
+        residue_calls_2d (np.ndarray):             2D array of residue calls as bools
 
     Returns:
         output_df (pd.DataFrame): dens_df with scores added
@@ -117,17 +127,34 @@ def apply_motif_scores(input_df, slim_length, conditional_matrices, sequences_2d
 
     # Get sequences only if needed; if sequences_2d is already provided, then sequences is not necessary
     if sequences_2d is None:
-        sequences = input_df[seq_col].values.astype("<U")
-        sequences_2d = unravel_seqs(sequences, slim_length, convert_phospho)
+        seqs = input_df[seq_col].values.astype("<U")
+        sequences_2d = unravel_seqs(seqs, slim_length, convert_phospho)
     else:
-        sequences = None
+        seqs = None
 
     # Get the motif scores for the peptide sequences
-    scores = score_seqs(sequences, slim_length, conditional_matrices, sequences_2d, convert_phospho, use_weighted)
-    if return_array:
-        return scores
+    output = score_seqs(seqs, slim_length, conditional_matrices, sequences_2d, convert_phospho, use_weighted, return_2d)
+    if return_2d:
+        scores, scores_2d = output
+    else:
+        scores = output
+        scores_2d = None
 
+    if return_array:
+        return output
+
+    # Assign scores to dataframe
+    if return_2d:
+        score_res_cols = ["#" + str(position) + "_score" for position in np.arange(1, slim_length + 1)]
+        output_df[score_res_cols] = scores_2d
     output_df[score_col] = scores
+
+    # If residue_calls_2d was given, assign to dataframe
+    if residue_calls_2d is not None:
+        score_call_cols = ["#" + str(position) + "_call" for position in np.arange(1, slim_length + 1)]
+        output_df[score_call_cols] = residue_calls_2d.astype("U")
+        overall_call_count = residue_calls_2d.sum(axis=1)
+        output_df["Residue_Pass_Count"] = overall_call_count
 
     if add_residue_cols and not in_place:
         # Define the index where residue columns should be inserted
