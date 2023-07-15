@@ -3,21 +3,11 @@
 import numpy as np
 import pandas as pd
 import os
+from Matrix_Generator.config import general_params, data_params, matrix_params
 from Matrix_Generator.ConditionalMatrix import ConditionalMatrices, default_data_params, default_matrix_params
-from general_utils.general_vars import aa_charac_dict
 from conditional_thresholds_optimization import find_optimal_thresholds
 
-default_general_params = {"percentiles_dict": None,
-                          "motif_length": None,
-                          "always_allowed_dict": None,
-                          "output_folder": None,
-                          "make_calls": True,
-                          "threshold_steps": 10,
-                          "aa_charac_dict": aa_charac_dict,
-                          "convert_phospho": True,
-                          "position_thresholds": np.array([0.4,0.8,0.0,0.6,0.2])}
-
-def main(input_df, general_params = None, data_params = None, matrix_params = None):
+def main(input_df, general_params = general_params, data_params = data_params, matrix_params = matrix_params):
     '''
     Main function for making pairwise position-weighted matrices
 
@@ -56,18 +46,10 @@ def main(input_df, general_params = None, data_params = None, matrix_params = No
                                             containing sensitivity/specificity/PPV/NPV values for different score thres
     '''
 
-    if general_params is None:
-        general_params = default_general_params.copy()
-    if data_params is None:
-        data_params = default_data_params.copy()
-    if matrix_params is None:
-        matrix_params = default_matrix_params.copy()
-
     # Declare the output folder for saving pairwise weighted matrices
-    output_folder = general_params.get("output_folder")
-    if output_folder is None:
-        output_folder = os.getcwd()
-    matrix_output_folder = os.path.join(output_folder, "Pairwise_Matrices")
+    if general_params.get("output_folder") is None:
+        general_params["output_folder"] = os.getcwd()
+    matrix_output_folder = os.path.join(general_params.get("output_folder"), "Pairwise_Matrices")
 
     # Obtain the dictionary of matrices that have not yet been weighted
     percentiles_dict = general_params.get("percentiles_dict")

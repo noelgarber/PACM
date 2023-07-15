@@ -8,6 +8,7 @@ from tqdm import trange
 from functools import partial
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
+from Matrix_Generator.config import comparator_info, specificity_params
 from general_utils.general_utils import least_different, get_delimited_list
 from general_utils.weights_utils import permute_weights
 from general_utils.general_vars import amino_acids, amino_acids_phos
@@ -397,7 +398,7 @@ default_specificity_params = {"thresholds": None,
                               "fit_mode": "extrema",
                               "abs_extrema_threshold": 0.5}
 
-def main(source_df, comparator_info = None, specificity_params = None):
+def main(source_df, comparator_info = comparator_info, specificity_params = specificity_params):
     '''
     Main function for generating and assessing optimal specificity position-weighted matrices
 
@@ -430,8 +431,6 @@ def main(source_df, comparator_info = None, specificity_params = None):
     '''
 
     output_df = source_df.copy()
-    comparator_info = comparator_info or default_comparator_info.copy()
-    specificity_params = specificity_params or default_specificity_params.copy()
 
     # Calculate least different pair of baits and corresponding log2fc for each row in output_df
     comparator_set_1, comparator_set_2 = comparator_info.get("comparator_set_1"), comparator_info.get("comparator_set_2")
