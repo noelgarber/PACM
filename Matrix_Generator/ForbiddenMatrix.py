@@ -8,8 +8,7 @@ from general_utils.matrix_utils import make_empty_matrix
 
 class ForbiddenMatrix:
     # Class containing a boolean position matrix describing whether certain amino acids are forbidden based on position
-    def __init__(self, motif_length, source_df, residue_charac_dict,
-                 data_params = data_params, matrix_params = matrix_params):
+    def __init__(self, motif_length, source_df, data_params = data_params, matrix_params = matrix_params):
         '''
         Function for initializing the forbidden matrix based on source peptide data
 
