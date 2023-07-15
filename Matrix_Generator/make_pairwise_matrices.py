@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import os
 from Matrix_Generator.config import general_params, data_params, matrix_params
-from Matrix_Generator.ConditionalMatrix import ConditionalMatrices, default_data_params, default_matrix_params
+from Matrix_Generator.ConditionalMatrix import ConditionalMatrices
 from conditional_thresholds_optimization import find_optimal_thresholds
 
 def main(input_df, general_params = general_params, data_params = data_params, matrix_params = matrix_params):
