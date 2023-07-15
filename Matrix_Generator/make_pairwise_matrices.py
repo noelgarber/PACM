@@ -47,8 +47,9 @@ def main(input_df, general_params = general_params, data_params = data_params, m
     '''
 
     # Declare the output folder for saving pairwise weighted matrices
-    if general_params.get("output_folder") is None:
-        general_params["output_folder"] = os.getcwd()
+    output_folder = general_params.get("output_folder")
+    if output_folder is None:
+        output_folder = os.getcwd()
     matrix_output_folder = os.path.join(general_params.get("output_folder"), "Pairwise_Matrices")
 
     # Obtain the dictionary of matrices that have not yet been weighted
