@@ -1,19 +1,11 @@
 # This workflow includes image processing, quantification, standardization, concatenation, and matrix-building
 
-import numpy as np
 import os
 import pickle
-import warnings
-
+from Matrix_Generator.config import *
 from Matrix_Generator.standardize_and_concatenate import main_workflow as standardized_concatenate
-
 from Matrix_Generator.make_pairwise_matrices import main as make_pairwise_matrices
-from Matrix_Generator.make_pairwise_matrices import default_general_params, default_data_params, default_matrix_params
-
 from Matrix_Generator.make_specificity_matrices import main as make_specificity_matrix
-from Matrix_Generator.make_specificity_matrices import default_comparator_info, default_specificity_params
-
-from general_utils.general_utils import input_number, list_inputter
 
 def get_data(output_folder = None, add_peptide_seqs = True,
              peptide_seq_cols = ["Phos_Sequence", "No_Phos_Sequence", "BJO_Sequence"], buffer_width = None,
@@ -21,10 +13,7 @@ def get_data(output_folder = None, add_peptide_seqs = True,
     # Get output folder if not provided
     if output_folder is None:
         user_output_folder = input("Enter the folder for saving data, or leave blank to use the working directory:  ")
-        if user_output_folder != "":
-            output_folder = user_output_folder
-        else:
-            output_folder = os.getcwd()
+        output_folder = user_output_folder if user_output_folder != "" else os.getcwd()
 
     # Get the standardized concatenated dataframe containing all of the quantified peptide spot data
     print("Processing and standardizing the SPOT image data...") if verbose else None
@@ -38,15 +27,9 @@ def get_data(output_folder = None, add_peptide_seqs = True,
 
 # Define the default image quantification parameters
 
-default_image_params = {"output_folder": "",
-                        "add_peptide_seqs": True,
-                        "peptide_seq_cols": ["Phos_Sequence", "No_Phos_Sequence", "BJO_Sequence"],
-                        "save_pickled_data": True,
-                        "buffer_width": None}
-
-def main(image_params = None, general_params = None, data_params = None, matrix_params = None, comparator_info = None,
-         specificity_params = None, use_cached_data = False, generate_context_matrices = True,
-         generate_specificity_matrix = True, verbose = True):
+def main(image_params = image_params, general_params = general_params, data_params = data_params,
+         matrix_params = matrix_params, comparator_info = comparator_info, specificity_params = specificity_params,
+         generate_context_matrices = True, generate_specificity_matrix = True, verbose = True):
     '''
     Main function for quantifying source data, generating context-aware matrices, and generating the specificity matrix
 
@@ -71,18 +54,20 @@ def main(image_params = None, general_params = None, data_params = None, matrix_
         results_tuple (tuple):              (scored_data_df, best_conditional_weights, weighted_matrices_dict, motif_statistics, specificity_weighted_matrix, specificity_statistics)
     '''
 
+    use_cached_data = image_params.get("use_cached_data")
+
     # Define output folders
-    image_params = image_params or default_image_params.copy()
     if not image_params.get("output_folder") and not use_cached_data:
         image_params["output_folder"] = input("Enter the folder to output image quantification data to:  ")
 
-    general_params = general_params or default_general_params.copy()
     if not general_params.get("output_folder"):
         general_params["output_folder"] = input("Enter the folder to output position-weighted matrices to:  ")
 
     # Quantify SPOT peptide binding data
     if use_cached_data:
-        cached_data_path = input("Enter path to pickled data:  ")
+        cached_data_path = image_params.get("cached_data_path")
+        if cached_data_path is None:
+            cached_data_path = input("Enter the path to the cached image data:  ")
         with open(cached_data_path, "rb") as f:
             data_df, percentiles_dict = pickle.load(f)
     else:
@@ -105,9 +90,8 @@ def main(image_params = None, general_params = None, data_params = None, matrix_
         return data_df
 
     # Generate pairwise position-weighted matrices
+
     general_params["percentiles_dict"] = percentiles_dict
-    data_params = data_params or default_data_params.copy()
-    matrix_params = matrix_params or default_matrix_params.copy()
 
     if generate_context_matrices:
         position_thresholds = general_params.get("position_thresholds")
@@ -119,16 +103,6 @@ def main(image_params = None, general_params = None, data_params = None, matrix_
 
         pairwise_results = make_pairwise_matrices(data_df, general_params, data_params, matrix_params)
         best_fdr, best_for, best_residue_thresholds, scored_data_df = pairwise_results
-
-    # Get specificity matrix comparator info and ensure consistency with data_params
-    comparator_info = comparator_info or default_comparator_info.copy()
-    comparator_info["seq_col"] = data_params.get("seq_col")
-    comparator_info["bait_pass_col"] = data_params.get("bait_pass_col")
-    comparator_info["pass_str"] = data_params.get("pass_str")
-
-    # Get specificity matrix params and ensure consistency with matrix_params
-    specificity_params = specificity_params or default_specificity_params.copy()
-    specificity_params["possible_weights"] = general_params["possible_weights"]
 
     # Generate specificity matrix and back-calculate scores
     if not generate_context_matrices:
@@ -173,59 +147,7 @@ def main(image_params = None, general_params = None, data_params = None, matrix_
 
 # If the script is executed directly, invoke the main workflow
 if __name__ == "__main__":
-    # Define image quantification parameters
-    image_params = default_image_params.copy()
-    use_cached = input("Use cached pickled data from a previous run? (Y/N)  ")
-    use_cached_data = use_cached == "Y"
-    if not use_cached_data:
-        save_pickled = input("Save pickled data from this run for future use? (Y/N)  ")
-        save_pickled_data = save_pickled == "Y"
-        image_params["save_pickled_data"] = save_pickled_data
-
-        print("For adding sequences to quantified data, the following columns are expected:", image_params.get("peptide_seq_cols"))
-        different_seq_cols = input("Use different sequence columns? (Y/N)  ")
-        if different_seq_cols == "Y":
-            print("Enter sequence columns one at a time.")
-            seq_cols = list_inputter("Next col name:  ")
-            image_params["peptide_seq_cols"] = seq_cols
-
-        buffer_width = image_params.get("buffer_width")
-        if buffer_width is None:
-            buffer_width = input_number("Please enter the buffer width for separating spot pixels from background pixels:  ", "int")
-            image_params["buffer_width"] = buffer_width
-
-    # Define general, source data, and matrix-building params for context-aware matrix generation
     generate_context_matrices = input("Generate context-aware position-weighted matrices? (Y/N)  ") == "Y"
-    if generate_context_matrices:
-        general_params = default_general_params.copy()
-        general_params["motif_length"] = input_number("Please enter the length of the short linear motif being studied:  ", "int")
-        data_params = default_data_params.copy()
-        matrix_params = default_matrix_params.copy()
-        use_points_function = input("When assigning points, use continuous assignment from rational function? If not, defaults to thresholding. (Y/N)  ") == "Y"
-        matrix_params["points_assignment_mode"] = "continuous" if use_points_function else "thresholds"
-        penalize_negatives = input("Use negative peptides to penalize disfavoured residues? (Y/N)  ") == "Y"
-        matrix_params["penalize_negatives"] = penalize_negatives
-    else:
-        general_params = None
-        data_params = None
-        matrix_params = None
-
-    # Define comparator info and specificity params for generating the specificity position-weighted matrix
     generate_specificity_matrix = input("Generate specificity position-weighted matrix? (Y/N)  ") == "Y"
-    if generate_specificity_matrix:
-        comparator_info = default_comparator_info.copy()
-        specificity_params = default_specificity_params.copy()
-        optimize_specificity_weights = input("Optimize specificity matrix weights? (Y/N)  ")
-        optimize_specificity_weights = optimize_specificity_weights == "Y"
-        specificity_params["optimize_weights"] = optimize_specificity_weights
-        if not optimize_specificity_weights:
-            specificity_weights_list = input("Enter a comma-delimited list of predefined weights:  ")
-            specificity_weights_array = np.array(specificity_weights_list.split(",")).astype(float)
-            specificity_params["predefined_weights"] = specificity_weights_array
-    else:
-        comparator_info = None
-        specificity_params = None
-
-    # Execute the main function
     main(image_params, general_params, data_params, matrix_params, comparator_info, specificity_params,
-         use_cached_data, generate_context_matrices, generate_specificity_matrix)
+         generate_context_matrices, generate_specificity_matrix)
