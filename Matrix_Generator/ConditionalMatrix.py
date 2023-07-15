@@ -311,6 +311,10 @@ class ConditionalMatrices:
         # Make the 3D matrix
         self.stacked_matrices = np.stack(matrices_list)
 
+        # Apply weights
+        weights_array = matrix_params.get("position_weights")
+        self.apply_weights(weights_array, only_3d = False)
+
     def apply_weights(self, weights_array, only_3d = True):
         # Method for assigning weights to the 3D matrix of matrices
 

@@ -93,7 +93,8 @@ data_params = {"bait": None,
         "penalize_negatives":     whether to use negative peptides to decrement the matrix for disfavoured residues
         "use_sigmoid":            whether to scale matrix values using a sigmoid function
         "sigmoid_strength":       the strength of the sigmoid function scaling; defaults to 1
-        "sigmoid_inflection":     threshold where matrix values are scaled larger when above or smaller when below '''
+        "sigmoid_inflection":     threshold where matrix values are scaled larger when above or smaller when below
+        "position_weights":       array of weights reflecting the relative score contributions of each position '''
 
 matrix_params = {"thresholds_points_dict": None,
                  "points_assignment_mode": "continuous",
@@ -104,7 +105,8 @@ matrix_params = {"thresholds_points_dict": None,
                  "penalize_negatives": True,
                  "use_sigmoid": True,
                  "sigmoid_strength": 1,
-                 "sigmoid_inflection": 0.5}
+                 "sigmoid_inflection": 0.5,
+                 "position_weights": np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1, 3, 3, 3, 2, 0.25, 1, 0.25, 0.25])}
 
 
 ''' ----------------------------------------------------------------------------------------------------------------
