@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 from math import e
+from scipy.stats import fisher_exact
 from general_utils.general_utils import unravel_seqs, check_seq_lengths
 from general_utils.matrix_utils import increment_matrix, make_empty_matrix, collapse_phospho
 from general_utils.user_helper_functions import get_thresholds
@@ -13,14 +14,16 @@ class ConditionalMatrix:
     Class that contains a position-weighted matrix (self.matrix_df) based on input data and a conditional type-position
     rule, e.g. position #1 = [D,E]
     '''
-    def __init__(self, motif_length, source_df, data_params = data_params, matrix_params = matrix_params):
+    def __init__(self, motif_length, source_df, residue_charac_dict,
+                 data_params = data_params, matrix_params = matrix_params):
         '''
         Function for initializing unadjusted conditional matrices from source peptide data,
         based on type-position rules (e.g. #1=Acidic)
 
         Args:
             motif_length (int):                the length of the motif being assessed
-            source_dataframe (pd.DataFrame):   dataframe containing peptide-protein binding data
+            source_df (pd.DataFrame):   dataframe containing peptide-protein binding data
+            residue_charac_dict: dict of amino acid chemical characteristics
             data_params (dict):                dictionary of parameters describing the source_dataframe structure:
                                                  --> bait (str): the bait to use for matrix generation; defaults to best if left blank
                                                  --> bait_signal_col_marker (str): keyword that marks columns in source_dataframe that
@@ -88,7 +91,8 @@ class ConditionalMatrix:
         # If penalizing negatives, decrement the matrix appropriately for negative peptides
         penalize_negatives = matrix_params.get("penalize_negatives") # boolean on whether to penalize negative peptides
         if penalize_negatives:
-            self.decrement_negatives(pass_calls, qualifying_member_calls, sequences_2d, masked_sequences_2d, mean_points)
+            self.decrement_negatives(pass_calls, qualifying_member_calls, sequences_2d, masked_sequences_2d,
+                                     mean_points, residue_charac_dict)
 
         # Optionally combine phospho and non-phospho residue rows in the matrix
         include_phospho = matrix_params.get("include_phospho")
@@ -100,8 +104,7 @@ class ConditionalMatrix:
         if clear_filtering_column:
             matrix_df["#" + str(position_for_filtering)] = 0
 
-        # Remove negatives
-        self.matrix_df[self.matrix_df < 0] = 0
+        # Convert to float32
         self.matrix_df = self.matrix_df.astype("float32")
 
         # Generate sigmoid-scaled version
@@ -165,7 +168,7 @@ class ConditionalMatrix:
         return mean_points
 
     def decrement_negatives(self, pass_calls, qualifying_member_calls, sequences_2d,
-                            masked_sequences_2d, mean_positive_points):
+                            masked_sequences_2d, mean_positive_points, residue_charac_dict, alpha = 0.1):
         # Helper function that decrements the matrix based on negative peptides if indicated
 
         inverse_logical_mask = np.logical_and(~pass_calls, qualifying_member_calls)
@@ -183,10 +186,39 @@ class ConditionalMatrix:
             for col_number in np.arange(inverse_masked_sequences_2d.shape[1]):
                 positive_masked_col = masked_sequences_2d[:, col_number]
                 negative_masked_col = inverse_masked_sequences_2d[:, col_number]
-                for aa in np.unique(negative_masked_col):
-                    if np.isin(aa, positive_masked_col):
-                        # Set non-forbidden residues to X such that they will not be used to decrement the matrix
-                        negative_masked_col[negative_masked_col == aa] = "X"
+
+                # Only use significantly disfavoured residues for decrementation, and set others to X (not used)
+                for aa_group in residue_charac_dict.values():
+                    # Perform Fisher's exact test on pooled amino acids from this group
+                    aa_group = np.array(aa_group, dtype="U")
+
+                    negative_group_count = np.sum(np.isin(negative_masked_col, aa_group))
+                    negative_nongroup_count = negative_count - negative_group_count
+                    positive_group_count = np.sum(np.isin(positive_masked_col, aa_group))
+                    positive_nongroup_count = positive_count - positive_group_count
+
+                    group_contingency_table = [[negative_group_count, negative_nongroup_count],
+                                               [positive_group_count, positive_nongroup_count]]
+                    group_odds_ratio, group_p_value = fisher_exact(group_contingency_table)
+
+                    for aa in aa_group:
+                        # Perform Fisher's exact test on this amino acid specifically
+                        negative_aa_count = np.sum(negative_masked_col == aa)
+                        negative_other_count = negative_count - negatives_aa_count
+
+                        positive_aa_count = np.sum(positive_masked_col == aa)
+                        positive_other_count = positive_count - positive_aa_count
+
+                        contingency_table = [[negative_aa_count, negative_other_count],
+                                             [positive_aa_count, positive_other_count]]
+                        odds_ratio, p_value = fisher_exact(contingency_table)
+
+                        # Set non-disfavoured residues to X such that they will not be used to decrement the matrix
+                        if (positive_negative_ratio * negative_aa_count) < positive_aa_count:
+                            negative_masked_col[negative_masked_col == aa] = "X"
+                        elif p_value > alpha and group_p_value > alpha:
+                            negative_masked_col[negative_masked_col == aa] = "X"
+
                 inverse_masked_sequences_2d[:, col_number] = negative_masked_col
 
             self.matrix_df = increment_matrix(None, self.matrix_df, inverse_masked_sequences_2d,
@@ -221,12 +253,12 @@ class ConditionalMatrices:
         Initialization function for generating conditional matrices properties, dict, and 3D representation
 
         Args:
-           motif_length:        length of the motif represented in the matrices
-           source_df:           dataframe with source peptide sequences, signal values, and pass/fail information
-           percentiles_dict:    dict of integer percentiles from 1-99 for the signal values
-           residue_charac_dict: dict of amino acid chemical characteristics
-           data_params:         same as in ConditionalMatrix()
-           matrix_params:       same as in ConditionalMatrix()
+            motif_length:        length of the motif represented in the matrices
+            source_df:           dataframe with source peptide sequences, signal values, and pass/fail information
+            percentiles_dict:    dict of integer percentiles from 1-99 for the signal values
+            residue_charac_dict: dict of amino acid chemical characteristics
+            data_params:         same as in ConditionalMatrix()
+            matrix_params:       same as in ConditionalMatrix()
         '''
 
         if matrix_params.get("points_assignment_mode") == "thresholds":
@@ -262,7 +294,8 @@ class ConditionalMatrices:
                 current_matrix_params["position_for_filtering"] = filter_position
 
                 # Generate the weighted matrix
-                conditional_matrix = ConditionalMatrix(motif_length, source_df, data_params, current_matrix_params)
+                conditional_matrix = ConditionalMatrix(motif_length, source_df, residue_charac_dict,
+                                                       data_params, current_matrix_params)
                 if use_sigmoid:
                     current_matrix = conditional_matrix.sigmoid_matrix_df
                 else:
