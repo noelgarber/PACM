@@ -2,35 +2,18 @@
 
 import numpy as np
 import pandas as pd
+from math import e
 from general_utils.general_utils import unravel_seqs, check_seq_lengths
 from general_utils.matrix_utils import increment_matrix, make_empty_matrix, collapse_phospho
-from general_utils.general_vars import amino_acids_phos
-from general_utils.user_helper_functions import get_min_members, get_thresholds
-
-default_data_params = {"bait": None,
-                       "bait_signal_col_marker": "Background-Adjusted_Standardized_Signal",
-                       "best_signal_col": "Max_Bait_Background-Adjusted_Mean",
-                       "bait_pass_col": "One_Passes",
-                       "pass_str": "Yes",
-                       "seq_col": "BJO_Sequence",
-                       "dest_score_col": "SLiM_Score"}
-
-default_matrix_params = {"thresholds_points_dict": None,
-                         "points_assignment_mode": "continuous",
-                         "included_residues": amino_acids_phos,
-                         "amino_acids": amino_acids_phos,
-                         "include_phospho": False,
-                         "min_members": None,
-                         "position_for_filtering": None,
-                         "clear_filtering_column": False,
-                         "penalize_negatives": True}
+from general_utils.user_helper_functions import get_thresholds
+from Matrix_Generator.config import data_params, matrix_params
 
 class ConditionalMatrix:
     '''
     Class that contains a position-weighted matrix (self.matrix_df) based on input data and a conditional type-position
     rule, e.g. position #1 = [D,E]
     '''
-    def __init__(self, motif_length, source_df, data_params, matrix_params):
+    def __init__(self, motif_length, source_df, data_params = data_params, matrix_params = matrix_params):
         '''
         Function for initializing unadjusted conditional matrices from source peptide data,
         based on type-position rules (e.g. #1=Acidic)
@@ -121,6 +104,17 @@ class ConditionalMatrix:
         self.matrix_df[self.matrix_df < 0] = 0
         self.matrix_df = self.matrix_df.astype("float32")
 
+        # Generate sigmoid-scaled version
+        sigmoid_strength = matrix_params.get("sigmoid_strength")
+        if sigmoid_strength is None:
+            sigmoid_strength = 1
+
+        sigmoid_inflection = matrix_params.get("sigmoid_inflection")
+        if sigmoid_inflection is None:
+            sigmoid_inflection = 0.5
+
+        self.apply_sigmoid(sigmoid_strength, sigmoid_inflection)
+
     def qualifying_entries_count(self, source_df, seq_col, position_for_filtering, residues_included_at_filter_position):
         # Helper function to get the number of sequences that qualify under the current type-position rule
 
@@ -198,11 +192,38 @@ class ConditionalMatrix:
             self.matrix_df = increment_matrix(None, self.matrix_df, inverse_masked_sequences_2d,
                                               enforced_points = negative_points, points_mode = "enforced_points")
 
+    def apply_sigmoid(self, strength = 1, inflection = 0.5):
+        '''
+        Basic function for scaling matrix values by a sigmoid function, suppressing small values and enhancing big ones
+
+        Args:
+            strength (int|float):   scales the function severity; must be > 1
+            inflection (int/float): inflection point between 0 and 1
+
+        Returns:
+            None: operation is performed in-place
+        '''
+
+        k = strength * 10
+        sigmoid_function = lambda x: 1 / (1 + e**(-k*(x - inflection)))
+
+        zeros_bools = self.matrix_df == 0
+        ones_bools = self.matrix_df == 1
+
+        self.sigmoid_matrix_df = self.matrix_df.copy()
+
+        self.sigmoid_matrix_df.applymap(sigmoid_function)
+
+        self.sigmoid_matrix_df[zeros_bools] = 0
+        self.sigmoid_matrix_df[ones_bools] = 1
+
+
 class ConditionalMatrices:
     '''
     Class that contains a set of conditional matrices defined using ConditionalMatrix()
     '''
-    def __init__(self, motif_length, source_df, percentiles_dict, residue_charac_dict, data_params, matrix_params):
+    def __init__(self, motif_length, source_df, percentiles_dict, residue_charac_dict,
+                 data_params = data_params, matrix_params = matrix_params):
         '''
         Initialization function for generating conditional matrices properties, dict, and 3D representation
 
@@ -215,11 +236,10 @@ class ConditionalMatrices:
            matrix_params:       same as in ConditionalMatrix()
         '''
 
-
-        if matrix_params.get("min_members") is None:
-           matrix_params["min_members"] = get_min_members()
-        if matrix_params.get("points_assignment_mode") == "thresholds" and not isinstance(matrix_params.get("thresholds_points_dict"), dict):
-           matrix_params["thresholds_points_dict"] = get_thresholds(percentiles_dict, use_percentiles=True, show_guidance=True)
+        if matrix_params.get("points_assignment_mode") == "thresholds":
+            if not isinstance(matrix_params.get("thresholds_points_dict"), dict):
+                matrix_params["thresholds_points_dict"] = get_thresholds(percentiles_dict, use_percentiles = True,
+                                                                         show_guidance = True)
 
         # Declare dict where keys are position-type rules (e.g. "#1=Acidic") and values are corresponding weighted matrices
         self.matrices_dict = {}
@@ -232,6 +252,9 @@ class ConditionalMatrices:
         matrices_list = []
 
         # Iterate over dict of chemical characteristic --> list of member amino acids (e.g. "Acidic" --> ["D","E"]
+
+        use_sigmoid = matrix_params.get("use_sigmoid")
+
         for i, (chemical_characteristic, member_list) in enumerate(residue_charac_dict.items()):
             # Map the encodings for the chemical classes
             for aa in member_list:
@@ -247,7 +270,10 @@ class ConditionalMatrices:
 
                 # Generate the weighted matrix
                 conditional_matrix = ConditionalMatrix(motif_length, source_df, data_params, current_matrix_params)
-                current_matrix = conditional_matrix.matrix_df
+                if use_sigmoid:
+                    current_matrix = conditional_matrix.sigmoid_matrix_df
+                else:
+                    current_matrix = conditional_matrix.matrix_df
 
                 # Standardize the weighted matrix so that the max value is 1
                 max_values = np.max(current_matrix.values, axis=0)
