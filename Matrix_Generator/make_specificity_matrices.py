@@ -8,10 +8,9 @@ from tqdm import trange
 from functools import partial
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
-from Matrix_Generator.config import comparator_info, specificity_params
+from Matrix_Generator.config import comparator_info, specificity_params, amino_acids, amino_acids_phos
 from general_utils.general_utils import least_different, get_delimited_list
 from general_utils.weights_utils import permute_weights
-from general_utils.general_vars import amino_acids, amino_acids_phos
 from general_utils.user_helper_functions import get_comparator_baits
 from general_utils.matrix_utils import collapse_phospho
 

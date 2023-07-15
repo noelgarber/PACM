@@ -1,6 +1,9 @@
 # This is the configuration file containing all the arguments and preferences for main.py; please edit as necessary
 
-from general_utils.general_vars import amino_acids_phos
+# Define the amino acid alphabet
+
+amino_acids = ("D", "E", "R", "H", "K", "S", "T", "N", "Q", "C", "G", "P", "A", "V", "I", "L", "M", "F", "Y", "W")
+amino_acids_phos = ("D", "E", "R", "H", "K", "S", "T", "N", "Q", "C", "G", "P", "A", "V", "I", "L", "M", "F", "Y", "W", "B", "J", "O") # B=pSer, J=pThr, Y=pTyr
 
 ''' ----------------------------------------------------------------------------------------------------------------
                                       SPOT Image Quantification Parameters
