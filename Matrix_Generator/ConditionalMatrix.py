@@ -207,15 +207,8 @@ class ConditionalMatrix:
         k = strength * 10
         sigmoid_function = lambda x: 1 / (1 + e**(-k*(x - inflection)))
 
-        zeros_bools = self.matrix_df == 0
-        ones_bools = self.matrix_df == 1
-
-        self.sigmoid_matrix_df = self.matrix_df.copy()
-
-        self.sigmoid_matrix_df.applymap(sigmoid_function)
-
-        self.sigmoid_matrix_df[zeros_bools] = 0
-        self.sigmoid_matrix_df[ones_bools] = 1
+        self.sigmoid_matrix_df = self.matrix_df.applymap(sigmoid_function)
+        self.sigmoid_matrix_df[self.matrix_df == 0] = 0
 
 
 class ConditionalMatrices:

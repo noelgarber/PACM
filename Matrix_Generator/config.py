@@ -102,7 +102,7 @@ matrix_params = {"thresholds_points_dict": None,
                  "min_members": 10,
                  "clear_filtering_column": False,
                  "penalize_negatives": True,
-                 "use_sigmoid": False,
+                 "use_sigmoid": True,
                  "sigmoid_strength": 1,
                  "sigmoid_inflection": 0.5}
 
