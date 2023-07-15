@@ -175,6 +175,8 @@ def find_optimal_thresholds(input_df, slim_length, conditional_matrices, sequenc
         results_tuple (tuple):  (best_fdr, best_for, best_score_threshold, best_weights, best_weighted_matrices_dict, best_dens_df)
     '''
 
+    save_weighted_matrices(conditional_matrices.matrices_dict, matrix_output_folder, save_pickled_matrix_dict)
+
     output_df = input_df.copy()
 
     # Permute thresholds; manage memory to ensure the available maximum is not exceeded
@@ -262,8 +264,7 @@ def find_optimal_thresholds(input_df, slim_length, conditional_matrices, sequenc
     print("\t---\n",
           f"\tDone! Optimal residue thresholds of {results[2]} gave FDR = {results[0]} and FOR = {results[1]}")
 
-    # Save the weighted matrices and scored data
-    save_weighted_matrices(conditional_matrices.matrices_dict, matrix_output_folder, save_pickled_matrix_dict)
+    # Save data
     with open(os.path.join(matrix_output_folder, "final_residue_thresholds.txt"), "w") as file:
         file.write(",".join(map(str, best_residue_thresholds)))
 
@@ -272,3 +273,7 @@ def find_optimal_thresholds(input_df, slim_length, conditional_matrices, sequenc
     print(f"Saved weighted matrices and scored data to {output_folder}")
 
     return results
+
+# TODO Incorporate summed peptide score values and only use thresholding for required residues
+
+# TODO Add clause for when a matrix is all zeros, substitute the total matrix rather than the conditional one
