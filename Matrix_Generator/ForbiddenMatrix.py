@@ -79,6 +79,7 @@ class ForbiddenMatrix:
     def predict_seqs(self, input_seqs):
         # Method that returns an array of bools matching the input array of peptide sequences
 
+        input_seqs = np.array(input_seqs, dtype="U")
         input_seqs_2d = unravel_seqs(input_seqs, self.motif_length, self.convert_phospho)
         matrix_indices_2d = np.full(shape=input_seqs_2d.shape, fill_value=np.nan, dtype=int)
 
