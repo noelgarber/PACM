@@ -1,5 +1,7 @@
 # This is the configuration file containing all the arguments and preferences for main.py; please edit as necessary
 
+import numpy as np
+
 # Define the amino acid alphabet
 
 amino_acids = ("D", "E", "R", "H", "K", "S", "T", "N", "Q", "C", "G", "P", "A", "V", "I", "L", "M", "F", "Y", "W")
