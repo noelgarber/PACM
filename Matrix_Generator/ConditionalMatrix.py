@@ -24,23 +24,8 @@ class ConditionalMatrix:
             motif_length (int):                the length of the motif being assessed
             source_df (pd.DataFrame):   dataframe containing peptide-protein binding data
             residue_charac_dict: dict of amino acid chemical characteristics
-            data_params (dict):                dictionary of parameters describing the source_dataframe structure:
-                                                 --> bait (str): the bait to use for matrix generation; defaults to best if left blank
-                                                 --> bait_signal_col_marker (str): keyword that marks columns in source_dataframe that
-                                                     contain signal values; required only if bait is given
-                                                 --> best_signal_col (str): column name with best signal values; used if bait is None
-                                                 --> bait_pass_col (str): column name with pass/fail information
-                                                 --> pass_str (str): the string representing a pass in bait_pass_col, e.g. "Yes"
-                                                 --> seq_col (str): column name containing peptide sequences as strings
-            matrix_params (dict):              dictionary of parameters that affect matrix-building behaviour:
-                                                 --> thresholds_points_dict (dict): dictionary where threshold_value --> points_value
-                                                 --> included_residues (list): the residues included for the current type-position rule
-                                                 --> amino_acids (tuple): the alphabet of amino acids to use when constructing the matrix
-                                                 --> min_members (int): the minimum number of peptides that must follow the current
-                                                     type-position rule for the matrix to be built
-                                                 --> position_for_filtering (int): the position for the type-position rule being assessed
-                                                 --> clear_filtering_column (bool): whether to set values in the filtering column to zero
-                                                 --> penalize_negatives (bool): whether to decrement the matrix based on negative peptides
+            data_params (dict):                dictionary of data-specific params described in config.py
+            matrix_params (dict):              dictionary of matrix-specific params described in config.py
         '''
         # Construct the empty matrix dataframe
         amino_acids = matrix_params.get("amino_acids")
