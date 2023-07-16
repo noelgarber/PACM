@@ -10,6 +10,8 @@ from Matrix_Generator.make_specificity_matrices import main as make_specificity_
 def get_data(output_folder = None, add_peptide_seqs = True,
              peptide_seq_cols = ["Phos_Sequence", "No_Phos_Sequence", "BJO_Sequence"], buffer_width = None,
              verbose = False):
+    # Helper function to get quantified SPOT peptide array image data
+
     # Get output folder if not provided
     if output_folder is None:
         user_output_folder = input("Enter the folder for saving data, or leave blank to use the working directory:  ")
@@ -25,8 +27,6 @@ def get_data(output_folder = None, add_peptide_seqs = True,
 
     return reindexed_data_df, percentiles_dict
 
-# Define the default image quantification parameters
-
 def main(image_params = image_params, general_params = general_params, data_params = data_params,
          matrix_params = matrix_params, comparator_info = comparator_info, specificity_params = specificity_params,
          generate_context_matrices = True, generate_specificity_matrix = True, verbose = True):
@@ -34,16 +34,12 @@ def main(image_params = image_params, general_params = general_params, data_para
     Main function for quantifying source data, generating context-aware matrices, and generating the specificity matrix
 
     Args:
-        image_params (dict):                SPOT peptide image quantification parameters for deriving binding data
-                                                --> "output_folder" (str): the folder path where data should be saved
-                                                --> "add_peptide_seqs" (bool): must be True when building matrices
-                                                --> "peptide_seq_cols" (list): col names, e.g. "BJO_Sequence"
-                                                --> "save_pickled_data" (bool): whether to pickle data for future re-use
-        general_params (dict):              as defined in make_pairwise_matrices.py
-        data_params (dict):                 as defined in make_pairwise_matrices.py
-        matrix_params (dict):               as defined in make_pairwise_matrices.py
-        comparator_info (dict):             as defined in make_specificity_matrices.py
-        specificity_params (dict):          as defined in make_specificity_matrices.py
+        image_params (dict):                as defined in config.py
+        general_params (dict):              as defined in config.py
+        data_params (dict):                 as defined in config.py
+        matrix_params (dict):               as defined in config.py
+        comparator_info (dict):             as defined in config.py
+        specificity_params (dict):          as defined in config.py
         use_cached_data (bool):             whether to use cached quantified data from a previous run
         generate_context_matrices (bool):   whether to generate context-aware position-weighted matrices for
                                             overall motif prediction
@@ -51,7 +47,9 @@ def main(image_params = image_params, general_params = general_params, data_para
         verbose (bool):                     whether to display additional information in the command line
 
     Returns:
-        results_tuple (tuple):              (scored_data_df, best_conditional_weights, weighted_matrices_dict, motif_statistics, specificity_weighted_matrix, specificity_statistics)
+        results_tuple (tuple):              (scored_data_df,
+                                            best_score_threshold, weighted_matrices_dict, best_fdr, best_for,
+                                            specificity_weighted_matrix, specificity_statistics)
     '''
 
     use_cached_data = image_params.get("use_cached_data")
@@ -77,7 +75,8 @@ def main(image_params = image_params, general_params = general_params, data_para
 
         # Obtain and quantify the data
         image_output_folder = image_params.get("output_folder")
-        data_df, percentiles_dict = get_data(image_output_folder, add_peptide_seqs, peptide_seq_cols, buffer_width, verbose)
+        data_df, percentiles_dict = get_data(image_output_folder, add_peptide_seqs, peptide_seq_cols, buffer_width,
+                                             verbose)
 
         # Optionally save pickled quantified data for future runs
         save_pickled_data = image_params.get("save_pickled_data")
@@ -96,13 +95,14 @@ def main(image_params = image_params, general_params = general_params, data_para
     if generate_context_matrices:
         position_thresholds = general_params.get("position_thresholds")
         position_thresholds_str = ",".join(position_thresholds.astype(str))
-        use_default_thresholds = input(f"For generating context-aware matrices, use default possible threshold values during optimization ({position_thresholds_str})? (Y/N)  ") == "Y"
+        use_default_thresholds = input(f"For generating context-aware matrices, use default possible threshold values "
+                                       + f"during optimization ({position_thresholds_str})? (Y/N)  ") == "Y"
         if not use_default_thresholds:
             position_thresholds = input("Enter comma-delimited possible threshold values:  ").split(",")
             general_params["position_thresholds"] = position_thresholds
 
         pairwise_results = make_pairwise_matrices(data_df, general_params, data_params, matrix_params)
-        best_fdr, best_for, best_residue_thresholds, scored_data_df = pairwise_results
+        best_fdr, best_for, best_score_threshold, scored_data_df = pairwise_results
 
     # Generate specificity matrix and back-calculate scores
     if not generate_context_matrices:
@@ -119,14 +119,15 @@ def main(image_params = image_params, general_params = general_params, data_para
     if generate_context_matrices or generate_specificity_matrix:
         scored_data_df.to_csv(os.path.join(general_params.get("output_folder"), "final_scored_data.csv"))
     if generate_specificity_matrix:
-        specificity_weighted_matrix.to_csv(os.path.join(general_params.get("output_folder"), "specificity_weighted_matrix.csv"))
+        specificity_weighted_matrix.to_csv(os.path.join(general_params.get("output_folder"),
+                                                        "specificity_weighted_matrix.csv"))
 
     # Display final report in the command line
     print("--------------------------------------------------------------------")
     print("                       Final Analysis Report                        ")
     if generate_context_matrices:
         print("                     -------------------------                      ")
-        print("Context-aware position-weighted matrix residue thresholds:", best_residue_thresholds)
+        print("Context-aware position-weighted matrix score threshold:", best_score_threshold)
         print(f"Detected motif statistics: FDR = {best_fdr}, FOR = {best_for}")
     if generate_specificity_matrix:
         print("                     -------------------------                      ")
@@ -135,12 +136,11 @@ def main(image_params = image_params, general_params = general_params, data_para
         print(specificity_statistics)
     print("--------------------------------------------------------------------")
 
-
     if generate_context_matrices and generate_specificity_matrix:
-        return (scored_data_df, best_residue_thresholds, best_fdr, best_for,
+        return (scored_data_df, best_score_threshold, best_fdr, best_for,
                 specificity_weights, specificity_weighted_matrix, specificity_statistics)
     elif generate_context_matrices:
-        return (scored_data_df, best_residue_thresholds, best_fdr, best_for)
+        return (scored_data_df, best_score_threshold, best_fdr, best_for)
     elif generate_specificity_matrix:
         return (scored_data_df, specificity_weights, specificity_weighted_matrix, specificity_statistics)
 
