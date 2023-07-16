@@ -2,6 +2,7 @@
 
 import numpy as np
 import pandas as pd
+import os
 from math import e
 from scipy.stats import fisher_exact
 from general_utils.general_utils import unravel_seqs, check_seq_lengths
@@ -328,3 +329,19 @@ class ConditionalMatrices:
                 weighted_matrix = matrix_df * weights_array
                 self.weighted_matrices_dict[key] = weighted_matrix
                 self.weighted_arrays_dict[key] = weighted_matrix.to_numpy()
+    
+    def save(self, output_folder):
+
+        parent_folder = os.path.join(output_folder, "Conditional_Matrices")
+
+        unweighted_folder = os.path.join(parent_folder, "Unweighted")
+        for key, unweighted_matrix in self.matrices_dict.items():
+            file_path = os.path.join(unweighted_folder, key + ".csv")
+            unweighted_matrix.to_csv(file_path)
+
+        weighted_folder = os.path.join(parent_folder, "Weighted")
+        for key, weighted_matrix in self.weighted_matrices_dict.items():
+            file_path = os.path.join(weighted_folder, key + ".csv")
+            weighted_matrix.to_csv(file_path)
+
+        print(f"Saved {len(self.matrices_dict)} unweighted and {len(self.weighted_matrices_dict)} weighted matrices to {parent_folder}")
