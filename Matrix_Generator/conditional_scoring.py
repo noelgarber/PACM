@@ -159,7 +159,7 @@ def apply_motif_scores(input_df, slim_length, conditional_matrices, sequences_2d
         # Assign residue columns
         residue_cols = ["#" + str(i) for i in np.arange(1, slim_length + 1)]
         residues_df = pd.DataFrame(sequences_2d, columns=residue_cols)
-        output_df = pd.concat([output_df, residues_df])
+        output_df = pd.concat([output_df, residues_df], axis=1)
 
         # Define list of columns in the desired order
         final_columns = current_cols[0:insert_index]
