@@ -90,19 +90,9 @@ class ConditionalMatrix:
         if clear_filtering_column:
             matrix_df["#" + str(position_for_filtering)] = 0
 
-        # Convert to float32
+        # Convert to float32 and round values
         self.matrix_df = self.matrix_df.astype("float32")
-
-        # Generate sigmoid-scaled version
-        sigmoid_strength = matrix_params.get("sigmoid_strength")
-        if sigmoid_strength is None:
-            sigmoid_strength = 1
-
-        sigmoid_inflection = matrix_params.get("sigmoid_inflection")
-        if sigmoid_inflection is None:
-            sigmoid_inflection = 0.5
-
-        self.apply_sigmoid(sigmoid_strength, sigmoid_inflection)
+        self.matrix_df = self.matrix_df.round(2)
 
     def qualifying_entries_count(self, source_df, seq_col, position_for_filtering, residues_included_at_filter_position):
         # Helper function to get the number of sequences that qualify under the current type-position rule
@@ -190,7 +180,7 @@ class ConditionalMatrix:
                     for aa in aa_group:
                         # Perform Fisher's exact test on this amino acid specifically
                         negative_aa_count = np.sum(negative_masked_col == aa)
-                        negative_other_count = negative_count - negatives_aa_count
+                        negative_other_count = negative_count - negative_aa_count
 
                         positive_aa_count = np.sum(positive_masked_col == aa)
                         positive_other_count = positive_count - positive_aa_count
@@ -210,24 +200,35 @@ class ConditionalMatrix:
             self.matrix_df = increment_matrix(None, self.matrix_df, inverse_masked_sequences_2d,
                                               enforced_points = negative_points, points_mode = "enforced_points")
 
-    def apply_sigmoid(self, strength = 1, inflection = 0.5):
-        '''
-        Basic function for scaling matrix values by a sigmoid function, suppressing small values and enhancing big ones
+def apply_sigmoid(matrix_df, strength = 1, inflection = 0.5):
+    '''
+    Function for scaling matrix values by a sigmoid function, suppressing small values and enhancing big ones
 
-        Args:
-            strength (int|float):   scales the function severity; must be > 1
-            inflection (int/float): inflection point between 0 and 1
+    Args:
+        matrix_df (pd.DataFrame): the matrix to apply the sigmoid function to
+        strength (int|float):     scales the function severity; must be > 1
+        inflection (int/float):   inflection point between 0 and 1
 
-        Returns:
-            None: operation is performed in-place
-        '''
+    Returns:
+        None: operation is performed in-place
+    '''
 
-        k = strength * 10
-        sigmoid_function = lambda x: 1 / (1 + e**(-k*(x - inflection)))
+    k = strength * 10
 
-        self.sigmoid_matrix_df = self.matrix_df.applymap(sigmoid_function)
-        self.sigmoid_matrix_df[self.matrix_df == 0] = 0
+    sigmoid_function = lambda x: 1 / (1 + e**(-k*(abs(x) - inflection)))
 
+    sigmoid_matrix_df = matrix_df.applymap(sigmoid_function)
+    sigmoid_matrix_df[matrix_df < 0] *= -1
+
+    # Scale to ensure that at x=0, y=0, and at x=1, y=1
+    base_value = 1 / (1 + e ** (k * inflection))
+    upper_value = 1 / (1 + e ** (-k * (1 - inflection))) - base_value
+    sigmoid_matrix_df -= base_value
+    sigmoid_matrix_df /= upper_value
+
+    sigmoid_matrix_df = sigmoid_matrix_df.round(2)
+
+    return sigmoid_matrix_df
 
 class ConditionalMatrices:
     '''
@@ -262,10 +263,18 @@ class ConditionalMatrices:
         self.chemical_class_decoder = {}
         matrices_list = []
 
-        # Iterate over dict of chemical characteristic --> list of member amino acids (e.g. "Acidic" --> ["D","E"]
-
+        # Get parameters for whether to use sigmoid-scaled matrices
         use_sigmoid = matrix_params.get("use_sigmoid")
+        # Generate sigmoid-scaled version
+        sigmoid_strength = matrix_params.get("sigmoid_strength")
+        if sigmoid_strength is None:
+            sigmoid_strength = 1
 
+        sigmoid_inflection = matrix_params.get("sigmoid_inflection")
+        if sigmoid_inflection is None:
+            sigmoid_inflection = 0.5
+
+        # Iterate over dict of chemical characteristic --> list of member amino acids (e.g. "Acidic" --> ["D","E"]
         for i, (chemical_characteristic, member_list) in enumerate(residue_charac_dict.items()):
             # Map the encodings for the chemical classes
             for aa in member_list:
@@ -282,15 +291,16 @@ class ConditionalMatrices:
                 # Generate the weighted matrix
                 conditional_matrix = ConditionalMatrix(motif_length, source_df, residue_charac_dict,
                                                        data_params, current_matrix_params)
-                if use_sigmoid:
-                    current_matrix = conditional_matrix.sigmoid_matrix_df
-                else:
-                    current_matrix = conditional_matrix.matrix_df
+                current_matrix = conditional_matrix.matrix_df
 
                 # Standardize the weighted matrix so that the max value is 1
                 max_values = np.max(current_matrix.values, axis=0)
                 max_values = np.maximum(max_values, 1)  # prevents divide-by-zero errors
                 current_matrix /= max_values
+
+                # If sigmoid scaling is enabled, apply the sigmoid function
+                if use_sigmoid:
+                    current_matrix = apply_sigmoid(current_matrix, sigmoid_strength, sigmoid_inflection)
 
                 # Assign the weighted matrix to the dictionary
                 dict_key_name = "#" + str(filter_position) + "=" + chemical_characteristic
@@ -327,6 +337,7 @@ class ConditionalMatrices:
             self.weighted_arrays_dict = {}
             for key, matrix_df in self.matrices_dict.items():
                 weighted_matrix = matrix_df * weights_array
+                weighted_matrix = weighted_matrix.round(2)
                 self.weighted_matrices_dict[key] = weighted_matrix
                 self.weighted_arrays_dict[key] = weighted_matrix.to_numpy()
 
@@ -335,11 +346,15 @@ class ConditionalMatrices:
         parent_folder = os.path.join(output_folder, "Conditional_Matrices")
 
         unweighted_folder = os.path.join(parent_folder, "Unweighted")
+        if not os.path.exists(unweighted_folder):
+            os.makedirs(unweighted_folder)
         for key, unweighted_matrix in self.matrices_dict.items():
             file_path = os.path.join(unweighted_folder, key + ".csv")
             unweighted_matrix.to_csv(file_path)
 
         weighted_folder = os.path.join(parent_folder, "Weighted")
+        if not os.path.exists(weighted_folder):
+            os.makedirs(weighted_folder)
         for key, weighted_matrix in self.weighted_matrices_dict.items():
             file_path = os.path.join(weighted_folder, key + ".csv")
             weighted_matrix.to_csv(file_path)
