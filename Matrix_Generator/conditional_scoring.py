@@ -118,13 +118,7 @@ def apply_motif_scores(input_df, slim_length, conditional_matrices, sequences_2d
         output_df (pd.DataFrame): dens_df with scores added
     '''
 
-    # Dataframe handling
-    if not in_place and not return_array:
-        output_df = input_df
-    elif in_place and not return_array:
-        output_df = input_df.copy()
-    else:
-        output_df = None
+    output_df = input_df if in_place else input_df.copy()
 
     # Get sequences only if needed; if sequences_2d is already provided, then sequences is not necessary
     if sequences_2d is None:

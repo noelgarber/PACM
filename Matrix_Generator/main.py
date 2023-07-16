@@ -93,14 +93,6 @@ def main(image_params = image_params, general_params = general_params, data_para
     general_params["percentiles_dict"] = percentiles_dict
 
     if generate_context_matrices:
-        position_thresholds = general_params.get("position_thresholds")
-        position_thresholds_str = ",".join(position_thresholds.astype(str))
-        use_default_thresholds = input(f"For generating context-aware matrices, use default possible threshold values "
-                                       + f"during optimization ({position_thresholds_str})? (Y/N)  ") == "Y"
-        if not use_default_thresholds:
-            position_thresholds = input("Enter comma-delimited possible threshold values:  ").split(",")
-            general_params["position_thresholds"] = position_thresholds
-
         pairwise_results = make_pairwise_matrices(data_df, general_params, data_params, matrix_params)
         best_fdr, best_for, best_score_threshold, scored_data_df = pairwise_results
 
