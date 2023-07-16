@@ -23,8 +23,8 @@ class ConditionalMatrix:
 
         Args:
             motif_length (int):                the length of the motif being assessed
-            source_df (pd.DataFrame):   dataframe containing peptide-protein binding data
-            residue_charac_dict: dict of amino acid chemical characteristics
+            source_df (pd.DataFrame):          dataframe containing peptide-protein binding data
+            residue_charac_dict:               dict of amino acid chemical characteristics
             data_params (dict):                dictionary of data-specific params described in config.py
             matrix_params (dict):              dictionary of matrix-specific params described in config.py
         '''
@@ -329,7 +329,7 @@ class ConditionalMatrices:
                 weighted_matrix = matrix_df * weights_array
                 self.weighted_matrices_dict[key] = weighted_matrix
                 self.weighted_arrays_dict[key] = weighted_matrix.to_numpy()
-    
+
     def save(self, output_folder):
 
         parent_folder = os.path.join(output_folder, "Conditional_Matrices")
