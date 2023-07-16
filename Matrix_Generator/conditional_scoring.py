@@ -92,7 +92,8 @@ def score_seqs(sequences, slim_length, conditional_matrices, sequences_2d = None
 
 def apply_motif_scores(input_df, slim_length, conditional_matrices, sequences_2d = None, seq_col = "No_Phos_Sequence",
                        score_col = "SLiM_Score", convert_phospho = True, add_residue_cols = False, in_place = False,
-                       return_array = True, use_weighted = False, return_2d = True, residue_calls_2d = None):
+                       use_weighted = True, return_array = True, return_2d = False, return_df = True,
+                       residue_calls_2d = None):
     '''
     Function to apply the score_seqs() function to all sequences in the source df and add residue cols for sorting
 
@@ -107,8 +108,8 @@ def apply_motif_scores(input_df, slim_length, conditional_matrices, sequences_2d
         convert_phospho (bool):                    whether to convert phospho-residues to non-phospho before lookups
         add_residue_cols (bool):                   whether to add columns containing individual residue letters
         in_place (bool):                           whether to apply operations in-place; add_residue_cols not supported
-        return_array (bool):                       whether to only return the array of points values
         use_weighted (bool):                       whether to use conditional_matrices.stacked_weighted_matrices
+        return_array (bool):                       whether to only return the array of points values
         return_2d (bool):                          whether to return an array of arrays of points values at each
                                                    position of each peptide in addition to the 1d array
         residue_calls_2d (np.ndarray):             2D array of residue calls as bools
@@ -140,7 +141,7 @@ def apply_motif_scores(input_df, slim_length, conditional_matrices, sequences_2d
         scores = output
         scores_2d = None
 
-    if return_array:
+    if return_array and not return_df:
         return output
 
     # Assign scores to dataframe
@@ -177,4 +178,11 @@ def apply_motif_scores(input_df, slim_length, conditional_matrices, sequences_2d
     elif add_residue_cols and in_place:
         raise Exception("apply_motif_scores error: in_place cannot be set to True when add_residue_cols is True")
 
-    return output_df
+    if return_df and return_array and return_2d:
+        return (output_df, scores, scores_2d)
+    elif return_array and return_df:
+        return (output_df, scores)
+    elif return_2d and return_df:
+        return (output_df, scores_2d)
+    elif return_df:
+        return output_df
