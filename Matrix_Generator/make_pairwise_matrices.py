@@ -8,7 +8,7 @@ from Matrix_Generator.ConditionalMatrix import ConditionalMatrices
 from Matrix_Generator.ForbiddenMatrix import ForbiddenMatrix
 from Matrix_Generator.conditional_scoring import apply_motif_scores
 
-def find_optimal_rates(motif_scores, passes_bools, contains_forbidden):
+def find_optimal_threshold(motif_scores, passes_bools, contains_forbidden):
     # Helper function to find the optimal score threshold where FDR and FOR are approximately equal
 
     # Ignore peptides with forbidden residues, as they will be rejected later anyway
@@ -16,28 +16,29 @@ def find_optimal_rates(motif_scores, passes_bools, contains_forbidden):
     non_forbidden_scores = motif_scores[~contains_forbidden]
 
     # Iterate over the range of scores to find the optimal threshold
-    score_range = np.linspace(non_forbidden_scores.min(), non_forbidden_scores.max(), 500)
+    min_score = non_forbidden_scores.min()
+    max_score = non_forbidden_scores.max()
+    score_range = np.linspace(start = min_score, stop = max_score, num = 500)
     best_score_threshold = None
-    best_rate_delta = 1
+    best_accuracy = 0
     for threshold in score_range:
-        above_threshold = non_forbidden_passes >= threshold
+        above_threshold = non_forbidden_scores >= threshold
 
-        false_positives = np.sum(above_threshold & ~passes_bools)
-        positive_calls = np.sum(above_threshold)
+        true_positives = np.sum(above_threshold & non_forbidden_passes)
+        false_positives = np.sum(above_threshold & ~non_forbidden_passes)
+        true_negatives = np.sum(~above_threshold & ~non_forbidden_passes)
+        false_negatives = np.sum(~above_threshold & non_forbidden_passes)
 
-        false_negatives = np.sum(~above_threshold & passes_bools)
-        negative_calls = np.sum(~above_threshold)
+        right_calls = true_positives + true_negatives
+        wrong_calls =  false_positives + false_negatives
+        accuracy = right_calls / (right_calls + wrong_calls)
 
-        if positive_calls > 0 and negative_calls > 0:
-            fdr_val = false_positives / positive_calls
-            for_val = false_negatives / negative_calls
-            rate_delta = abs(fdr_val - for_val)
-            if rate_delta < best_rate_delta:
-                best_score_threshold = threshold
-                best_rate_delta = rate_delta
+        if accuracy > best_accuracy:
+            best_score_threshold = threshold
+            best_accuracy = accuracy
 
     if best_score_threshold is None:
-        raise Exception("make_pairwise_matrices error: failed to find optimal threshold with defined FDR and FOR")
+        raise Exception("make_pairwise_matrices error: failed to find optimal threshold")
 
     return best_score_threshold
 
@@ -119,12 +120,13 @@ def main(input_df, general_params = general_params, data_params = data_params, m
 
     # Find the optimal score threshold where FDR and FOR are approximately equal
     bait_pass_col, pass_str = data_params.get("bait_pass_col"), data_params.get("pass_str")
-    passes_bools = scored_df[bait_pass_col] == pass_str
-    best_score_threshold = find_optimal_rates(motif_scores, passes_bools, contains_forbidden)
+    passes_bools = scored_df[bait_pass_col].to_numpy() == pass_str
+    best_score_threshold = find_optimal_threshold(motif_scores, passes_bools, contains_forbidden)
 
     # Calculate and apply the final FDR and FOR
     scored_df, best_fdr, best_for = apply_final_rates(scored_df, motif_scores, best_score_threshold,
                                                       contains_forbidden, passes_bools)
+    print(f"Conditional matrices metrics: FDR={best_fdr} | FOR={best_for} | threshold={best_score_threshold}")
 
     results = (best_fdr, best_for, best_score_threshold, scored_df)
 
