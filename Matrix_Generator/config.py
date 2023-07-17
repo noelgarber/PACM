@@ -39,12 +39,39 @@ image_params = {"use_cached_data": True,
 
 aa_charac_dict = {"Acidic": ["D", "E"],
                   "Basic": ["K", "R"],
-                  "ST": ["S", "T", "B", "J"],
+                  "SerThr": ["S", "T", "B", "J"],
                   "Aromatic": ["F", "Y", "W", "O"],
                   "Aliphatic": ["A", "V", "I", "L", "M"],
                   "Polar": ["N", "Q", "H", "C"],
                   "Proline": ["P"],
                   "Glycine": ["G"]}
+
+''' Amino acid equivalence dict (more closely related), used for constructing the forbidden residues matrix; 
+    operates on the premise of "if this residue is forbidden, those residues are also likely to be forbidden" '''
+
+aa_equivalence_dict = {"D": ("D", "E"),
+                       "E": ("D", "E"),
+                       "R": ("R", "K"),
+                       "K": ("R", "K"),
+                       "H": ("N", "Q", "R", "K"),
+                       "S": ("S", "T", "B", "J"),
+                       "T": ("S", "T", "B", "J"),
+                       "B": ("S", "T", "B", "J"),
+                       "J": ("S", "T", "B", "J"),
+                       "F": ("F", "Y", "O"),
+                       "Y": ("F", "Y", "O"),
+                       "O": ("F", "Y", "O"),
+                       "W": ("W"),
+                       "A": ("A", "V", "G"),
+                       "V": ("A", "V", "I", "L"),
+                       "I": ("V", "I", "L", "M"),
+                       "L": ("V", "I", "L", "M"),
+                       "M": ("I", "L"),
+                       "N": ("N", "Q", "H", "C"),
+                       "Q": ("N", "Q", "H", "C"),
+                       "C": ("N", "Q", "H", "C"),
+                       "P": ("P"),
+                       "G": ("G", "A")}
 
 ''' General parameters included in general_params: 
         "motif_length":           length of the peptide motif for which matrices are being generated
@@ -106,7 +133,7 @@ matrix_params = {"thresholds_points_dict": None,
                  "use_sigmoid": True,
                  "sigmoid_strength": 1,
                  "sigmoid_inflection": 0.5,
-                 "position_weights": np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1, 3, 3, 3, 2, 0.25, 1, 0.25, 0.25])}
+                 "position_weights": np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1, 1, 3, 3, 3, 0.25, 1, 0.25, 0.25])}
 
 
 ''' ----------------------------------------------------------------------------------------------------------------
