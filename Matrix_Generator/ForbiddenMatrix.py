@@ -6,19 +6,20 @@ import os
 from scipy.stats import fisher_exact
 from general_utils.general_utils import unravel_seqs, check_seq_lengths
 from general_utils.matrix_utils import make_empty_matrix
-from Matrix_Generator.config import data_params, matrix_params
+from Matrix_Generator.config import aa_charac_dict, matrix_params, aa_equivalence_dict
 
 class ForbiddenMatrix:
     # Class containing a boolean position matrix describing whether certain amino acids are forbidden based on position
-    def __init__(self, motif_length, source_df, data_params = data_params, matrix_params = matrix_params):
+    def __init__(self, motif_length, sequences, passes_bools, aa_equivalence_dict = aa_equivalence_dict,
+                 matrix_params = matrix_params):
         '''
         Function for initializing the forbidden matrix based on source peptide data
 
         Args:
             motif_length (int):                the length of the motif being assessed
-            source_df (pd.DataFrame):   dataframe containing peptide-protein binding data
-            residue_charac_dict: dict of amino acid chemical characteristics
-            data_params (dict):                dictionary of conditional matrix data-specific params from config.py
+            sequences (np.ndarray):            array of peptide sequences of equal length matching motif_length
+            passes_bools (np.ndarray):         array of bools representing whether the peptides are positive or not
+            aa_equivalence_dict (dict):        dict of amino acid --> (tuple of functionally highly similar amino acids)
             matrix_params (dict):              dictionary of conditional matrix params described in config.py
         '''
 
@@ -29,26 +30,18 @@ class ForbiddenMatrix:
         self.matrix_df = make_empty_matrix(motif_length, amino_acids, dtype=bool)
 
         # Extract and unravel sequences
-        seq_col = data_params.get("seq_col")
-        sequences = source_df[seq_col].to_numpy()
-        check_seq_lengths(source_df[seq_col], motif_length)  # check that all seqs in seq_col are the same length
+        check_seq_lengths(sequences, motif_length)  # check that all seqs in seq_col are the same length
         convert_phospho = not matrix_params.get("include_phospho")
         self.convert_phospho = convert_phospho
         sequences_2d = unravel_seqs(sequences, motif_length, convert_phospho)
 
-        # Get boolean calls for whether each peptide binds to the bait(s) or not
-        pass_str = data_params.get("pass_str")
-        pass_col = data_params.get("bait_pass_col")
-        pass_values = source_df[pass_col].to_numpy()
-        pass_calls = pass_values == pass_str
-
         # Divide sequences based on whether they pass or not
-        positive_sequences_2d = sequences_2d[pass_calls]
-        negative_sequences_2d = sequences_2d[~pass_calls]
+        positive_sequences_2d = sequences_2d[passes_bools]
+        negative_sequences_2d = sequences_2d[~passes_bools]
 
         # Iterate over matrix cols to assign boolean values (True = forbidden)
         positive_count = positive_sequences_2d.shape[0]
-        negative_count = negative_sequences_2d.shape[1]
+        negative_count = negative_sequences_2d.shape[0]
 
         for col_number in np.arange(positive_sequences_2d.shape[1]):
             positive_masked_col = positive_sequences_2d[:, col_number]
@@ -68,9 +61,28 @@ class ForbiddenMatrix:
                                          [aa_negative_count, other_negative_count]]
                     odds_ratio, p_value = fisher_exact(contingency_table)
 
-                    # Set the threshold to 0.1, since we are interested only in using this as a filter
                     if p_value <= 0.1:
+                        # The forbidden residue is significant on its own
                         position_forbidden_calls[i] = True
+                    else:
+                        # Get the functional identity group members for the amino acid in question
+                        group_members = aa_equivalence_dict.get(aa)
+
+                        # Count the number of occurrences in positive and negative peptides at this position
+                        group_positive_count = np.sum(np.in1d(positive_masked_col, np.array(group_members, dtype="U")))
+                        group_negative_count = np.sum(np.in1d(negative_masked_col, np.array(group_members, dtype="U")))
+
+                        nongroup_positive_count = positive_count - group_positive_count
+                        nongroup_negative_count = negative_count - group_negative_count
+
+                        # Test whether the forbidden residue's constituent group is significant
+                        group_contingency_table = [[group_positive_count, nongroup_positive_count],
+                                                   [group_negative_count, nongroup_negative_count]]
+                        group_odds_ratio, group_p_value = fisher_exact(group_contingency_table)
+
+                        consistent = (group_negative_count / negative_count) > (group_positive_count / positive_count)
+                        if p_value <= 0.2 and group_p_value <= 0.1 and consistent:
+                            position_forbidden_calls[i] = True
 
             self.matrix_df.iloc[:, col_number] = position_forbidden_calls
 
