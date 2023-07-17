@@ -133,7 +133,7 @@ matrix_params = {"thresholds_points_dict": None,
                  "use_sigmoid": True,
                  "sigmoid_strength": 1,
                  "sigmoid_inflection": 0.5,
-                 "position_weights": np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1, 1, 3, 3, 3, 0.25, 1, 0.25, 0.25])}
+                 "position_weights": np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1, 3, 3, 3, 3, 0.25, 1, 0.25, 0.25])}
 
 
 ''' ----------------------------------------------------------------------------------------------------------------
@@ -155,21 +155,21 @@ comparator_info = {"comparator_set_1": None,
 
 ''' If optimizing weights, possible_weights is a list of arrays of possible weight values for each matrix position '''
 
-possible_weights = [np.array([0.0, 0.5, 1.0, 2.0]),
-                    np.array([0.0, 0.5, 1.0, 2.0]),
-                    np.array([0.0, 0.5, 1.0, 2.0]),
-                    np.array([0.0, 0.5, 1.0, 2.0]),
-                    np.array([0.0, 0.5, 1.0, 2.0]),
-                    np.array([0.0, 0.5, 1.0, 2.0]),
-                    np.array([0.0, 1.0, 2.0, 3.0]),
-                    np.array([0.0, 1.0, 2.0, 3.0]),
-                    np.array([0.0, 1.0, 2.0, 3.0]),
-                    np.array([0.0, 1.0, 2.0, 3.0]),
-                    np.array([0.0, 1.0, 2.0, 3.0]),
+possible_weights = [np.array([0.0, 0.5, 1.0]),
+                    np.array([0.0, 0.5, 1.0]),
+                    np.array([0.0, 0.5, 1.0]),
+                    np.array([0.0, 0.5, 1.0]),
                     np.array([0.0, 0.5, 1.0]),
                     np.array([0.0, 0.5, 1.0, 2.0]),
-                    np.array([0.0, 0.5, 1.0]),
-                    np.array([0.0, 0.5, 1.0])]
+                    np.array([0.0, 1.0, 2.0, 3.0]),
+                    np.array([0.0, 1.0, 2.0, 3.0]),
+                    np.array([0.0, 1.0, 2.0, 3.0]),
+                    np.array([0.0, 1.0, 2.0, 3.0]),
+                    np.array([0.0, 1.0, 2.0, 3.0]),
+                    np.array([0.0, 0.5]),
+                    np.array([0.0, 0.5, 1.0, 2.0]),
+                    np.array([0.0, 0.5]),
+                    np.array([0.0, 0.5])]
 
 ''' Specificity matrix generation parameters contained in specificity_params: 
         "thresholds":            comma-delimited tuple of log2fc thresholds, in descending order, as floats
