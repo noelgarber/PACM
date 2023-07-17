@@ -110,8 +110,11 @@ def main(input_df, general_params = general_params, data_params = data_params, m
                                                  return_df = True)
 
     # Generate forbidden residues matrix and use it to check sequences
-    forbidden_matrix = ForbiddenMatrix(motif_length, input_df, data_params, matrix_params)
     sequences = scored_df[seq_col].to_numpy()
+    bait_pass_col, pass_str = data_params.get("bait_pass_col"), data_params.get("pass_str")
+    passes_bools = scored_df[bait_pass_col].to_numpy() == pass_str
+    forbidden_matrix = ForbiddenMatrix(motif_length, sequences, passes_bools, aa_charac_dict, matrix_params)
+
     contains_forbidden = forbidden_matrix.predict_seqs(sequences)
     forbidden_residues_col = np.full(shape=len(scored_df), fill_value="-", dtype="<U10")
     forbidden_residues_col[contains_forbidden] = "Yes"
@@ -119,8 +122,6 @@ def main(input_df, general_params = general_params, data_params = data_params, m
     forbidden_matrix.save(output_folder)
 
     # Find the optimal score threshold where FDR and FOR are approximately equal
-    bait_pass_col, pass_str = data_params.get("bait_pass_col"), data_params.get("pass_str")
-    passes_bools = scored_df[bait_pass_col].to_numpy() == pass_str
     best_score_threshold = find_optimal_threshold(motif_scores, passes_bools, contains_forbidden)
 
     # Calculate and apply the final FDR and FOR
