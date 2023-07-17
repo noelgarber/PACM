@@ -3,7 +3,7 @@
 import numpy as np
 import pandas as pd
 import os
-from Matrix_Generator.config import general_params, data_params, matrix_params
+from Matrix_Generator.config import general_params, data_params, matrix_params, aa_equivalence_dict
 from Matrix_Generator.ConditionalMatrix import ConditionalMatrices
 from Matrix_Generator.ForbiddenMatrix import ForbiddenMatrix
 from Matrix_Generator.conditional_scoring import apply_motif_scores
@@ -99,6 +99,8 @@ def main(input_df, general_params = general_params, data_params = data_params, m
     conditional_matrices = ConditionalMatrices(motif_length, input_df, percentiles_dict, aa_charac_dict,
                                                data_params, matrix_params)
     conditional_matrices.save(output_folder)
+    if matrix_params.get("use_sigmoid"):
+        conditional_matrices.save_sigmoid_plot(output_folder)
 
     # Apply motif scores
     seq_col = data_params.get("seq_col")
@@ -113,7 +115,8 @@ def main(input_df, general_params = general_params, data_params = data_params, m
     sequences = scored_df[seq_col].to_numpy()
     bait_pass_col, pass_str = data_params.get("bait_pass_col"), data_params.get("pass_str")
     passes_bools = scored_df[bait_pass_col].to_numpy() == pass_str
-    forbidden_matrix = ForbiddenMatrix(motif_length, sequences, passes_bools, aa_charac_dict, matrix_params)
+    forbidden_matrix = ForbiddenMatrix(motif_length, sequences, passes_bools, aa_equivalence_dict, matrix_params,
+                                       verbose = True)
 
     contains_forbidden = forbidden_matrix.predict_seqs(sequences)
     forbidden_residues_col = np.full(shape=len(scored_df), fill_value="-", dtype="<U10")
