@@ -132,8 +132,10 @@ matrix_params = {"thresholds_points_dict": None,
                  "penalize_negatives": True,
                  "use_sigmoid": True,
                  "sigmoid_strength": 1,
-                 "sigmoid_inflection": 0.5,
-                 "position_weights": np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1, 3, 3, 3, 3, 0.25, 1, 0.25, 0.25])}
+                 "sigmoid_inflection": 0.3,
+                 "position_weights": np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5,
+                                               0.5, 3, 3, 3, 3, 0, 0.5,
+                                               0.25, 0])}
 
 
 ''' ----------------------------------------------------------------------------------------------------------------
