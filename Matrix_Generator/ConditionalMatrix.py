@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import os
+import matplotlib.pyplot as plt
 from math import e
 from scipy.stats import fisher_exact
 from general_utils.general_utils import unravel_seqs, check_seq_lengths
@@ -274,6 +275,9 @@ class ConditionalMatrices:
         if sigmoid_inflection is None:
             sigmoid_inflection = 0.5
 
+        self.sigmoid_strength = sigmoid_strength
+        self.sigmoid_inflection = sigmoid_inflection
+
         # Iterate over dict of chemical characteristic --> list of member amino acids (e.g. "Acidic" --> ["D","E"]
         for i, (chemical_characteristic, member_list) in enumerate(residue_charac_dict.items()):
             # Map the encodings for the chemical classes
@@ -342,6 +346,7 @@ class ConditionalMatrices:
                 self.weighted_arrays_dict[key] = weighted_matrix.to_numpy()
 
     def save(self, output_folder):
+        # User-called function to save the conditional matrices as CSVs to folders for both unweighted and weighted
 
         parent_folder = os.path.join(output_folder, "Conditional_Matrices")
 
@@ -360,3 +365,26 @@ class ConditionalMatrices:
             weighted_matrix.to_csv(file_path)
 
         print(f"Saved {len(self.matrices_dict)} unweighted and {len(self.weighted_matrices_dict)} weighted matrices to {parent_folder}")
+
+    def save_sigmoid_plot(self, output_folder):
+        # User-called function to save a plot of the sigmoid function used to adjust the matrix points values
+
+        k = self.sigmoid_strength * 10
+
+        base_value = 1 / (1 + e ** (k * self.sigmoid_inflection))
+        upper_value = 1 / (1 + e ** (-k * (1 - self.sigmoid_inflection))) - base_value
+        sigmoid_function = lambda x: (1/(1+e**(-k*(abs(x)-self.sigmoid_inflection))) - base_value) / upper_value
+
+        # Generate the graph contents
+        x_values = np.linspace(0, 1, 1000)
+        y_values = np.array([sigmoid_function(x) for x in x_values])
+
+        # Create the plot
+        plt.plot(x_values, y_values)
+        plt.xlabel("Original Score Value")
+        plt.ylabel("Sigmoid-Adjusted Score Value")
+        plt.title("Sigmoid Scaling of Conditional Matrix Points")
+        plt.grid(True)
+
+        # Save the figure as a PNG file
+        plt.savefig(os.path.join(output_folder, "sigmoid_points_plot.png"), dpi=600)
