@@ -101,7 +101,8 @@ def main(image_params = image_params, general_params = general_params, data_para
         scored_data_df = data_df.copy()
 
     # Generate specificity matrix and associated results as a SpecificityMatrix object
-    specificity_matrix = make_specificity_matrix(scored_data_df, comparator_info, specificity_params, save = True)
+    if generate_specificity_matrix:
+        specificity_matrix = make_specificity_matrix(scored_data_df, comparator_info, specificity_params, save = True)
 
     if generate_context_matrices and generate_specificity_matrix:
         return (scored_data_df, best_score_threshold, best_fdr, best_for, specificity_matrix)

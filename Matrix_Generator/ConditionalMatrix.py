@@ -279,6 +279,9 @@ class ConditionalMatrices:
         self.sigmoid_inflection = sigmoid_inflection
 
         # Iterate over dict of chemical characteristic --> list of member amino acids (e.g. "Acidic" --> ["D","E"]
+        self.sufficient_keys = []
+        self.insufficient_keys = []
+        self.report = ["Conditional Matrix Generation Report\n\n"]
         for i, (chemical_characteristic, member_list) in enumerate(residue_charac_dict.items()):
             # Map the encodings for the chemical classes
             for aa in member_list:
@@ -314,7 +317,15 @@ class ConditionalMatrices:
                 # Display a warning message if insufficient seqs were passed
                 sufficient_seqs = conditional_matrix.sufficient_seqs
                 if not sufficient_seqs:
-                    print(f"For matrix rule {dict_key_name}, insufficient source seqs were passed; defaulting to all seqs")
+                    line = f"Matrix status for {dict_key_name}: not enough source seqs meeting rule; defaulting to all"
+                    print(line)
+                    self.report.append(line+f"\n")
+                    self.insufficient_keys.append(dict_key_name)
+                else:
+                    line = f"Matrix status for {dict_key_name}: OK"
+                    print(line)
+                    self.report.append(line+f"\n")
+                    self.sufficient_keys.append(dict_key_name)
 
         # Make an array representation of matrices_dict
         self.index = matrices_list[0].index
@@ -350,6 +361,7 @@ class ConditionalMatrices:
 
         parent_folder = os.path.join(output_folder, "Conditional_Matrices")
 
+        # Save unweighted matrices
         unweighted_folder = os.path.join(parent_folder, "Unweighted")
         if not os.path.exists(unweighted_folder):
             os.makedirs(unweighted_folder)
@@ -357,6 +369,7 @@ class ConditionalMatrices:
             file_path = os.path.join(unweighted_folder, key + ".csv")
             unweighted_matrix.to_csv(file_path)
 
+        # Save weighted matrices
         weighted_folder = os.path.join(parent_folder, "Weighted")
         if not os.path.exists(weighted_folder):
             os.makedirs(weighted_folder)
@@ -364,7 +377,16 @@ class ConditionalMatrices:
             file_path = os.path.join(weighted_folder, key + ".csv")
             weighted_matrix.to_csv(file_path)
 
-        print(f"Saved {len(self.matrices_dict)} unweighted and {len(self.weighted_matrices_dict)} weighted matrices to {parent_folder}")
+        # Save output report
+        output_report_path = os.path.join(parent_folder, "conditional_matrices_report.txt")
+        with open(output_report_path, "w") as file:
+            file.writelines(self.report)
+
+        # Display saved message
+        unweighted_count = len(self.matrices_dict)
+        weighted_count = len(self.weighted_matrices_dict)
+        print(f"Saved {unweighted_count} unweighted matrices, {weighted_count} weighted matrices,",
+              f"and output report to {parent_folder}")
 
     def save_sigmoid_plot(self, output_folder):
         # User-called function to save a plot of the sigmoid function used to adjust the matrix points values

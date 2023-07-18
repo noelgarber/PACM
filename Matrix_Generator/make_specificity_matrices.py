@@ -156,7 +156,7 @@ def main(source_df, comparator_info = comparator_info, specificity_params = spec
 
     # Save the results
     if save:
-        output_folder = specificity_params["output_folder"]
+        output_folder = specificity_params.get("output_folder")
         specificity_matrix.save(output_folder)
 
     return specificity_matrix
