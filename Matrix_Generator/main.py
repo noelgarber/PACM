@@ -95,46 +95,20 @@ def main(image_params = image_params, general_params = general_params, data_para
     if generate_context_matrices:
         pairwise_results = make_pairwise_matrices(data_df, general_params, data_params, matrix_params)
         best_fdr, best_for, best_score_threshold, scored_data_df = pairwise_results
-
-    # Generate specificity matrix and back-calculate scores
-    if not generate_context_matrices:
+        if not generate_specificity_matrix:
+            scored_data_df.to_csv(os.path.join(general_params.get("output_folder"), "final_scored_data.csv"))
+    else:
         scored_data_df = data_df.copy()
-    specificity_results = make_specificity_matrix(scored_data_df, comparator_info, specificity_params)
 
-    scored_data_df = specificity_results[0]
-    specificity_weights = specificity_results[1]
-    specificity_weighted_matrix = specificity_results[3]
-    specificity_statistics = {"equation": specificity_results[4], "coefficient": specificity_results[5],
-                              "intercept": specificity_results[6], "r2": specificity_results[7]}
-
-    # Save data that has not been saved already
-    if generate_context_matrices or generate_specificity_matrix:
-        scored_data_df.to_csv(os.path.join(general_params.get("output_folder"), "final_scored_data.csv"))
-    if generate_specificity_matrix:
-        specificity_weighted_matrix.to_csv(os.path.join(general_params.get("output_folder"),
-                                                        "specificity_weighted_matrix.csv"))
-
-    # Display final report in the command line
-    print("--------------------------------------------------------------------")
-    print("                       Final Analysis Report                        ")
-    if generate_context_matrices:
-        print("                     -------------------------                      ")
-        print("Context-aware position-weighted matrix score threshold:", best_score_threshold)
-        print(f"Detected motif statistics: FDR = {best_fdr}, FOR = {best_for}")
-    if generate_specificity_matrix:
-        print("                     -------------------------                      ")
-        print("Specificity position-weighted matrix weights:", specificity_weights)
-        print("Specificity statistics: ")
-        print(specificity_statistics)
-    print("--------------------------------------------------------------------")
+    # Generate specificity matrix and associated results as a SpecificityMatrix object
+    specificity_matrix = make_specificity_matrix(scored_data_df, comparator_info, specificity_params, save = True)
 
     if generate_context_matrices and generate_specificity_matrix:
-        return (scored_data_df, best_score_threshold, best_fdr, best_for,
-                specificity_weights, specificity_weighted_matrix, specificity_statistics)
+        return (scored_data_df, best_score_threshold, best_fdr, best_for, specificity_matrix)
     elif generate_context_matrices:
         return (scored_data_df, best_score_threshold, best_fdr, best_for)
     elif generate_specificity_matrix:
-        return (scored_data_df, specificity_weights, specificity_weighted_matrix, specificity_statistics)
+        return (scored_data_df, specificity_matrix)
 
 
 # If the script is executed directly, invoke the main workflow
