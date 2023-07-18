@@ -241,8 +241,7 @@ class SpecificityMatrix:
         linear_intercept = model.intercept_[0]
         y_pred = model.predict(x_actual)
         linear_r2 = r2_score(y_actual, y_pred)
-        intercept_str = str(intercept) if intercept < 0 else "+" + str(intercept)
-        linear_equation = "y=" + str(coef) + "x" + intercept_str
+        linear_equation = f"y={linear_coef}x{linear_intercept:+.2f}"
 
         if use_weighted:
             self.weighted_linear_coef, self.weighted_linear_intercept = linear_coef, linear_intercept
@@ -262,8 +261,7 @@ class SpecificityMatrix:
         extrema_linear_intercept = extrema_model.intercept_[0]
         y_pred_extrema = extrema_model.predict(x_actual_extrema)
         extrema_linear_r2 = r2_score(y_actual_extrema, y_pred_extrema)
-        sign = "" if self.extrema_linear_intercept < 0 else "+"
-        extrema_linear_equation = "y=" + str(extrema_linear_coef) + "x" + sign + str(extrema_linear_intercept)
+        extrema_linear_equation = f"y={extrema_linear_coef}x{extrema_linear_intercept:+.2f}"
 
         if use_weighted:
             self.weighted_extrema_coef, self.weighted_extrema_intercept = extrema_linear_coef, extrema_linear_intercept

@@ -35,7 +35,7 @@ def process_weights_chunk(chunk, specificity_matrix, fit_mode = "extrema", abs_e
     
     if fit_mode != "extrema" and fit_mode != "all": 
         raise Exception(f"process_weights_chunk fit_mode was set to {fit_mode}, but `extrema` or `all` was expected")
-    use_extrema = fit_mode == extrema
+    use_extrema = fit_mode == "extrema"
 
     for permuted_weights in chunk:
         specificity_matrix.apply_weights(permuted_weights)
