@@ -187,7 +187,8 @@ possible_weights = [np.array([0.0, 0.5, 1.0]),
                                  "all" --> fit to all log2fc values
         "abs_extrema_threshold": threshold for declaring an absolute log2fc value to belong to the group of extrema '''
 
-specificity_params = {"thresholds": (1.0, 0.5, -0.5, -1.0),
+specificity_params = {"motif_length": 15,
+                      "thresholds": (1.0, 0.5, -0.5, -1.0),
                       "matching_points": (2.0, 1.0, -1.0, -2.0),
                       "include_phospho": False,
                       "predefined_weights": None,
