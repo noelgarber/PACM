@@ -22,7 +22,7 @@ amino_acids_phos = ("D", "E", "R", "H", "K", "S", "T", "N", "Q", "C", "G", "P", 
                              during background signal adjustment and call index calculation '''
 
 image_params = {"use_cached_data": True,
-                "cached_data_path": None,
+                "cached_data_path": "",
                 "output_folder": None,
                 "add_peptide_seqs": True,
                 "peptide_seq_cols": ["Phos_Sequence", "No_Phos_Sequence", "BJO_Sequence"],
@@ -83,7 +83,7 @@ aa_equivalence_dict = {"D": ("D", "E"),
         "position_thresholds":    range of values for optimization, as a list, for thresholding points values '''
 
 general_params = {"motif_length": 15,
-                  "output_folder": None,
+                  "output_folder": "",
                   "make_calls": True,
                   "aa_charac_dict": aa_charac_dict,
                   "convert_phospho": True,
@@ -190,5 +190,5 @@ specificity_params = {"motif_length": 15,
                       "predefined_weights": None,
                       "optimize_weights": True,
                       "possible_weights": possible_weights,
-                      "output_folder": None,
+                      "output_folder": "",
                       "chunk_size": 1000}
