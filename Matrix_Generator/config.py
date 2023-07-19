@@ -131,7 +131,7 @@ matrix_params = {"thresholds_points_dict": None,
                  "clear_filtering_column": False,
                  "penalize_negatives": True,
                  "use_sigmoid": True,
-                 "sigmoid_strength": 1,
+                 "sigmoid_strength": 0.5,
                  "sigmoid_inflection": 0.3,
                  "position_weights": np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5,
                                                0.5, 3, 3, 3, 3, 0, 0.5,
@@ -157,19 +157,19 @@ comparator_info = {"comparator_set_1": None,
 
 ''' If optimizing weights, possible_weights is a list of arrays of possible weight values for each matrix position '''
 
-possible_weights = [np.array([0.0, 0.5, 1.0]),
-                    np.array([0.0, 0.5, 1.0]),
-                    np.array([0.0, 0.5, 1.0]),
-                    np.array([0.0, 0.5, 1.0]),
-                    np.array([0.0, 0.5, 1.0]),
-                    np.array([0.0, 0.5, 1.0, 2.0]),
+possible_weights = [np.array([0.0, 1.0]),
+                    np.array([0.0, 1.0]),
+                    np.array([0.0, 1.0]),
+                    np.array([0.0, 1.0]),
+                    np.array([0.0, 1.0]),
+                    np.array([0.0, 1.0, 2.0]),
                     np.array([0.0, 1.0, 2.0, 3.0]),
                     np.array([0.0, 1.0, 2.0, 3.0]),
                     np.array([0.0, 1.0, 2.0, 3.0]),
                     np.array([0.0, 1.0, 2.0, 3.0]),
                     np.array([0.0, 1.0, 2.0, 3.0]),
                     np.array([0.0, 0.5]),
-                    np.array([0.0, 0.5, 1.0, 2.0]),
+                    np.array([0.0, 1.0, 2.0]),
                     np.array([0.0, 0.5]),
                     np.array([0.0, 0.5])]
 
@@ -181,11 +181,7 @@ possible_weights = [np.array([0.0, 0.5, 1.0]),
         "optimize_weights":      whether to optimize position weights
         "possible_weights":      possible weights values to permute for optimization 
         "output_folder":         the folder to save the specificity matrix and scored output data into 
-        "chunk_size":            parallel processing chunk size for weights optimization if optimize_weights is True 
-        "fit_mode":              fit mode for linear model fitting of log2fc to specificity scores; 
-                                 "extrema" --> fits to log2fc value set that exceeds abs_extrema_threshold
-                                 "all" --> fit to all log2fc values
-        "abs_extrema_threshold": threshold for declaring an absolute log2fc value to belong to the group of extrema '''
+        "chunk_size":            parallel processing chunk size for weights optimization if optimize_weights is True '''
 
 specificity_params = {"motif_length": 15,
                       "thresholds": (1.0, 0.5, -0.5, -1.0),
@@ -195,6 +191,4 @@ specificity_params = {"motif_length": 15,
                       "optimize_weights": True,
                       "possible_weights": possible_weights,
                       "output_folder": None,
-                      "chunk_size": 10000,
-                      "fit_mode": "extrema",
-                      "abs_extrema_threshold": 0.5}
+                      "chunk_size": 1000}
