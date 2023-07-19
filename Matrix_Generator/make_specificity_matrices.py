@@ -13,84 +13,66 @@ from general_utils.weights_utils import permute_weights
                      Define functions for parallelized optimization of specificity matrix weights
    ------------------------------------------------------------------------------------------------------------------'''
 
-def process_weights_chunk(chunk, specificity_matrix, fit_mode = "extrema", abs_extrema_threshold = 0.5):
+def process_weights_chunk(chunk, specificity_matrix):
     '''
     Lower helper function for parallelization of position weight optimization for the specificity matrix
 
     Args:
         chunk (np.ndarray):                     the chunk of permuted weights currently being processed
         specificity_matrix (SpecificityMatrix): the specificity matrix object
-        fit_mode (str):                         if "extrema", optimizes r2 with respect to data above abs_extrema_threshold;
-                                                if "all", optimizes r2 with respect to all data points
-        abs_extrema_threshold (float):          only required if fit_mode is "extrema"
 
     Returns:
-        chunk_results (tuple):                  (optimized_weights, optimized_r2, optimized_r2_extrema)
+        chunk_results (tuple):                  (optimized_weights, optimized_mean_mcc)
     '''
 
     sequence_length = len(chunk[0])
-    optimized_r2 = 0.0
-    optimized_r2_extrema = 0.0
+
+    optimized_mean_mcc = 0
     optimized_weights = np.ones(sequence_length)
-    
-    if fit_mode != "extrema" and fit_mode != "all": 
-        raise Exception(f"process_weights_chunk fit_mode was set to {fit_mode}, but `extrema` or `all` was expected")
-    use_extrema = fit_mode == "extrema"
 
     for permuted_weights in chunk:
         specificity_matrix.apply_weights(permuted_weights)
         specificity_matrix.score_source_peptides(use_weighted = True)
-        specificity_matrix.set_specificity_statistics(abs_extrema_threshold, use_weighted = True)
-        current_r2 = specificity_matrix.weighted_extrema_r2 if use_extrema else specificity_matrix.weighted_linear_r2
-        if current_r2 > optimized_r2:
+        specificity_matrix.set_specificity_statistics(use_weighted = True)
+        current_mean_mcc = specificity_matrix.weighted_mean_mcc
+        if current_mean_mcc > optimized_mean_mcc:
             optimized_weights = permuted_weights
-            optimized_r2 = specificity_matrix.weighted_linear_r2
-            optimized_r2_extrema = specificity_matrix.weighted_extrema_r2
+            optimized_mean_mcc = current_mean_mcc
 
-    return (optimized_weights, optimized_r2, optimized_r2_extrema)
+    return (optimized_weights, optimized_mean_mcc)
 
-def process_weights(weights_array_chunks, specificity_matrix, fit_mode = "extrema", abs_extrema_threshold = 0.5):
+def process_weights(weights_array_chunks, specificity_matrix):
     '''
     Upper helper function for parallelization of position weight optimization; processes weights by chunking
 
     Args:
         weights_array_chunks (list):            list of chunks as numpy arrays for feeding to process_weights_chunk
         specificity_matrix (SpecificityMatrix): the specificity matrix object
-        fit_mode (str):                         if "extrema", optimizes r2 with respect to data above abs_extrema_threshold;
-                                                if "all", optimizes r2 with respect to all data points
-        abs_extrema_threshold (float):          only required if fit_mode is "extrema"
 
     Returns:
         results (tuple):                        (best_weights, best_r2, best_r2_extrema)
     '''
 
     pool = multiprocessing.Pool()
-    process_partial = partial(process_weights_chunk, specificity_matrix = specificity_matrix,
-                              fit_mode = fit_mode, abs_extrema_threshold = abs_extrema_threshold)
+    process_partial = partial(process_weights_chunk, specificity_matrix = specificity_matrix)
 
     best_weights = None
-    best_r2 = 0
-    best_r2_extrema = 0
-
-    optimization_val = 0
-    r2_optimization_index = 2 if fit_mode == "extrema" else 1
+    best_mean_mcc = 0
 
     with trange(len(weights_array_chunks), desc="Processing specificity matrix weights") as pbar:
         for chunk_results in pool.imap_unordered(process_partial, weights_array_chunks):
-            if 1 >= chunk_results[r2_optimization_index] > optimization_val:
-                best_weights, best_r2, best_r2_extrema = chunk_results
-                optimization_val = chunk_results[r2_optimization_index]
-                print(f"New record: R2={best_r2} (extrema R2={best_r2_extrema}) for weights: {best_weights}")
+            if chunk_results[1] > best_mean_mcc:
+                best_weights, best_mean_mcc = chunk_results
+                print(f"New record: mean_mcc = {best_mean_mcc} for weights: {best_weights}")
 
             pbar.update()
 
     pool.close()
     pool.join()
 
-    return (best_weights, best_r2, best_r2_extrema)
+    return (best_weights, best_mean_mcc)
 
-def find_optimal_weights(specificity_matrix, motif_length, possible_weights = None, chunk_size = 1000,
-                         fit_mode = "extrema", abs_extrema_threshold = 0.5):
+def find_optimal_weights(specificity_matrix, motif_length, possible_weights = None, chunk_size = 1000):
     '''
     Parent function for finding optimal position weights to generate an optimally weighted specificity matrix
 
@@ -99,9 +81,6 @@ def find_optimal_weights(specificity_matrix, motif_length, possible_weights = No
         motif_length (int):                     length of the motif being studied
         possible_weights (list):                list of arrays of possible weights at each position of the motif
         chunk_size (int):                       the number of position weights to process at a time
-        fit_mode (str):                         if "extrema", optimizes r2 with respect to data above abs_extrema_threshold;
-                                                if "all", optimizes r2 with respect to all data points
-        abs_extrema_threshold (float):          only required if fit_mode is "extrema"
 
     Returns:
         specificity_matrix (SpecificityMatrix): the fitted SpecificityMatrix object containing matrices and scored data
@@ -109,16 +88,19 @@ def find_optimal_weights(specificity_matrix, motif_length, possible_weights = No
 
     # Get the permuted weights and break into chunks for parallelization
     permuted_weights = permute_weights(motif_length, possible_weights)
+    all_zero_rows = np.all(permuted_weights == 0, axis=1)
+    permuted_weights = permuted_weights[~all_zero_rows]
+
     weights_array_chunks = [permuted_weights[i:i + chunk_size] for i in range(0, len(permuted_weights), chunk_size)]
 
     # Run the parallelized optimization process
-    results = process_weights(weights_array_chunks, specificity_matrix, fit_mode, abs_extrema_threshold)
-    best_weights, best_r2, best_r2_extrema = results
+    results = process_weights(weights_array_chunks, specificity_matrix)
+    best_weights, best_mean_mcc = results
 
     # Apply the final best weights onto the specificity matrix and score the source data
     specificity_matrix.apply_weights(best_weights)
     specificity_matrix.score_source_peptides(use_weighted = True)
-    specificity_matrix.set_specificity_statistics(abs_extrema_threshold, use_weighted=True)
+    specificity_matrix.set_specificity_statistics(use_weighted=True)
 
     return specificity_matrix
 
@@ -150,9 +132,7 @@ def main(source_df, comparator_info = comparator_info, specificity_params = spec
         # Determine optimal weights by maximizing the R2 value against a permuted array of weights arrays
         motif_length = specificity_params["motif_length"]
         possible_weights, chunk_size = specificity_params["possible_weights"], specificity_params["chunk_size"]
-        fit_mode, abs_extrema_threshold = specificity_params["fit_mode"], specificity_params["abs_extrema_threshold"]
-        specificity_matrix = find_optimal_weights(specificity_matrix, motif_length, possible_weights,
-                                                 chunk_size, fit_mode, abs_extrema_threshold)
+        specificity_matrix = find_optimal_weights(specificity_matrix, motif_length, possible_weights, chunk_size)
 
     # Save the results
     if save:
