@@ -62,20 +62,27 @@ def csv_to_dict(filepath, list_mode = False):
             result[key] = value
     return result
 
-def dict_value_append(input_dict, key, element_to_append):
+def dict_value_append(input_dict, key, element_to_append, duplicates_allowed = True):
     '''
     Simple function for appending elements to lists held as dictionary values for a given key in an existing dictionary.
 
     Args:
-        input_dict (dict): dict of (key --> value_list) pairs, where an element will be appended to value_list for key
-        key: the key to use for accessing value_list
-        element_to_append: the value to append to the value_list associated with key
+        input_dict (dict):          dict of (key --> value_list) pairs, where an element will be appended to value_list for key
+        key:                        the key to use for accessing value_list
+        element_to_append:          the value to append to the value_list associated with key
+        duplicates_allowed (bool):  whether duplicates are allowed in the lists
 
     Returns:
         None; the operation is performed in-place
     '''
+
     if input_dict.get(key) == None:
         input_dict[key] = [element_to_append]
+    elif not duplicates_allowed:
+        value_list = input_dict.get(key)
+        if element_to_append in value_list:
+            value_list.append(element_to_append)
+        input_dict[key] = value_list
     else:
         value_list = input_dict.get(key)
         value_list.append(element_to_append)
