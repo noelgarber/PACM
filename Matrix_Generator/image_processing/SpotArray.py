@@ -3,7 +3,6 @@
 import numpy as np
 import os
 import string
-import matplotlib.pyplot as plt
 from Matrix_Generator.image_processing.image_utils import reverse_log_transform
 from tifffile import imread, imshow
 from scipy.signal import find_peaks
@@ -140,6 +139,7 @@ class SpotArray:
         # Display popup of sliced image if prompted
         if show_sliced_image:
             imshow(self.sliced_image / self.sliced_image.max())
+            import matplotlib.pyplot as plt
             plt.show()
 
         # Make a dictionary holding alphanumeric spot coordinates as keys --> tuples of
@@ -155,6 +155,7 @@ class SpotArray:
         # Display popup of sliced image with drawn crosshairs if prompted
         if show_outlined_image:
             imshow(self.outlined_image / self.outlined_image.max())
+            import matplotlib.pyplot as plt
             plt.show()
 
         # In addition to assigning to internal variables, also returns a tuple of results that can be optionally assigned when this function is invoked
@@ -233,12 +234,13 @@ class SpotArray:
         vlsums, hlsums = self.linear_array.sum(axis=0), self.linear_array.sum(axis=1)
 
         if show_line_sums:
-             print("\t\t\tShowing vertical line sums...")
-             plt.plot(vlsums)
-             plt.show()
-             print("\t\t\tShowing horizontal line sums...")
-             plt.plot(hlsums)
-             plt.show()
+            import matplotlib.pyplot as plt
+            print("\t\t\tShowing vertical line sums...")
+            plt.plot(vlsums)
+            plt.show()
+            print("\t\t\tShowing horizontal line sums...")
+            plt.plot(hlsums)
+            plt.show()
 
         # Find peaks and valleys in the vertical and horizontal line sums
         vlpeaks, _ = find_peaks(vlsums)
@@ -478,6 +480,7 @@ class SpotArray:
         # Show the input image if slicer debugging is enabled
         if slicer_debugging:
             print("\t\t\tshowing input image...")
+            import matplotlib.pyplot as plt
             imshow(image_ndarray, cmap="gray")
             plt.show()
 
@@ -539,6 +542,7 @@ class SpotArray:
 
                 if slicer_debugging:
                     print(f"\t\t\t{alphanumeric_coordinates} info: {values_at_coord}")
+                    import matplotlib.pyplot as plt
                     imshow(sliced_spot, cmap="gray")
                     plt.show()
 
