@@ -38,7 +38,7 @@ def preprocess_list(image_params = image_params, arbitrary_coords_to_drop = None
 
     return df_list
 
-def get_bait_cols(df_list):
+def get_bait_cols(df_list, signal_keyword = "Background-Adjusted_Signal", call_keyword = "call"):
     '''
     Function to get a dictionary of baits and their corresponding lists of column names holding signal values
 
@@ -55,10 +55,10 @@ def get_bait_cols(df_list):
     for df in df_list:
         all_cols = list(df.columns)
         for col in all_cols:
-            if "Background-Adjusted_Signal" in col:
+            if signal_keyword in col:
                 bait_name = col.split("_")[0]
                 dict_value_append(bait_signal_cols, bait_name, col, duplicates_allowed = False)
-            elif "call" in col:
+            elif call_keyword in col:
                 bait_name = col.split("_")[0]
                 bait_pass_cols[bait_name] = col
 

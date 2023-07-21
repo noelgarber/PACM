@@ -3,7 +3,6 @@
 import numpy as np
 import pandas as pd
 import math
-from general_utils.general_utils import input_number
 
 def standardize_dataframe(df, controls_list, bait_cols_dict, probe_control_name = None):
     '''
@@ -12,12 +11,13 @@ def standardize_dataframe(df, controls_list, bait_cols_dict, probe_control_name 
     Args:
         df (pd.DataFrame): the dataframe to standardize
         controls_list (list): list containing the control peptide names
-        bait_cols_dict (dict): a dictionary where each key-value pair is a bait name and a list of columns pointing to background-adjusted values for that bait
+        bait_cols_dict (dict): a dictionary where each key-value pair is a bait name and a list of columns pointing to
+                               background-adjusted values for that bait
         probe_control_name (str): the name of the control probe, which will be omitted when standardizing
 
     Returns:
-        output_df (pd.DataFrame): a new dataframe that has been standardized according to the controls
-        peptide_controls_supermean (float): the mean of controls across all baits
+        output_df (pd.DataFrame):   a new dataframe that has been standardized according to the controls
+        total_mean_control (float): the mean of peptide controls across all baits except the probe control
     '''
 
     if probe_control_name is None:
@@ -25,50 +25,30 @@ def standardize_dataframe(df, controls_list, bait_cols_dict, probe_control_name 
 
     output_df = df.copy()
 
-    # Make a dict where control_name --> corresponding row index in the dataframe
-    controls_indices = {}
-    for control in controls_list:
-        control_indices = output_df.index[output_df["Peptide_Name"]==control].tolist()
-        control_index = control_indices[0] # Takes the first instance
-        controls_indices[control] = control_index
+    # Get the mini-dataframe containing control rows
+    peptide_names_list = output_df["Peptide_Name"].tolist()
+    peptide_names_indexer = pd.Index(peptide_names_list)
+    control_row_indices = peptide_names_indexer.get_indexer_for(controls_list)
 
-    # Make a dict where bait_name --> mean of controls in all corresponding columns
-    bait_controls_means = {}
+    # Extract the bait cols that do not belong to the probe control, which is excluded from standardization
+    bait_cols_list = []
     for bait, cols in bait_cols_dict.items():
         if bait != probe_control_name:
-            bait_controls_values = []
-            for control_index in controls_indices.values():
-                bait_control_values = [output_df.at[control_index, col] for col in cols]
-                bait_controls_values.extend(bait_control_values)
-            bait_control_mean = np.array(bait_controls_values).mean()
-            bait_controls_means[bait] = bait_control_mean
+            bait_cols_list.extend(cols)
 
-    # Get mean of controls for all baits, excluding the control bait
-    peptide_controls_supermean = np.array(list(bait_controls_means.values())).mean()
+    # Calculate the mean control values across columns and overall
+    control_df = output_df.iloc[control_row_indices]
+    control_values = control_df[bait_cols_list].to_numpy()
+    mean_control_values = control_values.mean(axis=0)
+    total_mean_control = control_values.mean()
 
-    # Standardize dataframe
-    for bait, cols in bait_cols_dict.items():
-        # Check that the bait is an actual bait and not the control bait
-        if bait != probe_control_name:
-            # Iterate over the columns belonging to the current bait and standardize each one
-            for col in cols:
-                # Define the control values for this column
-                peptide_control_values = []
-                for control_index in controls_indices.values():
-                    peptide_control_value = output_df.at[control_index, col]
-                    peptide_control_values.append(peptide_control_value)
-                peptide_control_values = np.array(peptide_control_values)
+    # Loop over the columns to standardize them
+    divisors = mean_control_values / total_mean_control
+    current_array = output_df[bait_cols_list].to_numpy()
+    adjusted_array = current_array / divisors
+    output_df[bait_cols_list] = adjusted_array
 
-                # Find the mean of the control values in the column
-                peptide_controls_mean_in_col = peptide_control_values.mean()
-
-                # Calculate the multiplier to standardize, resulting in control value(s) equalling control supermean
-                multiplier = peptide_controls_supermean / peptide_controls_mean_in_col
-
-                # Apply the standardization using the multiplier
-                output_df[col] = output_df[col] * multiplier
-
-    return output_df, peptide_controls_supermean
+    return output_df, total_mean_control
 
 def log2fc(val1, val2, increment_avoid_inf = 0.01):
     '''
