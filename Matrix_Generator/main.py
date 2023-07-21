@@ -7,9 +7,7 @@ from Matrix_Generator.standardize_and_concatenate import main_workflow as standa
 from Matrix_Generator.make_pairwise_matrices import main as make_pairwise_matrices
 from Matrix_Generator.make_specificity_matrices import main as make_specificity_matrix
 
-def get_data(output_folder = None, add_peptide_seqs = True,
-             peptide_seq_cols = ["Phos_Sequence", "No_Phos_Sequence", "BJO_Sequence"], buffer_width = None,
-             verbose = False):
+def get_data(image_params = image_params, output_folder = None, verbose = False):
     # Helper function to get quantified SPOT peptide array image data
 
     # Get output folder if not provided
@@ -19,9 +17,7 @@ def get_data(output_folder = None, add_peptide_seqs = True,
 
     # Get the standardized concatenated dataframe containing all of the quantified peptide spot data
     print("Processing and standardizing the SPOT image data...") if verbose else None
-    data_df, percentiles_dict = standardized_concatenate(predefined_batch = True, add_peptide_seqs = add_peptide_seqs,
-                                                         peptide_seq_cols = peptide_seq_cols,
-                                                         buffer_width = buffer_width)
+    data_df, percentiles_dict = standardized_concatenate(image_params)
     reindexed_data_df = data_df.reset_index(drop = False)
     reindexed_data_df.to_csv(os.path.join(output_folder, "standardized_and_concatenated_data.csv"))
 
@@ -69,14 +65,9 @@ def main(image_params = image_params, general_params = general_params, data_para
         with open(cached_data_path, "rb") as f:
             data_df, percentiles_dict = pickle.load(f)
     else:
-        # Define necessary arguments for getting data
-        add_peptide_seqs, peptide_seq_cols = image_params.get("add_peptide_seqs"), image_params.get("peptide_seq_cols")
-        buffer_width = image_params.get("buffer_width")
-
         # Obtain and quantify the data
         image_output_folder = image_params.get("output_folder")
-        data_df, percentiles_dict = get_data(image_output_folder, add_peptide_seqs, peptide_seq_cols, buffer_width,
-                                             verbose)
+        data_df, percentiles_dict = get_data(image_params, image_output_folder, verbose)
 
         # Optionally save pickled quantified data for future runs
         save_pickled_data = image_params.get("save_pickled_data")
