@@ -211,7 +211,7 @@ def get_sigmoid(x, k, inflection):
 
     if x < 0:
         y = y * -1 # apply original sign of x
-        
+
     return y
 
 def apply_sigmoid(matrix_df, strength = 1, inflection = 0.5):
