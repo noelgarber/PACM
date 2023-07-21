@@ -204,10 +204,14 @@ class ConditionalMatrix:
 
 def get_sigmoid(x, k, inflection):
     # Basic function that applies a sigmoid function to x value
+
     base_value = 1 / (1 + e ** (k * inflection))
     upper_value = 1 / (1 + e ** (-k * (1 - inflection))) - base_value
     y = (1 / (1 + e ** (-k * (abs(x) - inflection))) - base_value) / upper_value
-    y = y * (x/abs(x)) # apply original sign of x
+
+    if x < 0:
+        y = y * -1 # apply original sign of x
+        
     return y
 
 def apply_sigmoid(matrix_df, strength = 1, inflection = 0.5):
