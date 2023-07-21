@@ -7,7 +7,7 @@ from general_utils.general_utils import input_number
 
 def standardize_dataframe(df, controls_list, bait_cols_dict, probe_control_name = None):
     '''
-    Define a function that standardizes dataframes according to a list of controls, across a set of columns
+    Function that standardizes dataframes according to a list of controls, across a set of columns
 
     Args:
         df (pd.DataFrame): the dataframe to standardize
@@ -16,21 +16,23 @@ def standardize_dataframe(df, controls_list, bait_cols_dict, probe_control_name 
         probe_control_name (str): the name of the control probe, which will be omitted when standardizing
 
     Returns:
-        standardized_df (pd.DataFrame): a new dataframe that has been standardized according to the controls
+        output_df (pd.DataFrame): a new dataframe that has been standardized according to the controls
+        peptide_controls_supermean (float): the mean of controls across all baits
     '''
+
     if probe_control_name is None:
-        probe_control_name = input("Please enter the name of the probe control to omit from the standardization algorithm (e.g. Secondary-only): ")
+        probe_control_name = input("Probe control to omit from the standardization algorithm (e.g. Secondary-only): ")
 
     output_df = df.copy()
 
-    # Make a dict where control_name => corresponding row index in the dataframe
+    # Make a dict where control_name --> corresponding row index in the dataframe
     controls_indices = {}
     for control in controls_list:
-        control_indices = output_df.index[output_df["Peptide_Name"]==control].tolist() # Gets the list of indices matching the current control name
+        control_indices = output_df.index[output_df["Peptide_Name"]==control].tolist()
         control_index = control_indices[0] # Takes the first instance
         controls_indices[control] = control_index
 
-    # Make a dict where bait_name => mean of controls in all corresponding columns
+    # Make a dict where bait_name --> mean of controls in all corresponding columns
     bait_controls_means = {}
     for bait, cols in bait_cols_dict.items():
         if bait != probe_control_name:
@@ -60,7 +62,7 @@ def standardize_dataframe(df, controls_list, bait_cols_dict, probe_control_name 
                 # Find the mean of the control values in the column
                 peptide_controls_mean_in_col = peptide_control_values.mean()
 
-                # Calculate the multiplier to standardize, which will result in the control value equalling the control supermean
+                # Calculate the multiplier to standardize, resulting in control value(s) equalling control supermean
                 multiplier = peptide_controls_supermean / peptide_controls_mean_in_col
 
                 # Apply the standardization using the multiplier
@@ -215,14 +217,18 @@ def find_max_bait_signal(input_df, bait_cols_dict, control_probe_name,
     Function for finding the max bait signal, averaged accross replicates, of any of the baits (excluding control)
 
     Args:
-        input_df (pd.DataFrame): the input dataframe to test
-        bait_col_dict (dict): a dictionary where each key-value pair is a bait name and a list of columns pointing to background-adjusted values for that bait
-        control_probe_name (str): the name of the control probe)
+        input_df (pd.DataFrame):        the input dataframe to test
+        bait_col_dict (dict):           a dictionary where each key-value pair is a bait name and a list of columns pointing
+                                        to background-adjusted values for that bait
+        control_probe_name (str):       the name of the control probe
+        max_bait_mean_col (str):        the destination column name for assigning max bait signal values
+        return_percentiles_dict (bool): whether to return a dict of signal value percentiles
 
     Returns:
-        output_df (pd.DataFrame): the dataframe with the "Max_Bait_Background-Adjusted_Mean" column added
-        percentiles_dict (dict): optional dict containing calculated signal percentiles from 1st to 99th
+        output_df (pd.DataFrame):       the dataframe with the "Max_Bait_Background-Adjusted_Mean" column added
+        percentiles_dict (dict):        optional dict containing calculated signal percentiles from 1st to 99th
     '''
+
     # Make a copy of the input dataframe
     output_df = input_df.copy()
 
@@ -271,7 +277,7 @@ def get_bait_pairs(list_of_baits):
 
     return bait_pairs
 
-def apply_log2fc(data_df, bait_cols_dict, bait_pass_cols, control_probe_name, control_multiplier = None):
+def apply_log2fc(data_df, bait_cols_dict, bait_pass_cols, control_probe_name, control_multiplier):
     '''
     Function for applying the conditional_log2fc() function to a dataframe
 
@@ -288,8 +294,6 @@ def apply_log2fc(data_df, bait_cols_dict, bait_pass_cols, control_probe_name, co
     Returns:
         data_df (pd.DataFrame): a dataframe with the log2fc columns added for comparing each bait-bait pair
     '''
-    if control_multiplier is None:
-        control_multiplier = input_number(prompt = "\tEnter a control multiplier for testing if hits are above this multiple (recommended between 2 and 5):  ", mode = "float")
 
     list_of_baits = []
     for key in bait_cols_dict.keys():
@@ -303,40 +307,48 @@ def apply_log2fc(data_df, bait_cols_dict, bait_pass_cols, control_probe_name, co
         data_df = conditional_log2fc(input_df = data_df, bait_pair = bait_pair, control_signal_cols = control_signal_cols,
                                      bait1_signal_cols = bait1_signal_cols, bait2_signal_cols = bait2_signal_cols,
                                      pass_cols = bait_pass_cols, control_multiplier = control_multiplier)
-    return data_df, control_multiplier
+    return data_df
 
-def main_processing(data_df, controls_list, bait_cols_dict, bait_pass_cols, control_probe_name, control_multiplier = None, df_standardization = True):
+def main_processing(data_df, controls_list, bait_cols_dict, bait_pass_cols, control_probe_name, control_multiplier,
+                    max_bait_mean_col = "Max_Bait_Background-Adjusted_Mean", df_standardization = True,
+                    return_percentiles = False):
     '''
     Main function for processing array data
 
     Args:
-        data_df (pd.DataFrame): the dataframe to standardize
-        controls_list (list): list containing the control peptide names
-        bait_cols_dict (dict): a dictionary where each key-value pair is a bait name and a list of columns pointing to background-adjusted values for that bait
-        bait_pass_cols (dict): dictionary where bait name --> column name holding significance calls based on ellipsoid_index
-        control_probe_name (str): the name of the control probe)
+        data_df (pd.DataFrame):     the dataframe to standardize
+        controls_list (list):       list containing the control peptide names
+        bait_cols_dict (dict):      dict where each key-value pair is a bait name and a list of columns pointing
+                                    to background-adjusted values for that bait
+        bait_pass_cols (dict):      bait name --> column name holding significance calls based on ellipsoid_index
+        control_probe_name (str):   the name of the control probe)
+        control_multiplier (float): multiplier of control values for significance testing
+        max_bait_mean_col (str):    the destination column name for assigning max bait signal values
+        df_standardization (bool):  whether to standardize the dataframe to control(s)
+        return_percentiles (bool):  whether to return a dict of signal value percentiles
 
     Returns:
         output_df (pd.DataFrame): the intra-dataset standardized dataframe with log2fc and significance columns
         percentiles_dict (dict): optional dict containing calculated signal percentiles from 1st to 99th
     '''
+
     output_df = data_df.copy()
 
     # Standardize the input dataframe
     if df_standardization:
-        output_df, _ = standardize_dataframe(df = output_df, controls_list = controls_list, bait_cols_dict = bait_cols_dict, probe_control_name = control_probe_name)
+        output_df, _ = standardize_dataframe(output_df, controls_list, bait_cols_dict, control_probe_name)
 
-    # Calculate log2fc conditionally for each pair of baits, if at least one bait passes the ellipsoid_index test and exceeds the control
-    output_df, control_multiplier = apply_log2fc(data_df = output_df, bait_cols_dict = bait_cols_dict,
-                                                 bait_pass_cols = bait_pass_cols, control_probe_name = control_probe_name,
-                                                 control_multiplier = control_multiplier)
+    # Calculate log2fc conditionally for each bait pair, if >1 bait passes the ellipsoid_index test and exceeds control
+    output_df = apply_log2fc(output_df, bait_cols_dict, bait_pass_cols, control_probe_name, control_multiplier)
 
     # Check if each hit passes significance for at least one bait
-    output_df = one_passes(input_df = output_df, bait_cols_dict = bait_cols_dict, bait_pass_cols = bait_pass_cols,
-                           control_probe_name = control_probe_name, control_multiplier = control_multiplier)
+    output_df = one_passes(output_df, bait_cols_dict, bait_pass_cols, control_probe_name, control_multiplier)
 
     # Create a column containing the maximum value across baits for the mean background-adjusted signal
-    output_df, percentiles_dict = find_max_bait_signal(input_df = output_df, bait_cols_dict = bait_cols_dict,
-                                                       control_probe_name = control_probe_name, return_percentiles_dict = True)
+    output_df, percentiles_dict = find_max_bait_signal(output_df, bait_cols_dict, control_probe_name, max_bait_mean_col,
+                                                       return_percentiles_dict = True)
 
-    return output_df, percentiles_dict
+    if return_percentiles:
+        return output_df, percentiles_dict
+    else:
+        return output_df

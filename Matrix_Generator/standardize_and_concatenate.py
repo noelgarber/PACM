@@ -1,91 +1,40 @@
 import numpy as np
 import pandas as pd
 import os
-from general_utils.general_utils import list_inputter, dict_value_append, input_number
-from Matrix_Generator.image_prep import main_preprocessing as preprocess_images
-from Matrix_Generator.image_prep import get_grid_dimensions, declare_output_dirs
+from general_utils.general_utils import dict_value_append
+from Matrix_Generator.image_prep import image_preprocessing as preprocess_images
 from Matrix_Generator.general_processing.process_arrays import main_processing as process_arrays
 from Matrix_Generator.general_processing.process_arrays import find_max_bait_signal
+from Matrix_Generator.config import image_params
 
-def get_image_dirs_dims():
-    # Declare probe order
-    print("For ordering the resulting data from each inputted directory, please enter the probe order; omit probes you wish to drop.")
-    probe_order = list_inputter("Next probe: ")
-
-    print("For each directory containing a set of TIFF images, please provide the following information.", "\n---")
-    no_more_entries = False
-    output_dict = {}
-    while not no_more_entries:
-        # Declare source image directory and grid dimensions
-        image_directory = input("Directory where TIFF images are stored: ")
-        if image_directory != "":
-            # Get grid dimensions (number of spots in width, number of spots in height)
-            grid_dims = get_grid_dimensions(verbose = False)
-
-            # Declare path to peptide names
-            peptide_names_path = input("Directory where (coordinates --> peptide names) are stored as a CSV file (hit enter when done): ")
-
-            # Declare output directory
-            parent_dir = input("Directory where outlined images for this dataset should be deposited: ")
-            output_dirs = declare_output_dirs(parent_directory=parent_dir)
-
-            # Declare significance threshold for ellipsoid index
-            ei_sig_thres = input_number("Enter the ellipsoid index significance threshold (e.g. 1.5): ", mode = "float")
-
-            # Get the last valid alphanumeric coordinate for the set
-            last_coord = input("Enter the last valid alphanumeric spot coordinate after which data should be dropped (leave blank to skip):  ")
-            if last_coord == "":
-                last_coord = None
-
-            # Assign to dict
-            value_tuple = (grid_dims, output_dirs, peptide_names_path, ei_sig_thres, probe_order, last_coord)
-            output_dict[image_directory] = value_tuple
-
-            print("---")
-        else:
-            print("Done inputting dataset info", "\n---")
-            no_more_entries = True
-
-    return output_dict
-
-def preprocess_list(image_directory_dims_dict = None, add_peptide_seqs = False, peptide_seq_cols = None,
-                    ending_coord = None, arbitrary_coords_to_drop = None, buffer_width = None):
+def preprocess_list(image_params = image_params, arbitrary_coords_to_drop = None):
     '''
     Function to preprocess a list of images
 
     Args:
-        image_directory_dims_dict (dict): dictionary where source_directory -->
-                                          (grid_dims, output_dirs, pep_names_path, ei_thres, probe_order, last_coord)
+        image_params (dict):             image processing parameters as described in config.py
+        arbitrary_coords_to_drop (list): alphanumeric spot coords to ignore
 
     Returns:
         df_list (list): list of preprocessed dataframes
     '''
-    if image_directory_dims_dict is None:
-        no_more_sets = False
-        df_list = []
-        while not no_more_sets:
-            df = preprocess_images(multiline_cols = False, add_peptide_seqs = add_peptide_seqs,
-                                   peptide_seq_cols = peptide_seq_cols, ending_coord = ending_coord,
-                                   arbitrary_coords_to_drop = arbitrary_coords_to_drop, buffer_width = buffer_width,
-                                   verbose = False)
-            df_list.append(df)
-            print("----------------------------------------------------------------")
-            add_another_df = input("Would you like to process another set of images? (Y/N)  ")
-            if add_another_df != "Y" and add_another_df != "y":
-                no_more_sets = True
-    else:
-        df_list = []
-        for i, (image_directory, value_tuple) in enumerate(image_directory_dims_dict.items()):
-            print(f"Processing data in {image_directory}")
-            grid_dims, output_dirs_dict, names_dir, ei_thres, probe_order, last_coord = value_tuple
-            df = preprocess_images(image_directory = image_directory, spot_grid_dimensions = grid_dims,
-                                   output_dirs = output_dirs_dict, peptide_names_path = names_dir,
-                                   ellipsoid_index_thres = ei_thres, probes_ordered = probe_order,
-                                   multiline_cols = False, add_peptide_seqs = add_peptide_seqs,
-                                   peptide_seq_cols = peptide_seq_cols, ending_coord = last_coord,
-                                   arbitrary_coords_to_drop = arbitrary_coords_to_drop, verbose = False)
-            df = df.rename(index = lambda x: str(i+1) + "-" + x)
-            df_list.append(df)
+
+    # Get zippable lists of params for sets of images and zip them into an interable object
+    input_image_paths = image_params["tiff_paths"]
+    input_grid_dims = image_params["grid_dimensions"]
+    output_paths = image_params["processed_image_paths"]
+    peptide_names_paths = image_params["peptide_names_paths"]
+    last_valid_coords = image_params["last_valid_coords"]
+
+    zipped_sets = zip(input_image_paths, input_grid_dims, output_paths, peptide_names_paths, last_valid_coords)
+
+    # Iterate through the zipped image quantification params and construct a list of dataframes, one for each set
+    df_list = []
+    for i, (input_path, grid_dims, output_path, peptide_names_path, ending_coord) in enumerate(zipped_sets):
+        df = preprocess_images(input_path, output_path, image_params, grid_dims, peptide_names_path, ending_coord,
+                               arbitrary_coords_to_drop, verbose = False)
+        df = df.rename(index = lambda x: str(i + 1) + "-" + x)
+        df_list.append(df)
 
     return df_list
 
@@ -97,62 +46,79 @@ def get_bait_cols(df_list):
         df_list (list): list of dataframes
 
     Returns:
-        bait_cols_dict (dict): a dictionary of bait names --> lists of column names holding background-adjusted signals
-        bait_calls_cols_dict (dict): a dictionary of bait names --> column names holding significance calls
+        bait_signal_cols (dict): bait names --> lists of column names holding background-adjusted signals
+        bait_pass_cols (dict):   bait names --> column names holding significance calls
     '''
-    bait_cols_dict = {} # dict containing column names with signal values
-    bait_calls_cols_dict = {} # dict containing column names with significance calls
+
+    bait_signal_cols = {} # dict containing column names with signal values
+    bait_pass_cols = {} # dict containing column names with significance calls
     for df in df_list:
         all_cols = list(df.columns)
         for col in all_cols:
             if "Background-Adjusted_Signal" in col:
                 bait_name = col.split("_")[0]
-                dict_value_append(bait_cols_dict, bait_name, col)
+                dict_value_append(bait_signal_cols, bait_name, col, duplicates_allowed = False)
             elif "call" in col:
                 bait_name = col.split("_")[0]
-                bait_calls_cols_dict[bait_name] = col
+                bait_pass_cols[bait_name] = col
 
-    return bait_cols_dict, bait_calls_cols_dict
+    return bait_signal_cols, bait_pass_cols
 
-def standardize_within_dataset(df_list, control_probe_name, control_multiplier = None):
-    standardize_within = input("Standardize within datasets using control peptides? (Y/N)  ")
+def standardize_within_dataset(df_list, image_params = image_params):
+    '''
+    Function to internally standardize each dataframe to defined positive control(s), and also applies bait-bait log2fc
+    values and significance calls afterwards
 
-    if control_multiplier is None:
-        control_multiplier = input_number(prompt = "\tEnter a control multiplier for testing if hits are above this multiple (recommended between 2 and 5):  ", mode = "float")
+    Args:
+        df_list (list):          list of dataframes containing quantified image data
+        image_params (dict):     image quantification parameters as defined in config.py
+
+    Returns:
+        output_df_list (list):   internally standardized list of dataframes
+        bait_signal_cols (dict): dictionary of bait --> [signal column names]
+    '''
+
+    standardize_within = image_params["standardize_within_datasets"]
+    control_multiplier = image_params["control_multiplier"]
+    control_probe_name = image_params["control_probe_name"]
+
+    bait_signal_cols, bait_pass_cols = get_bait_cols(df_list = df_list)
+
+    controls_list = image_params["intra_dataset_controls"]
+    max_bait_mean_col = image_params["max_bait_mean_col"]
 
     output_df_list = []
-    percentiles_dict_list = []
-    bait_cols_dict, bait_calls_cols_dict = get_bait_cols(df_list=df_list)
+    for df in df_list:
+        output_df = process_arrays(df, controls_list, bait_signal_cols, bait_pass_cols, control_probe_name,
+                                   control_multiplier, max_bait_mean_col, standardize_within, return_percentiles=False)
+        output_df_list.append(output_df)
 
-    if standardize_within == "Y" or standardize_within == "y":
-        controls_list = list_inputter("\tEnter next control: ")
-        for df in df_list:
-            output_df, percentiles_dict = process_arrays(data_df = df, controls_list = controls_list, bait_cols_dict = bait_cols_dict,
-                                                         bait_pass_cols = bait_calls_cols_dict, control_probe_name = control_probe_name,
-                                                         control_multiplier = control_multiplier, df_standardization = True)
-            output_df_list.append(output_df)
-            percentiles_dict_list.append(percentiles_dict)
-    else:
-        for df in df_list:
-            output_df, percentiles_dict = process_arrays(data_df = df, controls_list = None, bait_cols_dict = bait_cols_dict,
-                                                         bait_pass_cols = bait_calls_cols_dict, control_probe_name = control_probe_name,
-                                                         control_multiplier = control_multiplier, df_standardization = False)
-            output_df_list.append(output_df)
-            percentiles_dict_list.append(percentiles_dict)
+    return output_df_list, bait_signal_cols
 
-    return output_df_list, percentiles_dict_list, bait_cols_dict
+def standardize_between_datasets(df_list, image_params):
+    '''
+    Function to standardize dataframes to each other using a defined positive control
 
-def standardize_by_control(df_list):
+    Args:
+        df_list (list):          list of dataframes containing quantified image data
+        image_params (dict):     image quantification parameters as defined in config.py
+
+    Returns:
+        df_list (list):          the inter-dataset standardized dataframes
+    '''
+
     # Standardize the signal across sets
-    standardize = input("Would you like to standardize the data between sets using a common control? (Y/N)  ")
-    if standardize == "Y" or standardize == "y":
-        control_name = input("\tEnter the name of the control:  ")
+    standardize_between = image_params["standardize_between_datasets"]
+
+    if standardize_between:
+        control_name = image_params["inter_dataset_control"]
 
         # Define a dictionary for the mean control values in each dataframe
         control_means = {}
-        bas_cols_list_dict = {}
+        bas_cols_list_dict = {} # bas = background-adjusted signal
+
         for i, df in enumerate(df_list):
-            # Get a list of background-adjusted signal controls
+            # Get a list of background-adjusted signal columns
             cols_list = list(df.columns)
             bas_cols_list = []
             for col in cols_list:
@@ -160,7 +126,7 @@ def standardize_by_control(df_list):
                     bas_cols_list.append(col)
             bas_cols_list_dict[i] = bas_cols_list
 
-            # Get mean control value
+            # Get the background-adjusted, intra-dataset standardized control values for all control rows in the df
             df_control_values = []
             for j in np.arange(len(df)):
                 index_value = str(df.index[j])
@@ -178,9 +144,11 @@ def standardize_by_control(df_list):
                     # Add this list to the larger control values list
                     df_control_values.extend(row_control_values)
 
+            # Get mean control value
             df_control_values = np.array(df_control_values)
             df_mean_control = df_control_values.mean()
             control_means[i] = df_mean_control
+
         # Get the mean of mean control values and enforce it across dataframes
         control_means_values = np.array(list(control_means.values()))
         control_super_mean = control_means_values.mean()
@@ -196,35 +164,28 @@ def standardize_by_control(df_list):
                 vals = df.pop(bas_std_col)
                 df.insert(bas_col_loc+1, bas_std_col, vals)
             df_list[i] = df
+
     return df_list
 
 # Perform image pre-processing, quantified data processing, standardization, and concatenation
-def main_workflow(predefined_batch = True, add_peptide_seqs = False, peptide_seq_cols = None, buffer_width = None):
+def main_workflow(image_params = image_params):
     # Preprocess the sets of images
-    if predefined_batch:
-        image_dirs_dims_dict = get_image_dirs_dims()
-        df_list = preprocess_list(image_directory_dims_dict = image_dirs_dims_dict, add_peptide_seqs = add_peptide_seqs,
-                                  peptide_seq_cols = peptide_seq_cols, buffer_width = buffer_width)
-    else:
-        df_list = preprocess_list(add_peptide_seqs = add_peptide_seqs, peptide_seq_cols = peptide_seq_cols,
-                                  buffer_width = buffer_width)
+    df_list = preprocess_list(image_params)
 
     # Intra-Group Standardization to enforce consistent controls between baits, along with comparative processing
-    control_probe_name = input("For comparative processing, enter the name of the probe control (e.g. \"Secondary-only\"): ")
-    control_multiplier = input_number(prompt = "\tEnter a control multiplier for testing if hits are above this multiple (recommended between 2 and 5):  ", mode = "float")
-    intraset_standardized_df_list, percentiles_dict_list, bait_cols_dict = standardize_within_dataset(df_list = df_list, control_probe_name = control_probe_name,
-                                                                                                      control_multiplier = control_multiplier)
+    intraset_standardized_df_list, bait_cols_dict = standardize_within_dataset(df_list, image_params)
 
     # Inter-Group Standardization to enforce a consistent shared control between datasets
-    standardized_df_list = standardize_by_control(df_list = intraset_standardized_df_list)
+    standardized_df_list = standardize_between_datasets(intraset_standardized_df_list, image_params)
 
     # Concatenate the dataframes together
     concatenated_df = pd.concat(standardized_df_list, axis=0)
-    
+
     # Find the percentiles of the concatenated df
-    _, concatenated_percentiles_dict = find_max_bait_signal(input_df = concatenated_df, bait_cols_dict = bait_cols_dict,
-                                                            control_probe_name = control_probe_name, max_bait_mean_col = "Max_Bait_Standardized_Mean",
-                                                            return_percentiles_dict = True)
+    max_bait_mean_col = image_params["max_bait_mean_col"]
+    control_probe_name = image_params["control_probe_name"]
+    _, concatenated_percentiles_dict = find_max_bait_signal(concatenated_df, bait_cols_dict, control_probe_name,
+                                                            max_bait_mean_col, return_percentiles_dict = True)
 
     return concatenated_df, concatenated_percentiles_dict
 

@@ -11,6 +11,7 @@ import pandas as pd
 import os
 from general_utils.general_utils import input_number, csv_to_dict, dict_value_append
 from Matrix_Generator.image_processing.SpotArray import SpotArray
+from Matrix_Generator.config import image_params
 from tifffile import imwrite
 
 def get_grid_dimensions(verbose = True):
@@ -21,14 +22,14 @@ def get_grid_dimensions(verbose = True):
     print("-----------------------") if verbose else None
     return spot_grid_dimensions
 
-def load_spot_arrays(filenames_list, image_directory, spot_grid_dimensions, pixel_log_base = 1, ending_coord = None,
+def load_spot_arrays(filenames_list, image_folder, spot_grid_dimensions, pixel_log_base = 1, ending_coord = None,
                      arbitrary_coords_to_drop = None, buffer_width = 0, verbose = True):
     '''
     Function to load a set of SpotArray objects and return them as a list
 
     Args:
         filenames_list (list):           list of filenames containing spot array images
-        image_directory (str):           the directory where the filenames are stored
+        image_folder (str):           the directory where the filenames are stored
         spot_grid_dimensions (tuple):    the tuple of (number of spots wide, number of spots tall)
         pixel_log_base (int):            the base for linearizing the pixel encoding, if a logarithmic encoding was used
         ending_coord (str):              the last alphanumeric coordinate that represents a sample peptide,
@@ -44,7 +45,7 @@ def load_spot_arrays(filenames_list, image_directory, spot_grid_dimensions, pixe
     spot_arrays = []
     for filename in filenames_list:
         print("\tLoading", filename) if verbose else None
-        file_path = os.path.join(image_directory, filename)
+        file_path = os.path.join(image_folder, filename)
 
         # Extract metadata from filename
         filename_elements = filename.split("_")
@@ -126,13 +127,23 @@ def assign_data_values(data_df, spot_arrays, multiline_cols = True):
     # Return dicts of column names
     return uas_cols_dict, bas_cols_dict, ei_cols_dict, new_cols_dict
 
-def write_images(output_dirs, spot_arrays):
+def write_images(parent_output_path, spot_arrays):
+    # Simple function to save spot images to output folders
+
+    linear_folder = os.path.join(parent_output_path, "linear_images")
+    if not os.path.exists(linear_folder):
+        os.makedirs(linear_folder)
+
+    outlined_folder = os.path.join(parent_output_path, "outlined_spot_images")
+    if not os.path.exists(outlined_folder):
+        os.makedirs(outlined_folder)
+
     for spot_array in spot_arrays:
         #Save modified image
-        linear_directory = os.path.join(output_dirs.get("rlt_output"), "Copy" + str(spot_array.copy_number) + "_" + spot_array.probe_name + "_linear.tif")
+        linear_directory = os.path.join(linear_folder, "Copy" + str(spot_array.copy_number) + "_" + spot_array.probe_name + "_linear.tif")
         imwrite(linear_directory, spot_array.linear_array)
 
-        outlined_directory = os.path.join(output_dirs.get("outlined_output"), "Copy" + str(spot_array.copy_number) + "_" + spot_array.probe_name + "_outlined.tif")
+        outlined_directory = os.path.join(outlined_folder, "Copy" + str(spot_array.copy_number) + "_" + spot_array.probe_name + "_outlined.tif")
         imwrite(outlined_directory, spot_array.outlined_image)
 
 def get_probe_order(probes_list):
@@ -152,9 +163,23 @@ def get_probe_order(probes_list):
         probes_ordered = probes_list
     return probes_ordered
 
-def prepare_sorted_cols(data_df, probes_ordered, cols_dict):
+def prepare_sorted_cols(data_df, probes_ordered, cols_dict, seqs_cols):
+    '''
+    Function to sort the dataframe by bait (probe) protein
+
+    Args:
+        data_df (pd.DataFrame): the dataframe to sort
+        probes_ordered (list):  ordered list of probes
+        cols_dict (dict):       dict of cols by probe
+        seqs_cols (list):       list of column names for peptide seqs
+
+    Returns:
+
+    '''
+
     sorted_cols = ["Peptide_Name"] # Adds a column to receive peptide names later
-    data_df.insert(0, "Peptide_Name", "")
+    sorted_cols.extend(seqs_cols)
+
     for current_probe in probes_ordered:
         col_tuples = cols_dict.get(current_probe)
         col_tuples = sorted(col_tuples, key = lambda x: x[0]) #Sorts by copy number
@@ -168,16 +193,83 @@ def prepare_sorted_cols(data_df, probes_ordered, cols_dict):
 
     # Sort dataframe
     data_df = data_df[sorted_cols]
+
     return data_df
 
-def significance_testing(data_df, ei_cols_dict, probes_ordered, ei_sig_thres = None):
-    if ei_sig_thres is None:
-        ei_sig_thres = input_number(prompt = "Enter the ellipsoid index threshold above which a hit is considered significant:  ", mode = "float")
+def call_positives(data_df, bas_cols_dict, ei_cols_dict, image_params = image_params):
+    '''
+    Function that assigns passes in-place in the dataframe based on the ellipsoid index and signal values
 
+    Args:
+        data_df (pd.DataFrame):  input dataframe with quantified spot image data
+        bas_cols_dict (dict):    dictionary of probe --> [background-adjusted signal columns]
+        ei_cols_dict (dict):     dictionary of probe --> [ellipsoid index columns]
+        image_params (dict):     image params as defined in config.py
+
+    Returns:
+        None; operation is performed in-place
+    '''
+
+    # Get arguments out of image params
+    enforce_control_multiple = image_params["enforce_positive_control_multiple"]
+    positive_control = image_params["positive_control"]
+    positive_control_multiple = image_params["positive_control_multiple"]
+
+    ei_sig_thres = image_params["circle_index_threshold"]
+
+    bait_control_name = image_params["control_probe_name"]
+    bait_control_multiplier = image_params["control_multiplier"]
+
+    probes_ordered = image_params["ordered_probe_names"]
+
+    # Get positive control row index if enforcing a multiple of the control
+    if enforce_control_multiple and positive_control is None:
+        positive_control_index = data_df.index[0]
+    elif enforce_control_multiple:
+        peptide_names = data_df["Peptide_Name"].to_numpy()
+        positive_control_index = np.nanargmax(peptide_names == positive_control)
+    else:
+        positive_control_index = None
+
+    # Loop through probes and test for whether they pass as positives
     for current_probe in probes_ordered:
         call_col = current_probe + "_call"
-        ei_cols = ei_cols_dict.get(current_probe)
-        data_df[call_col] = data_df.apply(lambda x: "Pass" if (x[ei_cols] > ei_sig_thres).all() else "", axis = 1)
+        bas_cols = bas_cols_dict[current_probe]
+        ei_cols = ei_cols_dict[current_probe]
+
+        if enforce_control_multiple:
+            # Test signals against a positive control peptide along with testing ellipsoid index
+            positive_control_dict = data_df.iloc[positive_control_index].to_dict()
+            positive_control_bas_values = []
+            for bas_col in bas_cols:
+                positive_control_bas_values.append(positive_control_dict.get(bas_col))
+            positive_control_bas_values = np.array(positive_control_bas_values)
+            positive_control_bas_mean = positive_control_bas_values.mean()
+            minimum_signal = positive_control_multiple * positive_control_bas_mean
+            test = lambda x: "Pass" if np.logical_and(np.greater_equal(x[bas_cols].values, minimum_signal).all(),
+                                                      np.greater_equal(x[ei_cols].values, ei_sig_thres).all()) else ""
+        else:
+            # Test only ellipsoid index
+            test = lambda x: "Pass" if np.greater_equal(x[ei_cols].values, ei_sig_thres).all() else ""
+
+        data_df[call_col] = data_df.apply(test, axis = 1)
+
+    # Also test whether the signal values are above a defined multiple of the bait control (e.g. Secondary-only)
+    bait_control_bas_cols = bas_cols_dict[bait_control_name]
+    bait_control_bas_means = data_df[bait_control_bas_cols].to_numpy().mean(axis=1)
+    minimum_bas_means = bait_control_bas_means * bait_control_multiplier
+
+    for current_probe in probes_ordered:
+        exceeds_control_col = current_probe + "_exceeds_" + str(bait_control_multiplier) + "x_control"
+        current_bas_cols = bas_cols_dict[current_probe]
+
+        current_bas_means = data_df[current_bas_cols].to_numpy().mean(axis=1)
+        bas_exceeds_control_bait = np.greater(current_bas_means, minimum_bas_means)
+
+        exceeds_control_bait_calls = np.full(shape=len(bas_exceeds_control_bait), fill_value="", dtype="<U4")
+        exceeds_control_bait_calls[bas_exceeds_control_bait] = "Yes"
+
+        data_df[exceeds_control_col] = exceeds_control_bait_calls
 
 def add_peptide_names(data_df, names_path = None, include_seqs = False, cols_list = None):
     '''
@@ -189,6 +281,9 @@ def add_peptide_names(data_df, names_path = None, include_seqs = False, cols_lis
         include_seqs (bool):    whether to also assign sequence values
         cols_list (list):       if inlcude_seqs is True, then this is the list of sequence cols starting from column C
     '''
+
+    data_df.insert(0, "Peptide_Name", "")
+
     if names_path is None:
         names_path = input("\tEnter the path containing the CSV with coordinate-name pairs:  ")
 
@@ -210,61 +305,63 @@ def add_peptide_names(data_df, names_path = None, include_seqs = False, cols_lis
             pep_name = names_dict.get(i)
             data_df.at[i, "Peptide_Name"] = pep_name
 
-def main_preprocessing(image_directory = None, spot_grid_dimensions = None, output_dirs = None,
-                       peptide_names_path = None, ellipsoid_index_thres = None, probes_ordered = None,
-                       multiline_cols = True, add_peptide_seqs = False, peptide_seq_cols = None,
-                       ending_coord = None, arbitrary_coords_to_drop = None, buffer_width = None, verbose = True):
-    if spot_grid_dimensions is None:
-        spot_grid_dimensions = get_grid_dimensions(verbose = verbose)
-    if image_directory is None:
-        image_directory = input("Enter the full directory where TIFF images are stored: ")
-    filenames_list = os.listdir(image_directory)
+def image_preprocessing(image_folder, output_folder, image_params = image_params, spot_grid_dimensions = None,
+                        names_path = None, ending_coord = None, arbitrary_coords_to_drop = None, verbose = True):
+    '''
+    Main image preprocessing function
+
+    Args:
+        image_folder (str):                 directory where TIFF image files are stored
+        output_folder (str):                parent directory to output processed images and data to
+        image_params (dict):                image_params as described in config.py
+        spot_grid_dimensions (tuple):       tuple of (number of spots in width, number of spots in height)
+        names_path (str):                   path to CSV containing peptide names
+        ending_coord (str):                 last alphanumeric coordinate considered valid in the array
+        arbitrary_coords_to_drop (list):    list of arbitrary coordinates to drop/disregard
+        verbose (bool):                     whether to display verbose messages
+
+    Returns:
+        data_df (pd.DataFrame):             a dataframe containing the quantified spot image data
+    '''
+
+    # User prompting for missing arguments
+    spot_grid_dimensions = get_grid_dimensions(verbose) if spot_grid_dimensions is None else spot_grid_dimensions
+    image_folder = input("Enter the folder containing TIFF images: ") if image_folder is None else image_folder
+    filenames_list = os.listdir(image_folder)
 
     # Load images as SpotArray objects
     print("Loading and processing files as SpotArray objects...") if verbose else None
-    if buffer_width is None:
-        buffer_width = input_number("Please enter the buffer width separating spot pixels from surrounding pixels during background adjustment:  ", "int")
-
-    spot_arrays = load_spot_arrays(filenames_list = filenames_list, image_directory = image_directory,
-                                   spot_grid_dimensions = spot_grid_dimensions, pixel_log_base = 1,
-                                   ending_coord = ending_coord, arbitrary_coords_to_drop = arbitrary_coords_to_drop,
-                                   buffer_width = buffer_width, verbose = verbose)
+    buffer_width = image_params["buffer_width"]
+    pixel_log_base = image_params["pixel_encoding_base"]
+    spot_arrays = load_spot_arrays(filenames_list, image_folder, spot_grid_dimensions, pixel_log_base,
+                                   ending_coord, arbitrary_coords_to_drop, buffer_width, verbose)
 
     # Assemble a dataframe containing results values
     print("Assembling dataframe and saving images...") if verbose else None
     data_df = pd.DataFrame()
-    uas_cols_dict, bas_cols_dict, ei_cols_dict, new_cols_dict = assign_data_values(data_df = data_df, spot_arrays = spot_arrays, multiline_cols = multiline_cols)
+    multiline_cols = image_params["multiline_cols"]
+    uas_cols_dict, bas_cols_dict, ei_cols_dict, new_cols_dict = assign_data_values(data_df, spot_arrays, multiline_cols)
 
     # Write output images to destination directories
-    if output_dirs is None:
-        parent_dir = input("Please enter the directory where outlined images for this dataset should be deposited: ")
-        output_dirs = declare_output_dirs(parent_directory = parent_dir)
-    write_images(output_dirs = output_dirs, spot_arrays = spot_arrays)
+    write_images(output_folder, spot_arrays)
 
-    # Declare probe order for sorting dataframe columns
-    if probes_ordered is None:
-        probes_list = list(ei_cols_dict.keys())
-        probes_ordered = get_probe_order(probes_list = probes_list)
+    # Add peptide names/sequences
+    add_names = image_params["add_peptide_names"]
+    if add_names:
+        print("Applying peptide names to the dataframe...") if verbose else None
+        add_peptide_seqs = image_params["add_peptide_seqs"]
+        peptide_seq_cols = image_params["peptide_seq_cols"]
+        add_peptide_names(data_df, names_path, add_peptide_seqs, peptide_seq_cols)
 
     # Sorting dataframe and testing significance of hits
     print("Organizing dataframe and testing hit significance...") if verbose else None
-    data_df = prepare_sorted_cols(data_df = data_df, probes_ordered = probes_ordered, cols_dict = new_cols_dict)
-    if ellipsoid_index_thres is None:
-        significance_testing(data_df = data_df, ei_cols_dict = ei_cols_dict, probes_ordered = probes_ordered)
-    else:
-        significance_testing(data_df = data_df, ei_cols_dict = ei_cols_dict, probes_ordered = probes_ordered, ei_sig_thres = ellipsoid_index_thres)
-
-    # Add peptide names/sequences
-    if peptide_names_path is None:
-        add_names = input("Add peptide names from CSV file mapping coordinates to names? (Y/N)  ")
-    else:
-        add_names = "Y"
-
-    if add_names == "Y":
-        add_peptide_names(data_df = data_df, names_path = peptide_names_path, include_seqs = add_peptide_seqs, cols_list = peptide_seq_cols)
+    probes_ordered = image_params["ordered_probe_names"]
+    seqs_cols = image_params["peptide_seq_cols"]
+    data_df = prepare_sorted_cols(data_df, probes_ordered, new_cols_dict, seqs_cols)
+    call_positives(data_df, bas_cols_dict, ei_cols_dict, image_params)
 
     # Save completed dataframe
-    data_df.to_csv(os.path.join(output_dirs.get("output"), "preprocessed_data.csv"))
+    data_df.to_csv(os.path.join(output_folder, "preprocessed_data.csv"))
 
     print("Done!") if verbose else None
 
