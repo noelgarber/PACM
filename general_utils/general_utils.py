@@ -80,7 +80,7 @@ def dict_value_append(input_dict, key, element_to_append, duplicates_allowed = T
         input_dict[key] = [element_to_append]
     elif not duplicates_allowed:
         value_list = input_dict.get(key)
-        if element_to_append in value_list:
+        if element_to_append not in value_list:
             value_list.append(element_to_append)
         input_dict[key] = value_list
     else:
