@@ -17,11 +17,11 @@ __pycache__
 *.pickle
 
 #Ignore Uniprot databases
-Uniprot_All_Human_Protein_Isoforms.csv
-BioMart_Human_Proteins_NR.csv
+Old/Uniprot_All_Human_Protein_Isoforms.csv
+Old/BioMart_Human_Proteins_NR.csv
 
 #Ignore example data used for testing
-SLiM_Densitometry.csv
+Old*
 
 #Ignore private files
 /Private
