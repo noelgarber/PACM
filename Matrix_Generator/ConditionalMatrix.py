@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import os
 import matplotlib.pyplot as plt
+from functools import partial
 from math import e
 from scipy.stats import fisher_exact
 from general_utils.general_utils import unravel_seqs, check_seq_lengths
@@ -201,6 +202,14 @@ class ConditionalMatrix:
             self.matrix_df = increment_matrix(None, self.matrix_df, inverse_masked_sequences_2d,
                                               enforced_points = negative_points, points_mode = "enforced_points")
 
+def get_sigmoid(x, k, inflection):
+    # Basic function that applies a sigmoid function to x value
+    base_value = 1 / (1 + e ** (k * inflection))
+    upper_value = 1 / (1 + e ** (-k * (1 - inflection))) - base_value
+    y = (1 / (1 + e ** (-k * (abs(x) - inflection))) - base_value) / upper_value
+    y = y * (x/abs(x)) # apply original sign of x
+    return y
+
 def apply_sigmoid(matrix_df, strength = 1, inflection = 0.5):
     '''
     Function for scaling matrix values by a sigmoid function, suppressing small values and enhancing big ones
@@ -216,17 +225,8 @@ def apply_sigmoid(matrix_df, strength = 1, inflection = 0.5):
 
     k = strength * 10
 
-    sigmoid_function = lambda x: 1 / (1 + e**(-k*(abs(x) - inflection)))
-
+    sigmoid_function = partial(get_sigmoid, k = k, inflection = inflection)
     sigmoid_matrix_df = matrix_df.applymap(sigmoid_function)
-    sigmoid_matrix_df[matrix_df < 0] *= -1
-
-    # Scale to ensure that at x=0, y=0, and at x=1, y=1
-    base_value = 1 / (1 + e ** (k * inflection))
-    upper_value = 1 / (1 + e ** (-k * (1 - inflection))) - base_value
-    sigmoid_matrix_df -= base_value
-    sigmoid_matrix_df /= upper_value
-
     sigmoid_matrix_df = sigmoid_matrix_df.round(2)
 
     return sigmoid_matrix_df
@@ -392,14 +392,11 @@ class ConditionalMatrices:
         # User-called function to save a plot of the sigmoid function used to adjust the matrix points values
 
         k = self.sigmoid_strength * 10
-
-        base_value = 1 / (1 + e ** (k * self.sigmoid_inflection))
-        upper_value = 1 / (1 + e ** (-k * (1 - self.sigmoid_inflection))) - base_value
-        sigmoid_function = lambda x: (1/(1+e**(-k*(abs(x)-self.sigmoid_inflection))) - base_value) / upper_value
+        inflection = self.sigmoid_inflection
 
         # Generate the graph contents
-        x_values = np.linspace(0, 1, 1000)
-        y_values = np.array([sigmoid_function(x) for x in x_values])
+        x_values = np.linspace(0, 1, 101)
+        y_values = np.array([get_sigmoid(x, k, inflection) for x in x_values])
 
         # Create the plot
         plt.plot(x_values, y_values)
