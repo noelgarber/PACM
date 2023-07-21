@@ -1,6 +1,0 @@
-Name,From_Protein,Sequence,No_Phos_Sequence,BJO_Sequence,Position,Control_1,Control_2,*_1,*_1_Pass,*_2,*_2_Pass,*_Total_Pass,
-INSTRUCTIONS: (delete this row when done),,Peptide sequence including modification sites,Peptide sequence without phosphorylation,"To handle phosphorylation in single letter code, substitute pS=B, pT=J, and pY=O",,"Signal for your control bait, replicate #1","Signal for your control bait, replicate #2","* = Your Bait Here; densitometric signal, replicate #1",* = Your Bait Here; manual call on whether replicate #1 was positive (Pass),"* = Your Bait Here; densitometric signal, replicate #2",* = Your Bait Here; manual call on whether replicate #2 was positive (Pass),* = Your Bait Here; manual call on whether overall this bait was positive (Pass),Columns I:M can be copied for however many baits you have
-ABC1_XYZ_motif,ABC1,VLANC(pS)ALDKAAQRI,VLANCSALDKAAQRI,VLANCBALDKAAQRI,A1,10.1,20.2,938.3,Pass,702.5,Pass,Pass,
-ABC1_XYZ_motif_mutant,ABC1,NSFPIRGEM(pT)DKQMR,NSFPIRGEMTDKQMR,NSFPIRGEMJDKQMR,A2,24.9,22.6,25.7,,30.4,,,
-JKI8_XYZ_motif,JKI8,MCD(pY)FAEQPLDFNHD,MCDYFAEQPLDFNHD,MCDOFAEQPLDFNHD,A3,36.3,12.3,451.3,Pass,303.3,Pass,Pass,
-...,...,...,...,...,...,...,...,...,...,...,...,...,
