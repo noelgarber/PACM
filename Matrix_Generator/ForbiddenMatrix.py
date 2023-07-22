@@ -3,7 +3,7 @@
 import numpy as np
 import pandas as pd
 import os
-from scipy.stats import fisher_exact
+from scipy.stats import barnard_exact
 from general_utils.general_utils import unravel_seqs, check_seq_lengths
 from general_utils.matrix_utils import make_empty_matrix
 from Matrix_Generator.config import matrix_params, aa_equivalence_dict
@@ -51,51 +51,13 @@ class ForbiddenMatrix:
             position_forbidden_calls = np.full(shape=len(self.matrix_df.index), fill_value=False, dtype=bool)
 
             for i, aa in enumerate(self.matrix_df.index):
+                # Count the number of occurrences of this aa in positive and negative peptides
                 aa_positive_count = np.sum(positive_masked_col == aa)
-                other_positive_count = positive_count - aa_positive_count
                 aa_negative_count = np.sum(negative_masked_col == aa)
-                other_negative_count = negative_count - aa_negative_count
 
                 if aa_negative_count > 0 and aa_positive_count == 0:
-                    # Test whether the nonzero negative aa count is due to chance
-                    contingency_table = [[aa_positive_count, other_positive_count],
-                                         [aa_negative_count, other_negative_count]]
-                    odds_ratio, p_value = fisher_exact(contingency_table)
-
-                    if p_value <= 0.25:
-                        # The forbidden residue is significant on its own
-                        if verbose:
-                            print(f"At position #{col_number}, {aa} is classified as forbidden at p={p_value}")
-                        position_forbidden_calls[i] = True
-                        continue
-
                     # Get the functional identity group members for the amino acid in question
                     group_members = aa_equivalence_dict.get(aa)
-
-                    # Count the number of occurrences for each group member
-                    member_positives = np.array([np.sum(positive_masked_col == member) for member in group_members])
-                    member_negatives = np.array([np.sum(negative_masked_col == member) for member in group_members])
-
-                    member_proportions_positives = member_positives / positive_count
-                    member_proportions_negatives = member_negatives / negative_count
-
-                    if np.all((member_proportions_negatives * 2) > member_proportions_positives):
-                        # Double overrepresentation of member residues in negative peptides
-                        p_values = []
-                        for j in np.arange(len(group_members)):
-                            contingency_table = [[member_positives[j], positive_count - member_positives[j]],
-                                                 [member_negatives[j], negative_count - member_negatives[j]]]
-                            member_odds_ratio, member_p_value = fisher_exact(contingency_table)
-                            p_values.append(member_p_value)
-                        p_values = np.array(p_values)
-                        best_group_member = group_members[np.nanargmin(p_values)]
-
-                        if np.any(p_values <= 0.25) and p_value <= 0.5:
-                            # The forbidden residue didn't quite meet signficance, but a group member did, so it counts
-                            if verbose:
-                                print(f"At position #{col_number}, {aa} is possibly forbidden (p={p_value} alone),",
-                                      f"and {best_group_member} (highly similar) was forbidden (p={np.min(p_values)}")
-                            position_forbidden_calls[i] = True
 
                     # Count the number of occurrences in positive and negative peptides at this position
                     group_positive_count = np.sum(np.in1d(positive_masked_col, np.array(group_members, dtype="U")))
@@ -104,14 +66,28 @@ class ForbiddenMatrix:
                     nongroup_positive_count = positive_count - group_positive_count
                     nongroup_negative_count = negative_count - group_negative_count
 
-                    # Test whether the forbidden residue's constituent group is significant
-                    group_contingency_table = [[group_positive_count, nongroup_positive_count],
-                                               [group_negative_count, nongroup_negative_count]]
-                    group_odds_ratio, group_p_value = fisher_exact(group_contingency_table)
+                    # Test whether enrichment of aa in negatives is significant compared to non-group aas
+                    contingency_table = [[aa_positive_count, nongroup_positive_count],
+                                         [aa_negative_count, nongroup_negative_count]]
+                    p_value = barnard_exact(contingency_table).pvalue
 
-                    consistent = (group_negative_count / negative_count) > (group_positive_count / positive_count)
-                    if p_value <= 0.2 and group_p_value <= 0.1 and consistent:
+                    if p_value <= 0.2:
+                        # If there's a 4-in-5 chance that the residue is forbidden, consider it significantly forbidden
+                        print(f"#{col_number}={aa} is forbidden at p={p_value}") if verbose else None
                         position_forbidden_calls[i] = True
+
+                    else:
+                        # If the aa is only found in negative peptides, but fails the Fisher exact test, test aa group
+                        group_contingency_table = [[group_positive_count, nongroup_positive_count],
+                                                   [group_negative_count, nongroup_negative_count]]
+                        group_p_value = barnard_exact(group_contingency_table).pvalue
+                        if group_p_value <= 0.2:
+                            # If there's a 1-in-5 chance the aa's group is forbidden, consider that aa forbidden
+                            forbidden_threshold = matrix_params["forbidden_threshold"]
+                            if aa_negative_count >= forbidden_threshold:
+                                if verbose:
+                                    print(f"#{col_number}={aa} is forbidden (p={p_value}, group p={group_p_value})")
+                                position_forbidden_calls[i] = True
 
             self.matrix_df.iloc[:, col_number] = position_forbidden_calls
 
