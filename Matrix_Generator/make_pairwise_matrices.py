@@ -7,6 +7,7 @@ from Matrix_Generator.config import general_params, data_params, matrix_params, 
 from Matrix_Generator.ConditionalMatrix import ConditionalMatrices
 from Matrix_Generator.ForbiddenMatrix import ForbiddenMatrix
 from Matrix_Generator.conditional_scoring import apply_motif_scores
+from Matrix_Generator.conditional_weight_optimization import optimize_conditional_weights
 
 def find_optimal_threshold(motif_scores, passes_bools, contains_forbidden):
     # Helper function to find the optimal score threshold where FDR and FOR are approximately equal
@@ -98,7 +99,22 @@ def main(input_df, general_params = general_params, data_params = data_params, m
     aa_charac_dict = general_params.get("aa_charac_dict")
     conditional_matrices = ConditionalMatrices(motif_length, input_df, percentiles_dict, aa_charac_dict,
                                                data_params, matrix_params)
-    conditional_matrices.save(output_folder)
+
+    # Optionally optimize weights
+    if matrix_params.get("optimize_weights"):
+        possible_weights = matrix_params["possible_weights"]
+        sequence_col = data_params["seq_col"]
+        significance_col = data_params["bait_pass_col"]
+        significant_str = data_params["pass_str"]
+        convert_phospho = general_params["convert_phospho"]
+        chunk_size = matrix_params["chunk_size"]
+        conditional_matrices = optimize_conditional_weights(input_df, motif_length, conditional_matrices, sequence_col,
+                                                            significance_col, significant_str, possible_weights,
+                                                            convert_phospho, chunk_size)
+        conditional_matrices.save(output_folder)
+    else:
+        conditional_matrices.save(output_folder, save_weighted = False)
+
     if matrix_params.get("use_sigmoid"):
         conditional_matrices.save_sigmoid_plot(output_folder)
 
