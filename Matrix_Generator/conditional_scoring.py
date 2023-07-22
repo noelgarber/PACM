@@ -128,15 +128,17 @@ def apply_motif_scores(input_df, slim_length, conditional_matrices, sequences_2d
         seqs = None
 
     # Get the motif scores for the peptide sequences
-    output = score_seqs(seqs, slim_length, conditional_matrices, sequences_2d, convert_phospho, use_weighted, return_2d)
-    if return_2d:
-        scores, scores_2d = output
+    if return_2d and return_array and not return_df:
+        scores, scores_2d = score_seqs(seqs, slim_length, conditional_matrices, sequences_2d, convert_phospho,
+                                       use_weighted, return_2d = True)
+        return (scores, scores_2d)
+    elif not return_2d and return_array and not return_df:
+        scores = score_seqs(seqs, slim_length, conditional_matrices, sequences_2d, convert_phospho,
+                            use_weighted, return_2d = False)
+        return scores
     else:
-        scores = output
-        scores_2d = None
-
-    if return_array and not return_df:
-        return output
+        scores, scores_2d = score_seqs(seqs, slim_length, conditional_matrices, sequences_2d, convert_phospho,
+                                       use_weighted, return_2d = True)
 
     # Assign scores to dataframe
     if return_2d:

@@ -2,18 +2,14 @@
 
 import numpy as np
 import pandas as pd
-import os
-import time
 import multiprocessing
+from copy import deepcopy
 from tqdm import trange
 from functools import partial
 from Matrix_Generator.ConditionalMatrix import ConditionalMatrices
 from Matrix_Generator.conditional_scoring import apply_motif_scores
-from general_utils.general_utils import save_dataframe, save_weighted_matrices, unravel_seqs
+from general_utils.general_utils import unravel_seqs
 from general_utils.weights_utils import permute_weights
-from general_utils.general_vars import aa_charac_dict
-from general_utils.user_helper_functions import get_possible_weights
-from general_utils.statistics import optimize_threshold_fdr, fdr_for_optimizer
 
 def process_weights_chunk(chunk, conditional_matrices, sequences_2d, passes_bools, source_df, motif_length):
     '''
@@ -48,10 +44,13 @@ def process_weights_chunk(chunk, conditional_matrices, sequences_2d, passes_bool
 
         # Get the array of scores for peptide entries in source_df using the current set of weighted matrices
         scores_array = apply_motif_scores(output_df, motif_length, conditional_matrices, sequences_2d,
-                                          convert_phospho = True, return_array = True, use_weighted = True)
+                                          convert_phospho = True, return_array = True, use_weighted = True,
+                                          return_2d = False, return_df = False)
 
         # Find the Matthews correlation coefficient for different thresholds and select the best of them
-        sorted_scores = scores_array.copy().sort()
+        sorted_scores = deepcopy(scores_array)
+        sorted_scores = sorted_scores[sorted_scores>0]
+        sorted_scores.sort()
         scores_above_thresholds = scores_array >= sorted_scores.reshape(-1,1)
 
         TPs = np.logical_and(scores_above_thresholds, passes_bools).sum(axis=1)
@@ -59,7 +58,8 @@ def process_weights_chunk(chunk, conditional_matrices, sequences_2d, passes_bool
         FPs = np.logical_and(scores_above_thresholds, ~passes_bools).sum(axis=1)
         FNs = np.logical_and(~scores_above_thresholds, passes_bools).sum(axis=1)
 
-        MCCs_by_threshold = (TPs * TNs - FPs * FNs) / np.sqrt((TPs + FPs) * (TPs + FNs) * (TNs + FPs) * (TNs + FNs))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            MCCs_by_threshold = (TPs * TNs - FPs * FNs) / np.sqrt((TPs + FPs) * (TPs + FNs) * (TNs + FPs) * (TNs + FNs))
         MCC_max_index = np.nanargmax(MCCs_by_threshold)
         optimized_threshold = sorted_scores[MCC_max_index]
         optimized_mcc = MCCs_by_threshold[MCC_max_index]

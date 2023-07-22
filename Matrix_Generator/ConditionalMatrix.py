@@ -3,7 +3,6 @@
 import numpy as np
 import pandas as pd
 import os
-import matplotlib.pyplot as plt
 from functools import partial
 from math import e
 from scipy.stats import fisher_exact
@@ -343,7 +342,8 @@ class ConditionalMatrices:
 
         # Apply weights
         weights_array = matrix_params.get("position_weights")
-        self.apply_weights(weights_array, only_3d = False)
+        if weights_array is not None:
+            self.apply_weights(weights_array, only_3d = False)
 
     def apply_weights(self, weights_array, only_3d = True):
         # Method for assigning weights to the 3D matrix of matrices
@@ -360,7 +360,7 @@ class ConditionalMatrices:
                 self.weighted_matrices_dict[key] = weighted_matrix
                 self.weighted_arrays_dict[key] = weighted_matrix.to_numpy()
 
-    def save(self, output_folder):
+    def save(self, output_folder, save_weighted = True):
         # User-called function to save the conditional matrices as CSVs to folders for both unweighted and weighted
 
         parent_folder = os.path.join(output_folder, "Conditional_Matrices")
@@ -374,12 +374,13 @@ class ConditionalMatrices:
             unweighted_matrix.to_csv(file_path)
 
         # Save weighted matrices
-        weighted_folder = os.path.join(parent_folder, "Weighted")
-        if not os.path.exists(weighted_folder):
-            os.makedirs(weighted_folder)
-        for key, weighted_matrix in self.weighted_matrices_dict.items():
-            file_path = os.path.join(weighted_folder, key + ".csv")
-            weighted_matrix.to_csv(file_path)
+        if save_weighted:
+            weighted_folder = os.path.join(parent_folder, "Weighted")
+            if not os.path.exists(weighted_folder):
+                os.makedirs(weighted_folder)
+            for key, weighted_matrix in self.weighted_matrices_dict.items():
+                file_path = os.path.join(weighted_folder, key + ".csv")
+                weighted_matrix.to_csv(file_path)
 
         # Save output report
         output_report_path = os.path.join(parent_folder, "conditional_matrices_report.txt")
@@ -394,6 +395,8 @@ class ConditionalMatrices:
 
     def save_sigmoid_plot(self, output_folder):
         # User-called function to save a plot of the sigmoid function used to adjust the matrix points values
+
+        import matplotlib.pyplot as plt
 
         k = self.sigmoid_strength * 10
         inflection = self.sigmoid_inflection
