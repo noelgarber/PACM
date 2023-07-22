@@ -110,7 +110,9 @@ def process_weights(weights_array_chunks, conditional_matrices, motif_length, so
             if chunk_results[2] > best_mcc:
                 results = chunk_results
                 best_mcc = chunk_results[2]
-                print(f"\tNew record: Matthews correlation coefficient = {best_mcc} for weights {results[0]}")
+                best_weights = chunk_results[0]
+                best_weights_str = ", ".join(map(str, best_weights))
+                print(f"\tNew record: Matthews correlation coefficient = {best_mcc} for weights: {best_weights_str}")
 
             pbar.update()
 
