@@ -25,6 +25,7 @@ Old*
 
 #Ignore private files
 /Private
+.githooks
 
 #Ignore PyCharm idea files
 *.idea
