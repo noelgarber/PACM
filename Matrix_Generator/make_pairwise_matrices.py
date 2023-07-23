@@ -108,9 +108,10 @@ def main(input_df, general_params = general_params, data_params = data_params, m
         significant_str = data_params["pass_str"]
         convert_phospho = general_params["convert_phospho"]
         chunk_size = matrix_params["chunk_size"]
+        fit_mode = matrix_params["fit_mode"]
         conditional_matrices = optimize_conditional_weights(input_df, motif_length, conditional_matrices, sequence_col,
                                                             significance_col, significant_str, possible_weights,
-                                                            convert_phospho, chunk_size)
+                                                            convert_phospho, chunk_size, fit_mode)
         conditional_matrices.save(output_folder)
     else:
         conditional_matrices.save(output_folder, save_weighted = False)

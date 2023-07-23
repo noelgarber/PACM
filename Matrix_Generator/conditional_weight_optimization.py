@@ -11,7 +11,75 @@ from Matrix_Generator.conditional_scoring import apply_motif_scores
 from general_utils.general_utils import unravel_seqs
 from general_utils.weights_utils import permute_weights
 
-def process_weights_chunk(chunk, conditional_matrices, sequences_2d, passes_bools, source_df, motif_length):
+def optimize_predictive_values(scores_array, passes_bools):
+    '''
+    Helper function that returns the mean of optimal PPV & NPV, and the score threshold that made it
+
+    Args:
+        scores_array (np.ndarray): array of scored peptide values
+        passes_bools (np.ndarray): array of bools representing whether each peptide is positive or not
+
+    Returns:
+        optimized_mean_predictive (float):  the optimized mean of optimal PPV and NPV where the difference is smallest
+        optimized_threshold (float):        the optimized threshold that produced the aforementioned MCC value
+    '''
+
+    # Find the Matthews correlation coefficient for different thresholds and select the best of them
+    sorted_scores = deepcopy(scores_array)
+    sorted_scores = sorted_scores[sorted_scores > 0]
+    sorted_scores.sort()
+    scores_above_thresholds = scores_array >= sorted_scores.reshape(-1, 1)
+
+    TPs = np.logical_and(scores_above_thresholds, passes_bools).sum(axis=1)
+    TNs = np.logical_and(~scores_above_thresholds, ~passes_bools).sum(axis=1)
+    FPs = np.logical_and(scores_above_thresholds, ~passes_bools).sum(axis=1)
+    FNs = np.logical_and(~scores_above_thresholds, passes_bools).sum(axis=1)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        PPVs = TPs / (TPs + FPs)
+        NPVs = TNs / (TNs + FNs)
+    rate_deltas = np.abs(PPVs - NPVs)
+    min_delta_index = np.nanargmin(rate_deltas)
+
+    optimized_mean_predictive = (PPVs[min_delta_index] + NPVs[min_delta_index]) / 2
+    optimized_threshold = sorted_scores[min_delta_index]
+
+    return (optimized_threshold, optimized_mean_predictive)
+
+def optimize_mcc(scores_array, passes_bools):
+    '''
+    Helper function that returns the optimal Matthews correlation coefficient (MCC) and the score threshold that made it
+
+    Args:
+        scores_array (np.ndarray): array of scored peptide values
+        passes_bools (np.ndarray): array of bools representing whether each peptide is positive or not
+
+    Returns:
+        optimized_mcc (float):       the optimized Matthews correlation coefficient (MCC)
+        optimized_threshold (float): the optimized threshold that produced the aforementioned MCC value
+    '''
+
+    # Find the Matthews correlation coefficient for different thresholds and select the best of them
+    sorted_scores = deepcopy(scores_array)
+    sorted_scores = sorted_scores[sorted_scores > 0]
+    sorted_scores.sort()
+    scores_above_thresholds = scores_array >= sorted_scores.reshape(-1, 1)
+
+    TPs = np.logical_and(scores_above_thresholds, passes_bools).sum(axis=1)
+    TNs = np.logical_and(~scores_above_thresholds, ~passes_bools).sum(axis=1)
+    FPs = np.logical_and(scores_above_thresholds, ~passes_bools).sum(axis=1)
+    FNs = np.logical_and(~scores_above_thresholds, passes_bools).sum(axis=1)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        MCCs_by_threshold = (TPs * TNs - FPs * FNs) / np.sqrt((TPs + FPs) * (TPs + FNs) * (TNs + FPs) * (TNs + FNs))
+    MCC_max_index = np.nanargmax(MCCs_by_threshold)
+    optimized_threshold = sorted_scores[MCC_max_index]
+    optimized_mcc = MCCs_by_threshold[MCC_max_index]
+
+    return (optimized_threshold, optimized_mcc)
+
+def process_weights_chunk(chunk, conditional_matrices, sequences_2d, passes_bools, source_df, motif_length,
+                          mode = "MCC"):
     '''
     Lower helper function for parallelization of position weight optimization; processes chunks of permuted weights
 
@@ -24,7 +92,9 @@ def process_weights_chunk(chunk, conditional_matrices, sequences_2d, passes_bool
         sequences_2d (np.ndarray):                  2D array of peptide sequences, where each row is a peptide as array
         passes_bools (np.ndarray):                  array of bools about whether the peptides are positive or not
         source_df (pd.DataFrame):                   contains source peptide-protein binding data
-        motif_length (int):                          length of the motif being studied
+        motif_length (int):                         length of the motif being studied
+        mode (str):                                 "MCC" --> Matthews Correlation Coefficient is used for optimization;
+                                                    "predictive_values" --> PPV & NPV are used for optimization
 
     Returns:
         results_tuple (tuple):  (chunk_best_weights, chunk_best_threshold, chunk_best_mcc)
@@ -32,9 +102,12 @@ def process_weights_chunk(chunk, conditional_matrices, sequences_2d, passes_bool
 
     output_df = source_df.copy()
 
-    # Initialize what will become a list of tuples of (best_score, best_fdr, best_for) matching the indices of chunk
+    if mode == "MCC" or mode == "predictive_values":
+        use_mcc = mode == "MCC"
+    else:
+        raise ValueError(f"process_weights_chunk got mode {mode}, but `MCC` or `FDR` was expected")
 
-    chunk_best_mcc = 0
+    best_optimization_value = 0
     chunk_best_threshold = None
     chunk_best_weights = None
 
@@ -48,31 +121,22 @@ def process_weights_chunk(chunk, conditional_matrices, sequences_2d, passes_bool
                                           return_2d = False, return_df = False)
 
         # Find the Matthews correlation coefficient for different thresholds and select the best of them
-        sorted_scores = deepcopy(scores_array)
-        sorted_scores = sorted_scores[sorted_scores>0]
-        sorted_scores.sort()
-        scores_above_thresholds = scores_array >= sorted_scores.reshape(-1,1)
+        if use_mcc:
+            # Assign optimized_value as optimal MCC
+            optimized_threshold, optimized_value = optimize_mcc(scores_array, passes_bools)
+        else:
+            # Assign optimized_value as mean of optimal PPV and NPV
+            optimized_threshold, optimized_value = optimize_predictive_values(scores_array, passes_bools)
 
-        TPs = np.logical_and(scores_above_thresholds, passes_bools).sum(axis=1)
-        TNs = np.logical_and(~scores_above_thresholds, ~passes_bools).sum(axis=1)
-        FPs = np.logical_and(scores_above_thresholds, ~passes_bools).sum(axis=1)
-        FNs = np.logical_and(~scores_above_thresholds, passes_bools).sum(axis=1)
-
-        with np.errstate(divide="ignore", invalid="ignore"):
-            MCCs_by_threshold = (TPs * TNs - FPs * FNs) / np.sqrt((TPs + FPs) * (TPs + FNs) * (TNs + FPs) * (TNs + FNs))
-        MCC_max_index = np.nanargmax(MCCs_by_threshold)
-        optimized_threshold = sorted_scores[MCC_max_index]
-        optimized_mcc = MCCs_by_threshold[MCC_max_index]
-
-        if optimized_mcc > chunk_best_mcc:
+        if optimized_value > best_optimization_value:
             chunk_best_weights = weights_array
             chunk_best_threshold = optimized_threshold
-            chunk_best_mcc = optimized_mcc
+            best_optimization_value = optimized_value
 
-    return (chunk_best_weights, chunk_best_threshold, chunk_best_mcc)
+    return (chunk_best_weights, chunk_best_threshold, best_optimization_value)
 
 def process_weights(weights_array_chunks, conditional_matrices, motif_length, source_df, sequence_col, significance_col,
-                    significant_str, convert_phospho = True):
+                    significant_str, convert_phospho = True, mode = "MCC"):
     '''
     Upper helper function for parallelization of position weight optimization; processes weights by chunking
 
@@ -85,6 +149,8 @@ def process_weights(weights_array_chunks, conditional_matrices, motif_length, so
         significance_col (str):                     col name in chunk where significance information is found
         significant_str (str):                      value in significance_col that denotes significance, e.g. "Yes"
         convert_phospho (bool):                     whether to convert phospho-aa's to non-phospho before doing lookups
+        mode (str):                                 "MCC" --> Matthews Correlation Coefficient is used for optimization;
+                                                    "predictive_values" --> PPV & NPV are used for optimization
 
     Returns:
         results_tuple (tuple):                      tuple of optimized (best_weights, best_threshold, best_mcc)
@@ -100,19 +166,23 @@ def process_weights(weights_array_chunks, conditional_matrices, motif_length, so
 
     process_partial = partial(process_weights_chunk, conditional_matrices = conditional_matrices,
                               sequences_2d = sequences_2d, passes_bools = passes_bools, source_df = source_df,
-                              motif_length = motif_length)
+                              motif_length = motif_length, mode = mode)
 
     results = (None, None, None)
-    best_mcc = 0
+    final_optimized_value = 0
 
     with trange(len(weights_array_chunks), desc="Processing conditional matrix weights") as pbar:
         for chunk_results in pool.imap_unordered(process_partial, weights_array_chunks):
-            if chunk_results[2] > best_mcc:
+            if chunk_results[2] > final_optimized_value:
                 results = chunk_results
-                best_mcc = chunk_results[2]
+                final_optimized_value = chunk_results[2]
                 best_weights = chunk_results[0]
                 best_weights_str = ", ".join(map(str, best_weights))
-                print(f"\tNew record: Matthews correlation coefficient = {best_mcc} for weights: {best_weights_str}")
+                if mode == "MCC":
+                    print(f"\tNew record: MCC = {final_optimized_value} for weights: [{best_weights_str}]")
+                elif mode == "predictive_values":
+                    print(f"\tNew record: mean predictive value = {final_optimized_value} for weights:",
+                          f"[{best_weights_str}]")
 
             pbar.update()
 
@@ -122,7 +192,8 @@ def process_weights(weights_array_chunks, conditional_matrices, motif_length, so
     return results
 
 def optimize_conditional_weights(input_df, motif_length, conditional_matrices, sequence_col, significance_col,
-                                 significant_str, possible_weights = None, convert_phospho = True, chunk_size = 1000):
+                                 significant_str, possible_weights = None, convert_phospho = True, chunk_size = 1000,
+                                 mode = "MCC"):
     '''
     Parent function for finding optimal position weights to generate optimally weighted matrices
 
@@ -136,6 +207,8 @@ def optimize_conditional_weights(input_df, motif_length, conditional_matrices, s
         possible_weights (np.ndarray):               array of possible weight values for each position
         convert_phospho (bool):                      whether to convert phospho-residues to non-phospho before lookups
         chunk_size (int):                            chunk size for parallel processing of weights
+        mode (str):                                 "MCC" --> Matthews Correlation Coefficient is used for optimization;
+                                                    "predictive_values" --> PPV & NPV are used for optimization
 
     Returns:
         conditional_matrices (ConditionalMatrices):  final conditional matrices with optimal weights applied
@@ -152,10 +225,15 @@ def optimize_conditional_weights(input_df, motif_length, conditional_matrices, s
 
     # Run the parallelized optimization process
     optimized_results = process_weights(weights_array_chunks, conditional_matrices, motif_length, output_df,
-                                        sequence_col, significance_col, significant_str, convert_phospho)
-    best_weights, best_threshold, best_mcc = optimized_results
-    print("\t---\n", f"\tOptimal weights of {best_weights} gave Matthews correlation coefficient of {best_mcc}",
-                     f"at a score threshold > {best_threshold}")
+                                        sequence_col, significance_col, significant_str, convert_phospho, mode)
+    best_weights, best_threshold, best_value = optimized_results
+
+    if mode == "MCC":
+        print("\t---\n", f"\tOptimal weights of {best_weights} gave MCC = {best_value}",
+                         f"at a score threshold > {best_threshold}")
+    elif mode == "predictive_values":
+        print("\t---\n", f"\tOptimal weights of {best_weights} gave mean predictive value = {best_value}",
+                         f"at a score threshold > {best_threshold}")
 
     # Apply best weights onto ConditionalMatrices object
     conditional_matrices.apply_weights(best_weights, only_3d=False)
