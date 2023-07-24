@@ -26,7 +26,7 @@ Old*
 #Ignore private files
 /Private
 .githooks
-/Matrix_Generator/sconfig.py
+/Matrix_Generator/config.py
 
 #Ignore PyCharm idea files
 *.idea
