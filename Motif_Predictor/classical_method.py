@@ -1,3 +1,5 @@
+
+import os
 import numpy as np
 import pandas as pd
 
@@ -6,6 +8,9 @@ import pandas as pd
             The classical_method() function is a container for such known algorithms if you wish to 
             perform that analysis in parallel. It is completely OPTIONAL.
     ---------------------------------------------------------------------------------------------------------------- '''
+
+if not os.path.exists(os.path.join(os.getcwd(), "classical_matrix.csv")):
+    raise FileNotFoundError("Failed to find classical_matrix.csv, which is required when using classical_method()")
 
 classical_matrix = pd.read_csv("classical_matrix.csv")
 motif_length = 15
