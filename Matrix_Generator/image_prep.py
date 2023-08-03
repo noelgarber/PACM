@@ -11,8 +11,11 @@ import pandas as pd
 import os
 from general_utils.general_utils import input_number, csv_to_dict, dict_value_append
 from Matrix_Generator.image_processing.SpotArray import SpotArray
-from Matrix_Generator.config import image_params
 from tifffile import imwrite
+try:
+    from Matrix_Generator.config_local import image_params
+except:
+    from Matrix_Generator.config import image_params
 
 def get_grid_dimensions(verbose = True):
     print("Please enter the dimensions of the array (number of spots in width x number of spots in height).")

@@ -9,7 +9,10 @@ from scipy.stats import fisher_exact
 from general_utils.general_utils import unravel_seqs, check_seq_lengths
 from general_utils.matrix_utils import increment_matrix, make_empty_matrix, collapse_phospho
 from general_utils.user_helper_functions import get_thresholds
-from Matrix_Generator.config import data_params, matrix_params
+try:
+    from Matrix_Generator.config_local import data_params, matrix_params
+except:
+    from Matrix_Generator.config import data_params, matrix_params
 
 class ConditionalMatrix:
     '''

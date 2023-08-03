@@ -6,7 +6,10 @@ import os
 from scipy.stats import barnard_exact
 from general_utils.general_utils import unravel_seqs, check_seq_lengths
 from general_utils.matrix_utils import make_empty_matrix
-from Matrix_Generator.config import matrix_params, aa_equivalence_dict
+try:
+    from Matrix_Generator.config_local import matrix_params, aa_equivalence_dict
+except:
+    from Matrix_Generator.config import matrix_params, aa_equivalence_dict
 
 class ForbiddenMatrix:
     # Class containing a boolean position matrix describing whether certain amino acids are forbidden based on position

@@ -2,10 +2,13 @@
 
 import os
 import pickle
-from Matrix_Generator.config import *
 from Matrix_Generator.standardize_and_concatenate import main_workflow as standardized_concatenate
 from Matrix_Generator.make_pairwise_matrices import main as make_pairwise_matrices
 from Matrix_Generator.make_specificity_matrices import main as make_specificity_matrix
+try:
+    from Matrix_Generator.config_local import *
+except:
+    from Matrix_Generator.config import *
 
 def get_data(image_params = image_params, output_folder = None, verbose = False):
     # Helper function to get quantified SPOT peptide array image data

@@ -3,9 +3,12 @@
 import numpy as np
 import pandas as pd
 import os
-from Matrix_Generator.config import amino_acids, amino_acids_phos, comparator_info, specificity_params
 from general_utils.user_helper_functions import get_comparator_baits
 from general_utils.matrix_utils import collapse_phospho
+try:
+    from Matrix_Generator.config_local import amino_acids, amino_acids_phos, comparator_info, specificity_params
+except:
+    from Matrix_Generator.config import amino_acids, amino_acids_phos, comparator_info, specificity_params
 
 def mcc_2d(ground_truths, predicted_2d):
     '''

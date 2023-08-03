@@ -5,7 +5,10 @@ from general_utils.general_utils import dict_value_append
 from Matrix_Generator.image_prep import image_preprocessing as preprocess_images
 from Matrix_Generator.general_processing.process_arrays import main_processing as process_arrays
 from Matrix_Generator.general_processing.process_arrays import find_max_bait_signal
-from Matrix_Generator.config import image_params
+try:
+    from Matrix_Generator.config_local import image_params
+except:
+    from Matrix_Generator.config import image_params
 
 def preprocess_list(image_params = image_params, arbitrary_coords_to_drop = None):
     '''

@@ -3,11 +3,14 @@
 import numpy as np
 import pandas as pd
 import os
-from Matrix_Generator.config import general_params, data_params, matrix_params, aa_equivalence_dict
 from Matrix_Generator.ConditionalMatrix import ConditionalMatrices
 from Matrix_Generator.ForbiddenMatrix import ForbiddenMatrix
 from Matrix_Generator.conditional_scoring import apply_motif_scores
 from Matrix_Generator.conditional_weight_optimization import optimize_conditional_weights
+try:
+    from Matrix_Generator.config_local import general_params, data_params, matrix_params, aa_equivalence_dict
+except:
+    from Matrix_Generator.config import general_params, data_params, matrix_params, aa_equivalence_dict
 
 def find_optimal_threshold(motif_scores, passes_bools, contains_forbidden):
     # Helper function to find the optimal score threshold where FDR and FOR are approximately equal

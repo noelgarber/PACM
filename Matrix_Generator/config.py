@@ -1,4 +1,4 @@
-# This is the configuration file containing all the arguments and preferences for main.py; please edit as necessary
+# This is the configuration file containing all the arguments and preferences for matrix_generator.py; please edit as necessary
 
 import numpy as np
 
@@ -12,22 +12,72 @@ amino_acids_phos = ("D", "E", "R", "H", "K", "S", "T", "N", "Q", "C", "G", "P", 
     ---------------------------------------------------------------------------------------------------------------- '''
 
 ''' Image quantification preferences include in image_params: 
-        "use_cached_data":   whether to use pickled quantified image data from a previous run
-        "cached_data_path":  the path to the cached data if use_cached_data is True; user is prompted if not given
-        "output_folder":     folder to save output data and images showing detected spots; user is prompted if None
-        "add_peptide_seqs":  whether to add peptide sequences to the respective quantified data points
-        "peptide_seq_cols":  the cols containing peptide sequence data that should be added to quantified image data
-        "save_pickled_data": whether to save pickled data for future attempts, rather than generating anew each time
-        "buffer_width":      the width of the buffer zone between a defined spot and its exterior surroundings, used
-                             during background signal adjustment and call index calculation '''
+        "use_cached_data":                    whether to use pickled quantified image data from a previous run
+        "cached_data_path":                   the path to the cached data if use_cached_data is True
+        "output_folder":                      folder to save output data and images showing detected spots
+        "add_peptide_seqs":                   whether to add peptide sequences to the respective quantified data points
+        "peptide_seq_cols":                   cols with peptide sequences that should be added to quantified image data
+        "save_pickled_data":                  whether to save pickled data for future attempts
+        "buffer_width":                       width of the buffer zone between a defined spot and its exterior 
+                                              surroundings, used during background signal adjustment
+        "tiff_paths":                         list of directories containing groups of TIFF images to be quantified; 
+                                              the image file names must be: 
+                                                    [probe_name]_Copy[replicate_number]_Scan[scan_order_number].tif
+                                              where probe_name is the bait probe name, 
+                                              replicate_number is the technical replicate number, 
+                                              and scan_order_number is the number representing the position in the order 
+                                              that the  baits were applied to the blots between stripping cycles
+        "pixel_encoding_base":                logarithm base for pixel encoding; if set to 1, linear encoding is assumed
+        "add_peptide_names":                  whether to add peptide names
+        "peptide_names_paths":                list of paths to peptide names CSV files matching the TIFF image folders
+        "processed_image_paths":              paths where outlined and processed images will be saved for each input dir
+        "grid_dimensions":                    for each path, list of number of spots wide by number of spots high
+        "circle_index_threshold":             call index threshold used for making positive/negative calls 
+        "last_valid_coords":                  list of last valid alphanumeric spot coords where data ends in each set
+        "ordered_probe_names":                list of bait probe names in the order they should appear in the output df 
+        "control_probe_name":                 name of the negative control probe, e.g. Secondary-only or Mock 
+        "control_multiplier":                 multiplier for control signal values to test against bait signal values 
+        "standardize_within_datasets":        whether to standardize dataframes within themselves, between baits
+        "intra_dataset_controls":             list of controls to use for intra-dataset standardization
+        "max_bait_mean_col":                  column name where max bait mean signal values will be assigned
+        "standardize_between_datasets":       whether to standardize dataframes between each other
+        "inter_dataset_control":              control to use for inter-dataset standardization
+        "enforce_positive_control_multiple":  whether to enforce a minimum multiple of the positive control that other 
+                                              peptides must exceed to be considered significant
+        "positive_control":                   control to use if enforcing significant hits to be multiples of a control
+        "positive_control_multiple":          the multiple of the positive control signal that is considered the lowest 
+                                              allowed to be considered significant'''
 
-image_params = {"use_cached_data": True,
-                "cached_data_path": "",
-                "output_folder": None,
+image_params = {"use_cached_data": False,
+                "cached_data_path": None,
+                "output_folder": "",
                 "add_peptide_seqs": True,
                 "peptide_seq_cols": ["Phos_Sequence", "No_Phos_Sequence", "BJO_Sequence"],
                 "save_pickled_data": True,
-                "buffer_width": None}
+                "buffer_width": 2,
+                "tiff_paths": ["/home/user/path/to/your/first/dataset",
+                               "/home/user/path/to/your/second/dataset"],
+                "pixel_encoding_base": 1,
+                "add_peptide_names": True,
+                "multiline_cols": False,
+                "peptide_names_paths": ["/home/user/path/to/your/first/dataset_peptide_names.csv",
+                                        "/home/user/path/to/your/second/dataset_peptide_names.csv"],
+                "processed_image_paths": ["/home/user/first/dataset/output/folder",
+                                          "/home/user/second/dataset/output/folder"],
+                "grid_dimensions": [[28, 6], [28, 4]],
+                "circle_index_threshold": 1.25,
+                "last_valid_coords": ["F1", "D8"],
+                "ordered_probe_names": ["Secondary-only", "ABC1", "DEF2", "GHI3"],
+                "control_probe_name": "Secondary-only",
+                "control_multiplier": 5,
+                "standardize_within_datasets": True,
+                "intra_dataset_controls": ["Peptide_XYZ"],
+                "max_bait_mean_col": "Max_Bait_Background-Adjusted_Mean",
+                "standardize_between_datasets": True,
+                "inter_dataset_control": "Peptide_XYZ",
+                "enforce_positive_control_multiple": True,
+                "positive_control": "Peptide_XYZ",
+                "positive_control_multiple": 0.05}
 
 
 ''' ----------------------------------------------------------------------------------------------------------------
@@ -72,6 +122,22 @@ aa_equivalence_dict = {"D": ("D", "E"),
                        "C": ("N", "Q", "H", "C"),
                        "P": ("P"),
                        "G": ("G", "A")}
+
+possible_conditional_weights = [np.array([1.0, 0.5, 0.0]),
+                                np.array([1.0, 0.5, 0.0]),
+                                np.array([1.0, 0.5, 0.0]),
+                                np.array([1.0, 0.5, 0.0]),
+                                np.array([1.0, 0.5, 0.0]),
+                                np.array([1.0, 2.0, 0.5, 0.0]),
+                                np.array([1.0, 3.0, 2.0, 0.0]),
+                                np.array([1.0, 3.0, 2.0, 0.0]),
+                                np.array([1.0, 3.0, 2.0, 0.0]),
+                                np.array([1.0, 3.0, 2.0, 0.0]),
+                                np.array([1.0, 3.0, 2.0, 0.0]),
+                                np.array([0.0, 1.0]),
+                                np.array([1.0, 2.0, 0.0]),
+                                np.array([1.0, 0.5, 0.0]),
+                                np.array([0.5, 0.0])]
 
 ''' General parameters included in general_params: 
         "motif_length":           length of the peptide motif for which matrices are being generated
@@ -121,7 +187,12 @@ data_params = {"bait": None,
         "use_sigmoid":            whether to scale matrix values using a sigmoid function
         "sigmoid_strength":       the strength of the sigmoid function scaling; defaults to 1
         "sigmoid_inflection":     threshold where matrix values are scaled larger when above or smaller when below
-        "position_weights":       array of weights reflecting the relative score contributions of each position '''
+        "optimize_weights":       whether to permute weights to get optimally accurate results; takes a long time
+        "possible_weights":       possible weights values to permute for optimization 
+        "chunk_size":             parallel processing chunk size for weights optimization if optimize_weights is True
+        "position_weights":       array of weights reflecting the relative score contributions of each position
+        "forbidden_threshold":    minimum number of peptides with a putative forbidden residue before the residue is 
+                                  considered forbidden '''
 
 matrix_params = {"thresholds_points_dict": None,
                  "points_assignment_mode": "continuous",
@@ -133,13 +204,16 @@ matrix_params = {"thresholds_points_dict": None,
                  "use_sigmoid": True,
                  "sigmoid_strength": 0.5,
                  "sigmoid_inflection": 0.3,
-                 "position_weights": np.array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5,
-                                               0.5, 3, 3, 3, 3, 0, 0.5,
-                                               0.25, 0])}
+                 "optimize_weights": True,
+                 "possible_weights": possible_conditional_weights,
+                 "chunk_size": 1000,
+                 "position_weights": None,
+                 "fit_mode": "predictive_values",
+                 "forbidden_threshold": 3}
 
 
 ''' ----------------------------------------------------------------------------------------------------------------
-                                    Conditional Weighted Matrix Configuration
+                                         Specificity Matrix Configuration
     ---------------------------------------------------------------------------------------------------------------- '''
 
 ''' Comparator information in comparator_info: 
@@ -149,29 +223,29 @@ matrix_params = {"thresholds_points_dict": None,
         "bait_pass_col":    name of column containing pass/fail information for whether peptides bind to the baits
         "pass_str":         string representing a pass in bait_pass_col, e.g. "Yes" '''
 
-comparator_info = {"comparator_set_1": None,
-                   "comparator_set_2": None,
+comparator_info = {"comparator_set_1": ["GHI3"],
+                   "comparator_set_2": ["ABC1", "DEF2"],
                    "seq_col": "BJO_Sequence",
                    "bait_pass_col": "One_Passes",
                    "pass_str": "Yes"}
 
 ''' If optimizing weights, possible_weights is a list of arrays of possible weight values for each matrix position '''
 
-possible_weights = [np.array([0.0, 1.0]),
-                    np.array([0.0, 1.0]),
-                    np.array([0.0, 1.0]),
-                    np.array([0.0, 1.0]),
-                    np.array([0.0, 1.0]),
-                    np.array([0.0, 1.0, 2.0]),
-                    np.array([0.0, 1.0, 2.0, 3.0]),
-                    np.array([0.0, 1.0, 2.0, 3.0]),
-                    np.array([0.0, 1.0, 2.0, 3.0]),
-                    np.array([0.0, 1.0, 2.0, 3.0]),
-                    np.array([0.0, 1.0, 2.0, 3.0]),
-                    np.array([0.0, 0.5]),
-                    np.array([0.0, 1.0, 2.0]),
-                    np.array([0.0, 0.5]),
-                    np.array([0.0, 0.5])]
+possible_specificity_weights = [np.array([0.0, 1.0]),
+                                np.array([0.0, 1.0]),
+                                np.array([0.0, 1.0]),
+                                np.array([0.0, 1.0]),
+                                np.array([0.0, 1.0]),
+                                np.array([0.0, 1.0, 2.0]),
+                                np.array([0.0, 1.0, 2.0, 3.0]),
+                                np.array([0.0, 1.0, 2.0, 3.0]),
+                                np.array([0.0, 1.0, 2.0, 3.0]),
+                                np.array([0.0, 1.0, 2.0, 3.0]),
+                                np.array([0.0, 1.0, 2.0, 3.0]),
+                                np.array([0.0, 0.5]),
+                                np.array([0.0, 1.0, 2.0]),
+                                np.array([0.0, 0.5]),
+                                np.array([0.0, 0.5])]
 
 ''' Specificity matrix generation parameters contained in specificity_params: 
         "thresholds":            comma-delimited tuple of log2fc thresholds, in descending order, as floats
@@ -189,6 +263,6 @@ specificity_params = {"motif_length": 15,
                       "include_phospho": False,
                       "predefined_weights": None,
                       "optimize_weights": True,
-                      "possible_weights": possible_weights,
+                      "possible_weights": possible_specificity_weights,
                       "output_folder": "",
                       "chunk_size": 1000}

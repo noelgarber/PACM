@@ -5,9 +5,12 @@ import pandas as pd
 import multiprocessing
 from tqdm import trange
 from functools import partial
-from Matrix_Generator.config import comparator_info, specificity_params
 from Matrix_Generator.SpecificityMatrix import SpecificityMatrix
 from general_utils.weights_utils import permute_weights
+try:
+    from Matrix_Generator.config_local import comparator_info, specificity_params
+except:
+    from Matrix_Generator.config import comparator_info, specificity_params
 
 '''------------------------------------------------------------------------------------------------------------------
                      Define functions for parallelized optimization of specificity matrix weights
