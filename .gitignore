@@ -24,9 +24,10 @@ Old/BioMart_Human_Proteins_NR.csv
 Old*
 
 #Ignore private files
-/Private
+/Motif_Predictor/Private/*
 .githooks
 *config_local.py
 
 #Ignore PyCharm idea files
 *.idea
+.pybiomart.sqlite
