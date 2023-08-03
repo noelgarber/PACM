@@ -6,8 +6,11 @@ import math
 import requests
 from PACM_General_Vars import aa_charac_dict #dictionary of chemical characteristics of 20 amino acids
 
-def FilenameSubdir(subdirectory, filename):
-	curr_dir = os.getcwd()
+def FilenameSubdir(subdirectory, filename, parent_directory = "Default"):
+	if parent_directory == "Default": 
+		curr_dir = os.getcwd()
+	else: 
+		curr_dir = parent_directory
 	dest_subdir = os.path.join(curr_dir, subdirectory)
 	if not os.path.exists(dest_subdir):
 		os.makedirs(dest_subdir)
