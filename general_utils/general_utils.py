@@ -349,3 +349,14 @@ def permute_array(array, positions_count, dtype = np.float16):
         thresholds_arrays[:, i] = arr.ravel()
 
     return thresholds_arrays
+
+def finite_sorted_indices(arr):
+    # Simple function to sort values in an array in descending order, ignoring nan and inf values
+
+    mask = np.isfinite(arr)
+    masked_arr = arr[mask]
+    sorted_indices = np.argsort(masked_arr)[::-1]
+    original_indices = np.arange(len(arr))[mask]
+    output_indices = original_indices[sorted_indices]
+
+    return output_indices
