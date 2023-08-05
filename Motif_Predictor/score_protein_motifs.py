@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pickle
 from functools import partial
-from predictor_config import predictor_params
+from Motif_Predictor.predictor_config import predictor_params
 from Matrix_Generator.conditional_scoring import apply_motif_scores
 from general_utils.general_utils import finite_sorted_indices, add_number_suffix
 
