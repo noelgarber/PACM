@@ -344,7 +344,7 @@ class SpecificityMatrix:
         with open(statistics_path, "w") as file:
             file.writelines(output_lines)
         print(f"Saved specificity matrices regression statistics to {statistics_path}")
-        
+
     def score_motifs(self, motif_seqs_2d, use_weighted = True):
         '''
         User function to calculate specificity scores on motif sequences based on the generated specificity matrix
