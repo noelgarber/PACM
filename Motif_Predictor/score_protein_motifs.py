@@ -140,4 +140,4 @@ def score_protein_seqs(predictor_params = predictor_params):
             protein_seqs_df[motif_col_name] = classical_motif_col
             protein_seqs_df[score_col_name] = classical_scores_col
 
-    return protein_seqs_df
+    return protein_seqs_df, motif_col_names
