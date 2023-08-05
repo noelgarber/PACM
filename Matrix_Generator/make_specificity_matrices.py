@@ -3,6 +3,8 @@
 import numpy as np
 import pandas as pd
 import multiprocessing
+import os
+import pickle
 from tqdm import trange
 from functools import partial
 from Matrix_Generator.SpecificityMatrix import SpecificityMatrix
@@ -138,8 +140,13 @@ def main(source_df, comparator_info = comparator_info, specificity_params = spec
         specificity_matrix = find_optimal_weights(specificity_matrix, motif_length, possible_weights, chunk_size)
 
     # Save the results
+    output_folder = specificity_params.get("output_folder")
     if save:
-        output_folder = specificity_params.get("output_folder")
         specificity_matrix.save(output_folder)
+
+    # Save the SpecificityMatrix object for reloading when scoring novel motifs
+    specificity_matrix_path = os.path.join(output_folder, "specificity_matrix.pkl")
+    with open(specificity_matrix_path, "w") as f:
+        pickle.dump(specificity_matrix, f)
 
     return specificity_matrix
