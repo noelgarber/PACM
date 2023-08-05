@@ -155,7 +155,7 @@ def main(input_df, general_params = general_params, data_params = data_params, m
 
     # Save ConditionalMatrices object for later use in motif_predictor
     conditional_matrices_path = os.path.join(output_folder, "conditional_matrices.pkl")
-    with open(conditional_matrices_path, "w") as f:
+    with open(conditional_matrices_path, "wb") as f:
         pickle.dump(conditional_matrices, f)
 
     results = (best_fdr, best_for, best_score_threshold, scored_df)

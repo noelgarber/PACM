@@ -146,7 +146,7 @@ def main(source_df, comparator_info = comparator_info, specificity_params = spec
 
     # Save the SpecificityMatrix object for reloading when scoring novel motifs
     specificity_matrix_path = os.path.join(output_folder, "specificity_matrix.pkl")
-    with open(specificity_matrix_path, "w") as f:
+    with open(specificity_matrix_path, "wb") as f:
         pickle.dump(specificity_matrix, f)
 
     return specificity_matrix

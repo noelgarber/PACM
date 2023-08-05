@@ -83,7 +83,7 @@ def score_protein_seqs(predictor_params = predictor_params):
 
     # Load ConditionalMatrices object to be used in scoring
     conditional_matrices_path = predictor_params["conditional_matrices_path"]
-    with open(conditional_matrices_path, "r") as f:
+    with open(conditional_matrices_path, "rb") as f:
         conditional_matrices = pickle.load(f)
 
     # Generate columns for the number of motifs that will be returned per protein
