@@ -360,3 +360,20 @@ def finite_sorted_indices(arr):
     output_indices = original_indices[sorted_indices]
 
     return output_indices
+
+def add_number_suffix(number):
+    # Simple function that appends st, nd, rd, or th as appropriate to integers and returns as a string
+
+    last_digit = number % 10
+    if last_digit >= 4:
+        suffix = "th"
+    elif last_digit == 1:
+        suffix = "st"
+    elif last_digit == 2:
+        suffix = "nd"
+    elif last_digit == 3:
+        suffix = "rd"
+    else:
+        suffix = "th"
+
+    return f"{number}{suffix}"
