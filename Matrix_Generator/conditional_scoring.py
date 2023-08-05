@@ -118,8 +118,6 @@ def apply_motif_scores(input_df, slim_length, conditional_matrices, sequences_2d
         output_df (pd.DataFrame): dens_df with scores added
     '''
 
-    output_df = input_df if in_place else input_df.copy()
-
     # Get sequences only if needed; if sequences_2d is already provided, then sequences is not necessary
     if sequences_2d is None:
         seqs = input_df[seq_col].values.astype("<U")
@@ -141,6 +139,7 @@ def apply_motif_scores(input_df, slim_length, conditional_matrices, sequences_2d
                                        use_weighted, return_2d = True)
 
     # Assign scores to dataframe
+    output_df = input_df if in_place else input_df.copy()
     if return_2d:
         score_res_cols = ["#" + str(position) + "_score" for position in np.arange(1, slim_length + 1)]
         output_df[score_res_cols] = scores_2d
