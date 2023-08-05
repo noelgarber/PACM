@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import os
+import pickle
 from Matrix_Generator.ConditionalMatrix import ConditionalMatrices
 from Matrix_Generator.ForbiddenMatrix import ForbiddenMatrix
 from Matrix_Generator.conditional_scoring import apply_motif_scores
@@ -151,6 +152,11 @@ def main(input_df, general_params = general_params, data_params = data_params, m
     scored_df, best_fdr, best_for = apply_final_rates(scored_df, motif_scores, best_score_threshold,
                                                       contains_forbidden, passes_bools)
     print(f"Conditional matrices metrics: FDR={best_fdr} | FOR={best_for} | threshold={best_score_threshold}")
+
+    # Save ConditionalMatrices object for later use in motif_predictor
+    conditional_matrices_path = os.path.join(output_folder, "conditional_matrices.pkl")
+    with open(conditional_matrices_path, "w") as f:
+        pickle.dump(conditional_matrices, f)
 
     results = (best_fdr, best_for, best_score_threshold, scored_df)
 
