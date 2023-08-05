@@ -2,6 +2,7 @@
 import os
 import numpy as np
 import pandas as pd
+from Motif_Predictor.predictor_config import predictor_params
 
 ''' ---------------------------------------------------------------------------------------------------------------- 
             It is sometimes useful to compare the predictions of the PACM workflow against known algorithms. 
@@ -15,7 +16,7 @@ if not os.path.exists(os.path.join(os.getcwd(), "classical_matrix.csv")):
 classical_matrix = pd.read_csv("classical_matrix.csv")
 motif_length = 15
 
-def classical_method(sequence):
+def classical_method(sequence, predictor_params = predictor_params):
     '''
     Example of a parallel classical scoring method to employ alongside the new one; replace with your method as needed
 
@@ -64,19 +65,19 @@ def classical_method(sequence):
 
     core_points_sums = core_points.sum(axis=1)
 
-    # Get the total points for all the possible motifs and find the best two
+    # Get the total points for all the possible motifs
     total_points_motifs = tract_points + core_points_sums
-    best_motif_index = np.nanargmin(total_points_motifs)
-    best_motif_seq = sliced_seqs_2d[best_motif_index]
-    best_motif_seq = "".join(best_motif_seq)
-    best_motif_score = total_points_motifs[best_motif_index]
 
-    total_points_dropped = total_points_motifs.copy()
-    total_points_dropped[best_motif_index] = np.inf
-    second_best_index = np.nanargmin(np.concatenate(total_points_motifs[0:best_motif_index],
-                                                    total_points_motifs[best_motif_index+1:]))
-    second_best_seq = sliced_seqs_2d[second_best_index]
-    second_best_seq = "".join(second_best_seq)
-    second_best_score = total_points_motifs[second_best_index]
+    # Generate columns for the number of motifs that will be returned per protein
+    return_count = predictor_params["return_count"]
+    sorted_motifs = []
+    sorted_scores = []
+    sorted_score_indices = np.argsort(total_points_motifs)
+    for i in np.arange(return_count):
+        next_best_idx = sorted_score_indices[i]
+        next_best_score = total_points_motifs[next_best_idx]
+        next_best_motif = "".join(sliced_seqs_2d[next_best_idx])
+        sorted_scores.append(next_best_score)
+        sorted_motifs.append(next_best_motif)
 
-    return best_motif_seq, best_motif_score, second_best_seq, second_best_score
+    return sorted_motifs, sorted_scores
