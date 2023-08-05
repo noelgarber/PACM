@@ -344,3 +344,33 @@ class SpecificityMatrix:
         with open(statistics_path, "w") as file:
             file.writelines(output_lines)
         print(f"Saved specificity matrices regression statistics to {statistics_path}")
+        
+    def score_motifs(self, motif_seqs_2d, use_weighted = True):
+        '''
+        User function to calculate specificity scores on motif sequences based on the generated specificity matrix
+
+        Args:
+            motif_seqs_2d (np.ndarray): 2D array where each row is a motif as an array of residue letter codes
+            use_weighted (bool):        whether to use the weighted specificity matrix when scoring
+
+        Returns:
+
+        '''
+
+        if motif_seqs_2d.shape[1] != self.motif_length:
+            raise Exception(f"score_motifs error: given motifs had the shape {motif_seqs_2d.shape}, " +
+                            f"which does not match the specificity matrix motif length ({self.motif_length})")
+
+        scoring_matrix = self.weighted_matrix_df if use_weighted else self.matrix_df
+
+        # Get the indices for the matrix for each amino acid at each position
+        sequence_count = len(motif_seqs_2d)
+        indexer = scoring_matrix.index.get_indexer
+        row_indices = indexer(motif_seqs_2d.ravel()).reshape(motif_seqs_2d.shape)
+        column_indices = np.arange(self.motif_length)[np.newaxis, :].repeat(sequence_count, axis=0)
+
+        # Calculate the points
+        points_2d = scoring_matrix.values[row_indices, column_indices]
+        scores_values = points_2d.sum(axis=1)
+
+        return scores_values
