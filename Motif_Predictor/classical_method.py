@@ -11,13 +11,13 @@ from Motif_Predictor.predictor_config import predictor_params
     ---------------------------------------------------------------------------------------------------------------- '''
 
 try:
-    classical_matrix = pd.read_csv("Motif_Predictor/classical_matrix.csv")
+    classical_matrix = pd.read_csv("Motif_Predictor/classical_matrix.csv", index_col = 0)
 except:
     raise Exception("Failed to load classical_matrix.csv, which is required when using classical_method()")
 
 motif_length = 15
 
-def classical_method(sequence, predictor_params = predictor_params):
+def classical_method(sequence, predictor_params = predictor_params, classical_matrix = classical_matrix):
     '''
     Example of a parallel classical scoring method to employ alongside the new one; replace with your method as needed
 
