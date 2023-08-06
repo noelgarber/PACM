@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import multiprocessing
+import os
 from copy import deepcopy
 from tqdm import trange
 from functools import partial
@@ -162,7 +163,8 @@ def process_weights(weights_array_chunks, conditional_matrices, motif_length, so
     sequences = source_df[sequence_col].to_numpy()
     sequences_2d = unravel_seqs(sequences, motif_length, convert_phospho)
 
-    pool = multiprocessing.Pool()
+    cpu_count = os.cpu_count() - 1
+    pool = multiprocessing.Pool(processes=cpu_count)
 
     process_partial = partial(process_weights_chunk, conditional_matrices = conditional_matrices,
                               sequences_2d = sequences_2d, passes_bools = passes_bools, source_df = source_df,
