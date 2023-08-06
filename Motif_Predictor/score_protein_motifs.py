@@ -32,6 +32,8 @@ def scan_protein_seq(protein_seq, conditional_matrices, predictor_params = predi
     leading_glycines = np.repeat("G", predictor_params["leading_glycines"])
     trailing_glycines = np.repeat("G", predictor_params["trailing_glycines"])
     seq_array = np.array(list(protein_seq))
+    if seq_array[-1] == "*":
+        seq_array = seq_array[:-1] # remove stop asterisk if present
     seq_array = np.concatenate([leading_glycines, seq_array, trailing_glycines])
     slice_indices = np.arange(len(seq_array) - motif_length + 1)[:, np.newaxis] + np.arange(motif_length)
     sliced_seqs_2d = seq_array[slice_indices]
@@ -39,26 +41,36 @@ def scan_protein_seq(protein_seq, conditional_matrices, predictor_params = predi
     # Enforce position rules
     enforced_position_rules = predictor_params.get("enforced_position_rules")
     if enforced_position_rules is not None:
-        for position_index, allowed_residues in enforced_position_rules.values():
+        for position_index, allowed_residues in enforced_position_rules.items():
             column_residues = sliced_seqs_2d[:,position_index]
             residues_allowed = np.isin(column_residues, allowed_residues)
             sliced_seqs_2d = sliced_seqs_2d[residues_allowed]
+
+    # After rules have been enforced, replace uncertain residues (X) with G (no side chain) for purposes of scoring
+    missing_residues = "X" in sliced_seqs_2d
+    cleaned_sliced_2d = sliced_seqs_2d.copy()
+    if missing_residues:
+        cleaned_sliced_2d[cleaned_sliced_2d == "X"] = "G"
 
     # Get the number of motifs to return for the sequence
     return_count = predictor_params["return_count"]
 
     # Apply motif scores
-    motif_scores = apply_motif_scores(None, motif_length, conditional_matrices, sliced_seqs_2d, convert_phospho,
+    motif_scores = apply_motif_scores(None, motif_length, conditional_matrices, cleaned_sliced_2d, convert_phospho,
                                       use_weighted, return_array = True, return_2d = False, return_df = False)
     sorted_score_indices = finite_sorted_indices(motif_scores)
     sorted_motifs = []
     sorted_score_values = []
     for i in np.arange(return_count):
-        next_best_idx = sorted_score_indices[i]
-        next_best_score = motif_scores[next_best_idx]
-        next_best_motif = "".join(sliced_seqs_2d[next_best_idx])
-        sorted_motifs.append(next_best_motif)
-        sorted_score_values.append(next_best_score)
+        if i < len(motif_scores):
+            next_best_idx = sorted_score_indices[i]
+            next_best_score = motif_scores[next_best_idx]
+            next_best_motif = "".join(sliced_seqs_2d[next_best_idx])
+            sorted_motifs.append(next_best_motif)
+            sorted_score_values.append(next_best_score)
+        else:
+            sorted_motifs.append("")
+            sorted_score_values.append(np.nan)
 
     sorted_motifs = np.array(sorted_motifs)
     sorted_score_values = np.array(sorted_score_values)
