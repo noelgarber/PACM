@@ -20,19 +20,19 @@ def convert_ensembl(data_df, predictor_params = predictor_params):
 
     # Extract Ensembl IDs from dataframe and remove duplicates
     if "Ensembl_Protein_ID" in data_df.columns:
-        ensembl_id_list = data_df["Ensembl_Protein_ID"].tolist()
+        ensembl_ids = data_df["Ensembl_Protein_ID"].to_numpy()
     elif "Ensembl_ID" in data_df.columns:
-        ensembl_id_list = data_df["Ensembl_ID"].tolist()
+        ensembl_ids = data_df["Ensembl_ID"].to_numpy()
     else:
         raise IndexError("convert_ensembl error: could not find Ensembl_ID or Ensembl_Protein_ID col in input data_df")
-    ensembl_id_list = list(dict.fromkeys(ensembl_id_list)) # removes duplicates
+    unique_ensembl_ids = list(np.unique(ensembl_ids))
 
     # Define UniProt accession params
     URL = "https://rest.uniprot.org/idmapping"
 
     params = {"from": "Ensembl_Protein",
               "to": "UniProtKB",
-              "ids": " ".join(ensembl_id_list)}
+              "ids": " ".join(unique_ensembl_ids)}
 
     response = requests.post(f'{URL}/run', params)
     job_id = response.json()["jobId"]
@@ -55,7 +55,7 @@ def convert_ensembl(data_df, predictor_params = predictor_params):
        else:
            time.sleep(uniprot_refresh_time)
 
-    return ensembl_uniprot_dict
+    return ensembl_uniprot_dict, ensembl_ids
 
 def assign_uniprot(data_df, predictor_params = predictor_params):
     '''
@@ -70,16 +70,17 @@ def assign_uniprot(data_df, predictor_params = predictor_params):
     '''
 
     # Insert blank Uniprot ID column
-    data_df["Uniprot_ID"] = ""
     cols = list(data_df.columns)
     ensembl_col_name = "Ensembl_ID" if "Ensembl_ID" in cols else "Ensembl_Protein_ID"
     ensembl_col_idx = cols.index(ensembl_col_name)
-    cols.insert(ensembl_col_idx+1, ensembl_col_name)
+    cols.insert(ensembl_col_idx+1, "Uniprot_ID")
+    data_df["Uniprot_ID"] = ""
     data_df = data_df[cols]
 
     # Get dict of Ensembl Protein ID --> Uniprot ID and map it onto the dataframe
-    ensembl_uniprot_dict = convert_ensembl(data_df, predictor_params)
-    data_df["Uniprot_ID"] = data_df[ensembl_col_name].map(ensembl_uniprot_dict)
+    ensembl_uniprot_dict, ensembl_ids = convert_ensembl(data_df, predictor_params)
+    uniprot_ids = [ensembl_uniprot_dict.get(ensembl_id) for ensembl_id in ensembl_ids]
+    data_df["Uniprot_ID"] = uniprot_ids
 
     return data_df
 
@@ -181,7 +182,7 @@ def response_to_df(index, resp, motif_cols, dataframe, predictor_params = predic
     '''
 
     if resp.ok:
-        response_json = response.json() # creates a dict of dicts
+        response_json = resp.json() # creates a dict of dicts
 
         comments_list_dicts = response_json.get("comments")
         if comments_list_dicts is not None:
@@ -228,9 +229,12 @@ def predict_topology(data_df, motif_cols, predictor_params = predictor_params):
 
     protein_count = len(data_df)
 
+    # Assign Uniprot IDs to Ensembl proteins
+    data_df = assign_uniprot(data_df, predictor_params)
+
     # Loop through the dataframe to apply the function
     for i in np.arange(protein_count):
-        uniprot_id = data_df.at[i, "UniProt_ID"]
+        uniprot_id = data_df.at[i, "Uniprot_ID"]
 
         if uniprot_id != "None" and uniprot_id != "":
             query_url = "https://rest.uniprot.org/uniprotkb/" + uniprot_id
