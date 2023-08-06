@@ -44,9 +44,11 @@ def scan_protein_seq(protein_seq, conditional_matrices, predictor_params = predi
 
     # Extract protein sequence into overlapping motif-sized segments with step size of 1
     if valid_seq:
+        # Remove stop asterisk if present
+        if protein_seq[-1] == "*":
+            protein_seq = protein_seq[:-1]
+
         seq_array = np.array(list(protein_seq))
-        if seq_array[-1] == "*":
-            seq_array = seq_array[:-1] # remove stop asterisk if present
 
         seq_array = np.concatenate([leading_glycines, seq_array, trailing_glycines])
         slice_indices = np.arange(len(seq_array) - motif_length + 1)[:, np.newaxis] + np.arange(motif_length)
@@ -121,25 +123,29 @@ def score_protein_seqs(predictor_params = predictor_params):
 
     # Generate columns for the number of motifs that will be returned per protein
     return_count = predictor_params["return_count"]
+    compare_classical_method = predictor_params["compare_classical_method"]
+
     ordered_motifs_cols = []
     ordered_scores_cols = []
     motif_col_names = []
     score_col_names = []
+    if compare_classical_method:
+        classical_motifs_cols = []
+        classical_scores_cols = []
+
     for i in np.arange(return_count):
         ordered_motifs_cols.append([])
         ordered_scores_cols.append([])
-        suffix_number = add_number_suffix(i)
+        if compare_classical_method:
+            classical_motifs_cols.append([])
+            classical_scores_cols.append([])
+        suffix_number = add_number_suffix(i+1)
         motif_col_names.append(suffix_number+"_motif")
         score_col_names.append(suffix_number+"_motif_score")
 
     # Loop over the protein sequences to score them
     scan_seq_partial = partial(scan_protein_seq, conditional_matrices = conditional_matrices,
                                predictor_params = predictor_params)
-
-    compare_classical_method = predictor_params["compare_classical_method"]
-    if compare_classical_method:
-        classical_motifs_cols = ordered_motifs_cols.copy()
-        classical_scores_cols = ordered_scores_cols.copy()
 
     for i, protein_seq in enumerate(protein_seqs_list):
         print(f"Current entry: #{i}")
