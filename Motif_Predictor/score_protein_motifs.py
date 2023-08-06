@@ -85,7 +85,8 @@ def score_protein_seqs(predictor_params = predictor_params):
         predictor_params (dict): dictionary of user-defined parameters from predictor_config.py
 
     Returns:
-
+        protein_seqs_df (pd.DataFrame): dataframe with protein sequences and found motifs
+        motif_col_names (list):         list of column names containing motif sequences for each protein
     '''
 
     # Get protein sequences to score
