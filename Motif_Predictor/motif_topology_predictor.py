@@ -172,7 +172,7 @@ def response_to_df(index, resp, motif_cols, dataframe, predictor_params = predic
 
     Args:
         index (int):              current row index in dataframe
-        resp (response):          server response
+        resp (requests.Response): server response
         motif_cols (list):        list of columns holding motif sequences
         dataframe (pd.DataFrame): main dataframe
         predictor_params (dict):  dictionary of user-defined parameters for the motif prediction workflow
@@ -213,6 +213,9 @@ def response_to_df(index, resp, motif_cols, dataframe, predictor_params = predic
                 motif_topo_assigner(motif_start, motif_end, features_list_dicts, index, output_col, dataframe)
             else:
                 dataframe.at[index, output_col] = "Motif not found (usually due to UniProt/Ensembl sequence discrepancy"
+
+    else:
+        print(f"Error {resp.status_code} at row {index} while requesting topology information from Uniprot")
 
 def predict_topology(data_df, motif_cols, predictor_params = predictor_params):
     '''
