@@ -49,8 +49,8 @@ def classical_method(sequence, predictor_params = predictor_params):
     # Translate tract charges into points values
     tract_points = np.full(shape=tract_charges.shape, fill_value=np.inf, dtype=float)
     tract_points[tract_charges <= -4] = 0
-    tract_points[tract_charges <= -3 & tract_charges > -4] = 0.5
-    tract_points[tract_charges <= -2 & tract_charges > -3] = 1
+    tract_points[np.logical_and(tract_charges <= -3, tract_charges > -4)] = 0.5
+    tract_points[np.logical_and(tract_charges <= -2, tract_charges > -3)] = 1
     tract_points[tract_charges > -2] = 1.5
 
     # Apply matrix to core sequences
