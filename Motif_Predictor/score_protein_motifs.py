@@ -52,6 +52,11 @@ def scan_protein_seq(protein_seq, conditional_matrices, predictor_params = predi
     if missing_residues:
         cleaned_sliced_2d[cleaned_sliced_2d == "X"] = "G"
 
+    # Optionally replace selenocysteine with cysteine for scoring purposes
+    replace_selenocysteine = predictor_params["replace_selenocysteine"]
+    if replace_selenocysteine and "U" in sliced_seqs_2d:
+        cleaned_sliced_2d[cleaned_sliced_2d == "U"] = "C"
+
     # Get the number of motifs to return for the sequence
     return_count = predictor_params["return_count"]
 
@@ -122,11 +127,13 @@ def score_protein_seqs(predictor_params = predictor_params):
         classical_scores_cols = ordered_scores_cols.copy()
 
     for i, protein_seq in enumerate(protein_seqs_list):
+        print(f"Entry #{i}:")
         # Score the protein sequence using conditional matrices
         sorted_motifs, sorted_score_values = scan_seq_partial(protein_seq)
         for j, (motif, score) in enumerate(zip(sorted_motifs, sorted_score_values)):
             ordered_motifs_cols[j].append(motif)
             ordered_scores_cols[j].append(score)
+        print(f"\tNovel method found motifs {sorted_motifs} with scores {sorted_score_values}")
 
         # Optionally score the sequence using a classical method for comparison
         if compare_classical_method:
@@ -134,6 +141,7 @@ def score_protein_seqs(predictor_params = predictor_params):
             for j, (classical_motif, classical_score) in enumerate(zip(classical_motifs, classical_scores)):
                 classical_motifs_cols[j].append(classical_motif)
                 classical_scores_cols[j].append(classical_score)
+            print(f"\tClassical method found motifs {classical_motifs} with scores {classical_scores}")
 
     # Apply motifs and scores as columns to the dataframe
     zipped_cols = zip(ordered_motifs_cols, motif_col_names, ordered_scores_cols, score_col_names)
