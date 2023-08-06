@@ -27,55 +27,70 @@ def scan_protein_seq(protein_seq, conditional_matrices, predictor_params = predi
     motif_length = predictor_params["motif_length"]
     use_weighted = predictor_params["use_weighted"]
     convert_phospho = predictor_params["convert_phospho"]
-
-    # Extract protein sequence into overlapping motif-sized segments with step size of 1
-    leading_glycines = np.repeat("G", predictor_params["leading_glycines"])
-    trailing_glycines = np.repeat("G", predictor_params["trailing_glycines"])
-    seq_array = np.array(list(protein_seq))
-    if seq_array[-1] == "*":
-        seq_array = seq_array[:-1] # remove stop asterisk if present
-    seq_array = np.concatenate([leading_glycines, seq_array, trailing_glycines])
-    slice_indices = np.arange(len(seq_array) - motif_length + 1)[:, np.newaxis] + np.arange(motif_length)
-    sliced_seqs_2d = seq_array[slice_indices]
-
-    # Enforce position rules
-    enforced_position_rules = predictor_params.get("enforced_position_rules")
-    if enforced_position_rules is not None:
-        for position_index, allowed_residues in enforced_position_rules.items():
-            column_residues = sliced_seqs_2d[:,position_index]
-            residues_allowed = np.isin(column_residues, allowed_residues)
-            sliced_seqs_2d = sliced_seqs_2d[residues_allowed]
-
-    # After rules have been enforced, replace uncertain residues (X) with G (no side chain) for purposes of scoring
-    missing_residues = "X" in sliced_seqs_2d
-    cleaned_sliced_2d = sliced_seqs_2d.copy()
-    if missing_residues:
-        cleaned_sliced_2d[cleaned_sliced_2d == "X"] = "G"
-
-    # Optionally replace selenocysteine with cysteine for scoring purposes
-    replace_selenocysteine = predictor_params["replace_selenocysteine"]
-    if replace_selenocysteine and "U" in sliced_seqs_2d:
-        cleaned_sliced_2d[cleaned_sliced_2d == "U"] = "C"
-
-    # Get the number of motifs to return for the sequence
     return_count = predictor_params["return_count"]
 
-    # Apply motif scores
-    motif_scores = apply_motif_scores(None, motif_length, conditional_matrices, cleaned_sliced_2d, convert_phospho,
-                                      use_weighted, return_array = True, return_2d = False, return_df = False)
-    sorted_score_indices = finite_sorted_indices(motif_scores)
-    sorted_motifs = []
-    sorted_score_values = []
-    for i in np.arange(return_count):
-        if i < len(motif_scores):
-            next_best_idx = sorted_score_indices[i]
-            next_best_score = motif_scores[next_best_idx]
-            next_best_motif = "".join(sliced_seqs_2d[next_best_idx])
-            sorted_motifs.append(next_best_motif)
-            sorted_score_values.append(next_best_score)
-        else:
-            sorted_motifs.append("")
-            sorted_score_values.append(np.nan)
+    # Get N-term and C-term trailing residue info
+    leading_glycines = np.repeat("G", predictor_params["leading_glycines"])
+    trailing_glycines = np.repeat("G", predictor_params["trailing_glycines"])
+
+    # Determine whether protein seq is valid
+    valid_seq = True
+    if not isinstance(protein_seq, str):
+        valid_seq = False
+    elif len(protein_seq) < motif_length:
+        valid_seq = False
+    elif "*" in protein_seq[:-1]:
+        valid_seq = False
+
+    # Extract protein sequence into overlapping motif-sized segments with step size of 1
+    if valid_seq:
+        seq_array = np.array(list(protein_seq))
+        if seq_array[-1] == "*":
+            seq_array = seq_array[:-1] # remove stop asterisk if present
+
+        seq_array = np.concatenate([leading_glycines, seq_array, trailing_glycines])
+        slice_indices = np.arange(len(seq_array) - motif_length + 1)[:, np.newaxis] + np.arange(motif_length)
+        sliced_seqs_2d = seq_array[slice_indices]
+
+        # Enforce position rules
+        enforced_position_rules = predictor_params.get("enforced_position_rules")
+        if enforced_position_rules is not None:
+            for position_index, allowed_residues in enforced_position_rules.items():
+                column_residues = sliced_seqs_2d[:,position_index]
+                residues_allowed = np.isin(column_residues, allowed_residues)
+                sliced_seqs_2d = sliced_seqs_2d[residues_allowed]
+
+        # After rules have been enforced, replace uncertain residues (X) with G (no side chain) for purposes of scoring
+        missing_residues = "X" in sliced_seqs_2d
+        cleaned_sliced_2d = sliced_seqs_2d.copy()
+        if missing_residues:
+            cleaned_sliced_2d[cleaned_sliced_2d == "X"] = "G"
+
+        # Optionally replace selenocysteine with cysteine for scoring purposes
+        replace_selenocysteine = predictor_params["replace_selenocysteine"]
+        if replace_selenocysteine and "U" in sliced_seqs_2d:
+            cleaned_sliced_2d[cleaned_sliced_2d == "U"] = "C"
+
+        # Apply motif scores
+        motif_scores = apply_motif_scores(None, motif_length, conditional_matrices, cleaned_sliced_2d, convert_phospho,
+                                          use_weighted, return_array = True, return_2d = False, return_df = False)
+        sorted_score_indices = finite_sorted_indices(motif_scores)
+        sorted_motifs = []
+        sorted_score_values = []
+        for i in np.arange(return_count):
+            if i < len(motif_scores):
+                next_best_idx = sorted_score_indices[i]
+                next_best_score = motif_scores[next_best_idx]
+                next_best_motif = "".join(sliced_seqs_2d[next_best_idx])
+                sorted_motifs.append(next_best_motif)
+                sorted_score_values.append(next_best_score)
+            else:
+                sorted_motifs.append("")
+                sorted_score_values.append(np.nan)
+
+    else:
+        sorted_motifs = np.repeat("", return_count)
+        sorted_score_values = np.repeat(np.nan, return_count)
 
     sorted_motifs = np.array(sorted_motifs)
     sorted_score_values = np.array(sorted_score_values)
@@ -127,13 +142,13 @@ def score_protein_seqs(predictor_params = predictor_params):
         classical_scores_cols = ordered_scores_cols.copy()
 
     for i, protein_seq in enumerate(protein_seqs_list):
-        print(f"Entry #{i}:")
+        print(f"Current entry: #{i}")
         # Score the protein sequence using conditional matrices
         sorted_motifs, sorted_score_values = scan_seq_partial(protein_seq)
         for j, (motif, score) in enumerate(zip(sorted_motifs, sorted_score_values)):
             ordered_motifs_cols[j].append(motif)
             ordered_scores_cols[j].append(score)
-        print(f"\tNovel method found motifs {sorted_motifs} with scores {sorted_score_values}")
+        #print(f"\tNovel method found motifs {sorted_motifs} with scores {sorted_score_values}")
 
         # Optionally score the sequence using a classical method for comparison
         if compare_classical_method:
@@ -141,7 +156,7 @@ def score_protein_seqs(predictor_params = predictor_params):
             for j, (classical_motif, classical_score) in enumerate(zip(classical_motifs, classical_scores)):
                 classical_motifs_cols[j].append(classical_motif)
                 classical_scores_cols[j].append(classical_score)
-            print(f"\tClassical method found motifs {classical_motifs} with scores {classical_scores}")
+            #print(f"\tClassical method found motifs {classical_motifs} with scores {classical_scores}")
 
     # Apply motifs and scores as columns to the dataframe
     zipped_cols = zip(ordered_motifs_cols, motif_col_names, ordered_scores_cols, score_col_names)
