@@ -298,8 +298,7 @@ def unravel_seqs(sequences_array, motif_length, convert_phospho = True):
     sequence_lengths = np.vectorize(len)(sequences_array)
     matches_slim_length = sequence_lengths == motif_length
     if not matches_slim_length.all():
-        wrong_lengths_count = np.sum(~matches_slim_length)
-        raise ValueError(f"score_seqs error: {wrong_lengths_count} seqs (of {len(sequences)}) are not the expected length ({slim_length})")
+        raise ValueError(f"score_seqs error: the following seqs are not the expected length ({motif_length}): {sequences_array[~matches_slim_length]}")
 
     sequences_array = sequences_array.astype("<U")
     sequences_unravelled = sequences_array.view("U1")
