@@ -87,7 +87,7 @@ def scan_protein_seq(protein_seq, conditional_matrices, predictor_params = predi
                 sorted_motifs.append(next_best_motif)
                 sorted_score_values.append(next_best_score)
             else:
-                sorted_motifs.append("")
+                sorted_motifs.append(" " * motif_length)
                 sorted_score_values.append(np.nan)
 
     else:
