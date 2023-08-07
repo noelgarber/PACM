@@ -15,11 +15,11 @@ def main(fasta_path):
         ensembl_gene_id = ""
         for element in description_elements:
                 if "gene_symbol" in element:
-                        gene_name = element.split(":",1)
+                        gene_name = element.split(":",1)[1]
                 elif "gene:" in element:
-                        ensembl_gene_id = element.split(":",1)
+                        ensembl_gene_id = element.split(":",1)[1]
                 elif "transcript:" in element:
-                        ensembl_transcript_id = element.split(":",1)
+                        ensembl_transcript_id = element.split(":",1)[1]
         data.append([ensembl_protein_id, ensembl_transcript_id, ensembl_gene_id, gene_name, protein_seq])
 
     cols = ["Ensembl_Protein_ID","Ensembl_Transcript_ID","Ensembl_Gene_ID","Gene_Name","Sequence"]
