@@ -18,8 +18,12 @@ def main(predictor_params = predictor_params):
         protein_seqs_df (pd.DataFrame): dataframe of scored protein sequences
     '''
 
+    # Get protein sequences to score
+    protein_seqs_path = predictor_params["protein_seqs_path"]
+    protein_seqs_df = pd.read_csv(protein_seqs_path)
+
     # Apply conditional matrices motif scoring
-    protein_seqs_df, motif_col_names = score_protein_seqs(predictor_params)
+    protein_seqs_df, motif_col_names = score_protein_seqs(protein_seqs_df, predictor_params)
 
     # Apply bait specificity scoring of discovered motifs
     compare_classical_method = predictor_params["compare_classical_method"]

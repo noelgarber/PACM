@@ -99,12 +99,13 @@ def scan_protein_seq(protein_seq, conditional_matrices, predictor_params = predi
 
     return sorted_motifs, sorted_score_values
 
-def score_protein_seqs(predictor_params = predictor_params):
+def score_protein_seqs(protein_seqs_df, predictor_params = predictor_params):
     '''
     Top level function to score protein sequences based on conditional matrices
 
     Args:
-        predictor_params (dict): dictionary of user-defined parameters from predictor_config.py
+        protein_seqs_df (pd.DataFrame): protein sequences dataframe
+        predictor_params (dict):        dictionary of user-defined parameters from predictor_config.py
 
     Returns:
         protein_seqs_df (pd.DataFrame): dataframe with protein sequences and found motifs
@@ -112,8 +113,6 @@ def score_protein_seqs(predictor_params = predictor_params):
     '''
 
     # Get protein sequences to score
-    protein_seqs_path = predictor_params["protein_seqs_path"]
-    protein_seqs_df = pd.read_csv(protein_seqs_path)
     protein_seqs_list = protein_seqs_df["Sequence"].to_list()
 
     # Load ConditionalMatrices object to be used in scoring
