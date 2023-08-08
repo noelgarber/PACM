@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import warnings
+from math import e
 from functools import partial
 
 def make_empty_matrix(position_count, amino_acid_list, dtype=np.int64):
@@ -29,33 +30,43 @@ def make_empty_matrix(position_count, amino_acid_list, dtype=np.int64):
 
     return empty_matrix_df
 
-def continuous_points(x_value, peak_points, peak_at_signal):
+def continuous_points(x_value, k, x_midpoint, L = 1, base = e, enforce_origin = True):
     '''
-    Simple function for continuous points assignment based on signal value, using a rational function in the form:
-        y = a((kx-1)/(1+(kx-1)^2) + 1/2)
+    Simple function for continuous points assignment based on signal value, using the logistic (sigmoid) function
 
     Args:
         x_value (float):        the signal value to evaluate for points assignment
         peak_points (float):    maximum number of points that can be assigned
         peak_at_signal (float): signal value threshold where maximum points are assigned, followed by a steady decrease
+        k (float):              steepness of the curve
+        x_midpoint (float):     x-value at the sigmoid midpoint (inflection point)
+        L (float):              maximum y-value outputted by the function
+        base (float):           exponent base for the function's denominator; default is math.e
+        enforce_origin (bool):  whether to enforce origin = (0,0)
 
     Returns:
         points_at_x (float):    the evaluated number of points corresponding to the signal x_value given
     '''
 
-    k = 2 / peak_at_signal
-    kx_minus_1 = (k * x_value) - 1
-    points_relative = (kx_minus_1 / (1 + kx_minus_1**2)) + 1/2
-    points = peak_points * points_relative
+    exponent = -k * (x_value - x_midpoint)
+    points = L / (1 + base**exponent)
+    if enforce_origin:
+        value_at_zero = L / (1 + base**(k*x_midpoint))
+        points = points - value_at_zero
 
     return points
 
 def get_peptide_points(signal_values, sequence_count, sorted_thresholds = None, use_points_function = False,
-                       function_peak_signal = 10, function_peak_points = 4, enforced_points = None, verbose = False):
+                       continuous_function_arguments = None, enforced_points = None, verbose = False):
     # Helper function to apply sorted thresholds, as tuples of (threshold, points), to an array of peptide sequences
 
     if use_points_function:
-        get_points = partial(continuous_points, peak_points = function_peak_points, peak_at_signal = function_peak_signal)
+        k = continuous_function_arguments["k"]
+        L = continuous_function_arguments["L"]
+        x_midpoint = continuous_function_arguments["x_midpoint"]
+        if x_midpoint is None:
+            raise ValueError("get_peptide_points requires x_midpoint to be int or float, not None (NoneType)")
+        get_points = partial(continuous_points, k, x_midpoint, L, base = e, enforce_origin = True)
         points_values = [get_points(signal_val) for signal_val in signal_values]
         points_values = np.array(points_values)
     elif enforced_points is None:
@@ -72,25 +83,28 @@ def get_peptide_points(signal_values, sequence_count, sorted_thresholds = None, 
     return points_values, mean_points
 
 def increment_matrix(sequences, matrix_df, sequences_2d = None, sorted_thresholds = None, signal_values = None,
-                     enforced_points = None, points_mode = "continuous", return_mean_points = False, verbose = False):
+                     enforced_points = None, points_mode = "continuous", continuous_function_arguments = None,
+                     return_mean_points = False, verbose = False):
     '''
     Function to increment a position-weighted matrix based on sequences and their associated points values
 
     Args:
-        sequences (array-like):     the sequences as a list of strings
-        matrix_df (pd.DataFrame):   the matrix to increment
-        sequences_2d (np.ndarray):  optionally work from a 2D unravelled array of sequences where each row is an
-                                    array of amino acids constituting a peptide
-        sorted_thresholds (list):   list of tuples of signal thresholds and associated points values
-        signal_values (array-like): the signal values associated with the sequences
-        enforced_points (float):    if not using thresholding, this is the enforced points value used for incrementing;
-                                    negative values result in decrementing
-        points_mode (str):          "continuous" calculates points by signal value, rising to a peak and then
-                                    decreasing to a plateau at half of the peak value;
-                                    "thresholds" uses sorted_thresholds;
-                                    "enforced_points" uses enforced_points as the same points value for all peptides
-        return_mean_points (bool):  whether to also return the mean points value for all positive peptides
-        verbose (bool):             whether to display debugging info
+        sequences (array-like):               the sequences as a list of strings
+        matrix_df (pd.DataFrame):             the matrix to increment
+        sequences_2d (np.ndarray):            optionally work from a 2D unravelled array of sequences where each row is
+                                              an array of amino acids constituting a peptide
+        sorted_thresholds (list):             list of tuples of signal thresholds and associated points values
+        signal_values (array-like):           the signal values associated with the sequences
+        enforced_points (float):              if not using thresholding, this is the enforced points value used for
+                                              incrementing; negative values result in decrementing
+        points_mode (str):                    "continuous" calculates points by signal value, rising to a peak and then
+                                              decreasing to a plateau at half of the peak value;
+                                              "thresholds" uses sorted_thresholds;
+                                              "enforced_points" uses enforced_points as the same points value for all
+        continuous_function_arguments (dict): dictionary of continuous points assignment sigmoid function arguments;
+                                              only required if points_mode is "continuous"
+        return_mean_points (bool):            whether to also return the mean points value for all positive peptides
+        verbose (bool):                       whether to display debugging info
 
     Returns:
         matrix_df (pd.DataFrame):   the updated matrix with incremented values
@@ -105,10 +119,13 @@ def increment_matrix(sequences, matrix_df, sequences_2d = None, sorted_threshold
 
     # Get the relevant points values for each sequence
     if points_mode == "continuous":
-        mean_positive_signal = signal_values[signal_values >= 0].mean()
+        if continuous_function_arguments["x_midpoint"] is None:
+            median_positive_signal = np.nanmedian(signal_values[signal_values >= 0])
+            continuous_function_arguments["x_midpoint"] = median_positive_signal
+        signal_values[signal_values < 0] = 0
         points_values, mean_points = get_peptide_points(signal_values, sequence_count, use_points_function = True,
-                                                        function_peak_signal = mean_positive_signal,
-                                                        function_peak_points = 4, verbose = verbose)
+                                                        continuous_function_arguments = continuous_function_arguments,
+                                                        verbose = verbose)
     elif points_mode == "thresholds":
         points_values, mean_points = get_peptide_points(signal_values, sequence_count, sorted_thresholds,
                                                         verbose = verbose)
