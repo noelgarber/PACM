@@ -75,8 +75,7 @@ class ConditionalMatrix:
         
         # Assign points for positive peptides and increment the matrix
         points_assignment_mode = matrix_params.get("points_assignment_mode")
-        thres_points_dict = matrix_params.get("thresholds_points_dict")
-        mean_points = self.increment_positives(masked_sequences_2d, masked_signal_values, points_assignment_mode, thres_points_dict)
+        mean_points = self.increment_positives(masked_sequences_2d, masked_signal_values, points_assignment_mode)
 
         # If penalizing negatives, decrement the matrix appropriately for negative peptides
         penalize_negatives = matrix_params.get("penalize_negatives") # boolean on whether to penalize negative peptides
@@ -131,12 +130,14 @@ class ConditionalMatrix:
 
         return signal_cols
 
-    def increment_positives(self, masked_sequences_2d, masked_signal_values, points_assignment_mode = "continuous",
-                            thresholds_points_dict = None):
+    def increment_positives(self, masked_sequences_2d, masked_signal_values, points_assignment_mode = "continuous"):
         if points_assignment_mode == "continuous":
+            continuous_constants = matrix_params["continuous_constants"]
             self.matrix_df, mean_points = increment_matrix(None, self.matrix_df, masked_sequences_2d,
                                                            signal_values = masked_signal_values,
-                                                           points_mode = "continuous", return_mean_points = True)
+                                                           points_mode = "continuous",
+                                                           continuous_function_arguments = continuous_constants,
+                                                           return_mean_points = True)
         elif points_assignment_mode == "thresholds":
             thresholds_points_dict = matrix_params.get("thresholds_points_dict")
             sorted_thresholds = sorted(thresholds_points_dict.items(), reverse=True)
