@@ -29,12 +29,12 @@ def optimize_predictive_values(scores_array, passes_bools):
     sorted_scores = deepcopy(scores_array)
     sorted_scores = sorted_scores[sorted_scores > 0]
     sorted_scores.sort()
-    scores_above_thresholds = scores_array >= sorted_scores.reshape(-1, 1)
+    scores_below_thresholds = scores_array <= sorted_scores.reshape(-1, 1)
 
-    TPs = np.logical_and(scores_above_thresholds, passes_bools).sum(axis=1)
-    TNs = np.logical_and(~scores_above_thresholds, ~passes_bools).sum(axis=1)
-    FPs = np.logical_and(scores_above_thresholds, ~passes_bools).sum(axis=1)
-    FNs = np.logical_and(~scores_above_thresholds, passes_bools).sum(axis=1)
+    TPs = np.logical_and(scores_below_thresholds, passes_bools).sum(axis=1)
+    TNs = np.logical_and(~scores_below_thresholds, ~passes_bools).sum(axis=1)
+    FPs = np.logical_and(scores_below_thresholds, ~passes_bools).sum(axis=1)
+    FNs = np.logical_and(~scores_below_thresholds, passes_bools).sum(axis=1)
 
     with np.errstate(divide="ignore", invalid="ignore"):
         PPVs = TPs / (TPs + FPs)

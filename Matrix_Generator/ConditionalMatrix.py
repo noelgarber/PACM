@@ -3,24 +3,27 @@
 import numpy as np
 import pandas as pd
 import os
-from functools import partial
-from math import e
-from scipy.stats import fisher_exact
+import warnings
+from scipy.stats import barnard_exact, ttest_ind
 from general_utils.general_utils import unravel_seqs, check_seq_lengths
-from general_utils.matrix_utils import increment_matrix, make_empty_matrix, collapse_phospho
+from general_utils.matrix_utils import make_empty_matrix, collapse_phospho
 from general_utils.user_helper_functions import get_thresholds
 try:
-    from Matrix_Generator.config_local import data_params, matrix_params
+    from Matrix_Generator.config_local import data_params, matrix_params, aa_equivalence_dict
 except:
-    from Matrix_Generator.config import data_params, matrix_params
+    from Matrix_Generator.config import data_params, matrix_params, aa_equivalence_dict
 
 class ConditionalMatrix:
     '''
-    Class that contains a position-weighted matrix (self.matrix_df) based on input data and a conditional type-position
-    rule, e.g. position #1 = [D,E]
+    Describes a position-weighted suboptimal element matrix (self.matrix_df) based on input data and a conditional
+    type-position rule, e.g. position #1 = ["D","E"].
+
+    The underlying principle is to determine which suboptimal residues are 'lethal', which are disfavoured, and how many
+    non-lethal disfavoured residues are required to collectively kill a putative peptide's binding to target proteins.
     '''
-    def __init__(self, motif_length, source_df, residue_charac_dict,
-                 data_params = data_params, matrix_params = matrix_params):
+
+    def __init__(self, motif_length, source_df, data_params = data_params,
+                 matrix_params = matrix_params, aa_equivalence_dict = aa_equivalence_dict):
         '''
         Function for initializing unadjusted conditional matrices from source peptide data,
         based on type-position rules (e.g. #1=Acidic)
@@ -28,9 +31,9 @@ class ConditionalMatrix:
         Args:
             motif_length (int):                the length of the motif being assessed
             source_df (pd.DataFrame):          dataframe containing peptide-protein binding data
-            residue_charac_dict:               dict of amino acid chemical characteristics
             data_params (dict):                dictionary of data-specific params described in config.py
             matrix_params (dict):              dictionary of matrix-specific params described in config.py
+            aa_equivalence_dict (dict):        dictionary of similar amino acids described in config.py
         '''
         # Construct the empty matrix dataframe
         amino_acids = matrix_params.get("amino_acids")
@@ -62,26 +65,17 @@ class ConditionalMatrix:
         pass_str = data_params.get("pass_str")
         pass_col = data_params.get("bait_pass_col")
         pass_values = source_df[pass_col].to_numpy()
-        pass_calls = pass_values == pass_str
+        pass_calls = np.equal(pass_values, pass_str)
         index_for_filtering = position_for_filtering - 1
         get_nth_position = np.vectorize(lambda x: x[index_for_filtering] if len(x) >= index_for_filtering + 1 else "")
         filter_position_chars = get_nth_position(sequences)
         qualifying_member_calls = np.isin(filter_position_chars, included_residues)
 
-        # Get the sequences and signal values to use for incrementing the matrix
-        logical_mask = np.logical_and(pass_calls, qualifying_member_calls)
-        masked_sequences_2d = sequences_2d[logical_mask]
-        masked_signal_values = mean_signal_values[logical_mask]
-        
-        # Assign points for positive peptides and increment the matrix
-        points_assignment_mode = matrix_params.get("points_assignment_mode")
-        mean_points = self.increment_positives(masked_sequences_2d, masked_signal_values, points_assignment_mode)
-
-        # If penalizing negatives, decrement the matrix appropriately for negative peptides
-        penalize_negatives = matrix_params.get("penalize_negatives") # boolean on whether to penalize negative peptides
-        if penalize_negatives:
-            self.decrement_negatives(pass_calls, qualifying_member_calls, sequences_2d, masked_sequences_2d,
-                                     mean_points, residue_charac_dict)
+        # Assign points to the suboptimal element matrix based on which amino acids are more or less disfavoured
+        masked_sequences_2d = sequences_2d[qualifying_member_calls]
+        masked_signal_values = mean_signal_values[qualifying_member_calls]
+        masked_pass_calls = pass_calls[qualifying_member_calls]
+        self.increment_suboptimal(masked_sequences_2d, masked_signal_values, masked_pass_calls, aa_equivalence_dict)
 
         # Optionally combine phospho and non-phospho residue rows in the matrix
         include_phospho = matrix_params.get("include_phospho")
@@ -130,120 +124,97 @@ class ConditionalMatrix:
 
         return signal_cols
 
-    def increment_positives(self, masked_sequences_2d, masked_signal_values, points_assignment_mode = "continuous"):
-        if points_assignment_mode == "continuous":
-            continuous_constants = matrix_params["continuous_constants"]
-            self.matrix_df, mean_points = increment_matrix(None, self.matrix_df, masked_sequences_2d,
-                                                           signal_values = masked_signal_values,
-                                                           points_mode = "continuous",
-                                                           continuous_function_arguments = continuous_constants,
-                                                           return_mean_points = True)
-        elif points_assignment_mode == "thresholds":
-            thresholds_points_dict = matrix_params.get("thresholds_points_dict")
-            sorted_thresholds = sorted(thresholds_points_dict.items(), reverse=True)
-            self.matrix_df, mean_points = increment_matrix(None, self.matrix_df, masked_sequences_2d, sorted_thresholds,
-                                                           masked_signal_values, return_mean_points = True)
-        else:
-            raise ValueError(f"ConditionalMatrix initialization error: matrix_params[\"points_assignment_mode\"] is set to {points_assignment_mode}, but must be either `continuous` or `thresholds`")
+    def increment_suboptimal(self, sequences_2d, signal_values, pass_calls, aa_equivalence_dict = aa_equivalence_dict):
+        '''
+        Function to increment the conditional suboptimal element matrix based on disfavoured amino acids by position
 
-        return mean_points
+        Args:
+            sequences_2d (np.ndarray):  array of sequences where each row is a peptide as an array of amino acids
+            signal_values (np.ndarray): signal values for each peptide
+            pass_calls (np.ndarray):    pass/fail calls as bools for each peptide
+            aa_equivalence_dict (dict): used for pooling similar residues when testing whether residues are disfavoured
 
-    def decrement_negatives(self, pass_calls, qualifying_member_calls, sequences_2d,
-                            masked_sequences_2d, mean_positive_points, residue_charac_dict, alpha = 0.1):
-        # Helper function that decrements the matrix based on negative peptides if indicated
+        Returns:
+            None; operation is performed in-place
+        '''
 
-        inverse_logical_mask = np.logical_and(~pass_calls, qualifying_member_calls)
-        inverse_masked_sequences_2d = sequences_2d[inverse_logical_mask]
+        signal_values[signal_values < 0] = 0
+        index_for_filtering = self.rule[0] - 1
 
-        # Decrement the matrix based on inverse masked sequences
-        if len(inverse_masked_sequences_2d) > 0:
-            # Adjust for inequality in number of negative hits compared to positive
-            positive_count = len(masked_sequences_2d)
-            negative_count = len(inverse_masked_sequences_2d)
-            positive_negative_ratio = positive_count / negative_count
-            negative_points = -1 * mean_positive_points * positive_negative_ratio
+        # Iterate over the matrix columns representing motif positions
+        cols = list(self.matrix_df.columns)
+        cols.pop(index_for_filtering)
 
-            # Only use AAs that are never found in passing peptides, i.e. forbidden AAs, to decrement the matrix
-            for col_number in np.arange(inverse_masked_sequences_2d.shape[1]):
-                positive_masked_col = masked_sequences_2d[:, col_number]
-                negative_masked_col = inverse_masked_sequences_2d[:, col_number]
+        for col_index, col in enumerate(self.matrix_df.columns):
+            col_residues = sequences_2d[:, col_index]
+            passing_residues = col_residues[pass_calls]
+            failing_residues = col_residues[~pass_calls]
 
-                # Only use significantly disfavoured residues for decrementation, and set others to X (not used)
-                for aa_group in residue_charac_dict.values():
-                    # Perform Fisher's exact test on pooled amino acids from this group
-                    aa_group = np.array(aa_group, dtype="U")
+            # Iterate over possible amino acids in the matrix index
+            for amino_acid in self.matrix_df.index:
+                peptides_with_aa = np.sum(col_residues == amino_acid)
 
-                    negative_group_count = np.sum(np.isin(negative_masked_col, aa_group))
-                    negative_nongroup_count = negative_count - negative_group_count
-                    positive_group_count = np.sum(np.isin(positive_masked_col, aa_group))
-                    positive_nongroup_count = positive_count - positive_group_count
+                if peptides_with_aa > 0:
+                    # Get disfavourability ratio
+                    residue_matches_aa = col_residues == amino_acid
+                    matching_signal_values = signal_values[residue_matches_aa]
+                    other_signal_values = signal_values[~residue_matches_aa]
+                    disfavoured_ratio = matching_signal_values.mean() / signal_values.mean()
+                    suboptimal_points = (1 - disfavoured_ratio) ** 2
 
-                    group_contingency_table = [[negative_group_count, negative_nongroup_count],
-                                               [positive_group_count, positive_nongroup_count]]
-                    group_odds_ratio, group_p_value = fisher_exact(group_contingency_table)
+                    # Perform Barnard's exact test, using pass/fail categorical data
+                    aa_count_passing = np.sum(passing_residues == amino_acid)
+                    other_count_passing = len(passing_residues) - aa_count_passing
+                    aa_count_failing = np.sum(failing_residues == amino_acid)
+                    other_count_failing = len(failing_residues) - aa_count_failing
+                    contingency_table = [[aa_count_passing, other_count_passing],
+                                         [aa_count_failing, other_count_failing]]
+                    barnard_exact_result = barnard_exact(contingency_table, alternative="less")
+                    barnard_pvalue = barnard_exact_result.pvalue
+                    if barnard_pvalue <= 0.05:
+                        self.matrix_df.at[amino_acid, col] = suboptimal_points
+                        continue
 
-                    for aa in aa_group:
-                        # Perform Fisher's exact test on this amino acid specifically
-                        negative_aa_count = np.sum(negative_masked_col == aa)
-                        negative_other_count = negative_count - negative_aa_count
+                    # Perform Student's t-test to determine if the individual amino acid is significantly disfavoured
+                    if len(matching_signal_values) > 0 and len(other_signal_values) > 0:
+                        with np.errstate(divide="ignore", invalid="ignore"):
+                            with warnings.catch_warnings(record=True) as caught_warnings:
+                                warnings.simplefilter("ignore", category=RuntimeWarning)
+                                ttest_result = ttest_ind(matching_signal_values, other_signal_values, equal_var=False,
+                                                         nan_policy="omit", alternative="less")
+                        _, ttest_pvalue = ttest_result
+                    else:
+                        ttest_pvalue = 1
+                    if ttest_pvalue <= 0.05:
+                        self.matrix_df.at[amino_acid, col] = suboptimal_points
+                        continue
 
-                        positive_aa_count = np.sum(positive_masked_col == aa)
-                        positive_other_count = positive_count - positive_aa_count
+                    # Perform Student's t-test to determine if pooled equivalent residues are significantly disfavoured
+                    equivalent_amino_acids = aa_equivalence_dict[amino_acid]
+                    residue_matches_pool = np.isin(element=col_residues, test_elements=equivalent_amino_acids)
+                    matching_pool_signals = signal_values[residue_matches_pool]
+                    other_pool_signals = signal_values[~residue_matches_pool]
+                    if len(matching_pool_signals) > 0 and len(other_pool_signals) > 0:
+                        with np.errstate(divide="ignore", invalid="ignore"):
+                            with warnings.catch_warnings(record=True) as caught_warnings:
+                                warnings.simplefilter("ignore", category=RuntimeWarning)
+                                pool_ttest_result = ttest_ind(matching_pool_signals, other_pool_signals, equal_var=False,
+                                                              nan_policy="omit", alternative="less")
+                        _, pool_ttest_pvalue = pool_ttest_result
+                    else:
+                        pool_ttest_pvalue = 1
+                    if pool_ttest_pvalue <= 0.05 and matching_signal_values.mean() < signal_values.mean():
+                        self.matrix_df.at[amino_acid, col] = suboptimal_points
+                        continue
 
-                        contingency_table = [[negative_aa_count, negative_other_count],
-                                             [positive_aa_count, positive_other_count]]
-                        odds_ratio, p_value = fisher_exact(contingency_table)
-
-                        # Set non-disfavoured residues to X such that they will not be used to decrement the matrix
-                        if (positive_negative_ratio * negative_aa_count) < positive_aa_count:
-                            negative_masked_col[negative_masked_col == aa] = "X"
-                        elif p_value > alpha and group_p_value > alpha:
-                            negative_masked_col[negative_masked_col == aa] = "X"
-
-                inverse_masked_sequences_2d[:, col_number] = negative_masked_col
-
-            self.matrix_df = increment_matrix(None, self.matrix_df, inverse_masked_sequences_2d,
-                                              enforced_points = negative_points, points_mode = "enforced_points")
-
-def get_sigmoid(x, k, inflection):
-    # Basic function that applies a sigmoid function to x value
-
-    base_value = 1 / (1 + e ** (k * inflection))
-    upper_value = 1 / (1 + e ** (-k * (1 - inflection))) - base_value
-    y = (1 / (1 + e ** (-k * (abs(x) - inflection))) - base_value) / upper_value
-
-    if x < 0:
-        y = y * -1 # apply original sign of x
-
-    return y
-
-def apply_sigmoid(matrix_df, strength = 1, inflection = 0.5):
-    '''
-    Function for scaling matrix values by a sigmoid function, suppressing small values and enhancing big ones
-
-    Args:
-        matrix_df (pd.DataFrame): the matrix to apply the sigmoid function to
-        strength (int|float):     scales the function severity; must be > 1
-        inflection (int/float):   inflection point between 0 and 1
-
-    Returns:
-        None: operation is performed in-place
-    '''
-
-    k = strength * 10
-
-    sigmoid_function = partial(get_sigmoid, k = k, inflection = inflection)
-    sigmoid_matrix_df = matrix_df.applymap(sigmoid_function)
-    sigmoid_matrix_df = sigmoid_matrix_df.round(2)
-
-    return sigmoid_matrix_df
+# --------------------------------------------------------------------------------------------------------------------
 
 class ConditionalMatrices:
     '''
     Class that contains a set of conditional matrices defined using ConditionalMatrix()
     '''
     def __init__(self, motif_length, source_df, percentiles_dict, residue_charac_dict,
-                 data_params = data_params, matrix_params = matrix_params):
+                 data_params = data_params, matrix_params = matrix_params, aa_equivalence_dict = aa_equivalence_dict):
         '''
         Initialization function for generating conditional matrices properties, dict, and 3D representation
 
@@ -271,20 +242,6 @@ class ConditionalMatrices:
         self.chemical_class_decoder = {}
         matrices_list = []
 
-        # Get parameters for whether to use sigmoid-scaled matrices
-        use_sigmoid = matrix_params.get("use_sigmoid")
-        # Generate sigmoid-scaled version
-        sigmoid_strength = matrix_params.get("sigmoid_strength")
-        if sigmoid_strength is None:
-            sigmoid_strength = 1
-
-        sigmoid_inflection = matrix_params.get("sigmoid_inflection")
-        if sigmoid_inflection is None:
-            sigmoid_inflection = 0.5
-
-        self.sigmoid_strength = sigmoid_strength
-        self.sigmoid_inflection = sigmoid_inflection
-
         # Iterate over dict of chemical characteristic --> list of member amino acids (e.g. "Acidic" --> ["D","E"]
         self.sufficient_keys = []
         self.insufficient_keys = []
@@ -303,18 +260,9 @@ class ConditionalMatrices:
                 current_matrix_params["position_for_filtering"] = filter_position
 
                 # Generate the weighted matrix
-                conditional_matrix = ConditionalMatrix(motif_length, source_df, residue_charac_dict,
-                                                       data_params, current_matrix_params)
+                conditional_matrix = ConditionalMatrix(motif_length, source_df, data_params, current_matrix_params,
+                                                       aa_equivalence_dict)
                 current_matrix = conditional_matrix.matrix_df
-
-                # Standardize the weighted matrix so that the max value is 1
-                max_values = np.max(current_matrix.values, axis=0)
-                max_values = np.maximum(max_values, 1)  # prevents divide-by-zero errors
-                current_matrix /= max_values
-
-                # If sigmoid scaling is enabled, apply the sigmoid function
-                if use_sigmoid:
-                    current_matrix = apply_sigmoid(current_matrix, sigmoid_strength, sigmoid_inflection)
 
                 # Assign the weighted matrix to the dictionary
                 dict_key_name = "#" + str(filter_position) + "=" + chemical_characteristic
@@ -396,25 +344,3 @@ class ConditionalMatrices:
         weighted_count = len(self.weighted_matrices_dict)
         print(f"Saved {unweighted_count} unweighted matrices, {weighted_count} weighted matrices,",
               f"and output report to {parent_folder}")
-
-    def save_sigmoid_plot(self, output_folder):
-        # User-called function to save a plot of the sigmoid function used to adjust the matrix points values
-
-        import matplotlib.pyplot as plt
-
-        k = self.sigmoid_strength * 10
-        inflection = self.sigmoid_inflection
-
-        # Generate the graph contents
-        x_values = np.linspace(0, 1, 101)
-        y_values = np.array([get_sigmoid(x, k, inflection) for x in x_values])
-
-        # Create the plot
-        plt.plot(x_values, y_values)
-        plt.xlabel("Original Score Value")
-        plt.ylabel("Sigmoid-Adjusted Score Value")
-        plt.title("Sigmoid Scaling of Conditional Matrix Points")
-        plt.grid(True)
-
-        # Save the figure as a PNG file
-        plt.savefig(os.path.join(output_folder, "sigmoid_points_plot.png"), dpi=600)

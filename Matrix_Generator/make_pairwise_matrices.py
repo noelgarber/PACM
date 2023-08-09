@@ -75,7 +75,8 @@ def apply_final_rates(scored_df, motif_scores, best_score_threshold, contains_fo
 
     return scored_df, best_fdr, best_for
 
-def main(input_df, general_params = general_params, data_params = data_params, matrix_params = matrix_params):
+def main(input_df, general_params = general_params, data_params = data_params, matrix_params = matrix_params,
+         aa_equivalence_dict = aa_equivalence_dict):
     '''
     Main function for making pairwise position-weighted matrices
 
@@ -102,7 +103,7 @@ def main(input_df, general_params = general_params, data_params = data_params, m
     motif_length = general_params.get("motif_length")
     aa_charac_dict = general_params.get("aa_charac_dict")
     conditional_matrices = ConditionalMatrices(motif_length, input_df, percentiles_dict, aa_charac_dict,
-                                               data_params, matrix_params)
+                                               data_params, matrix_params, aa_equivalence_dict)
 
     # Optionally optimize weights
     if matrix_params.get("optimize_weights"):
