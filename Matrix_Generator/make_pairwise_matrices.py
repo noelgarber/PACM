@@ -121,9 +121,6 @@ def main(input_df, general_params = general_params, data_params = data_params, m
     else:
         conditional_matrices.save(output_folder, save_weighted = False)
 
-    if matrix_params.get("use_sigmoid"):
-        conditional_matrices.save_sigmoid_plot(output_folder)
-
     # Apply motif scores
     seq_col = data_params.get("seq_col")
     score_col = data_params.get("dest_score_col")
