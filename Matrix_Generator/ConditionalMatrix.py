@@ -3,8 +3,6 @@
 import numpy as np
 import pandas as pd
 import os
-import warnings
-from scipy.stats import barnard_exact, ttest_ind
 from general_utils.general_utils import unravel_seqs, check_seq_lengths
 from general_utils.matrix_utils import make_empty_matrix, collapse_phospho
 from general_utils.user_helper_functions import get_thresholds
@@ -147,8 +145,6 @@ class ConditionalMatrix:
 
         for col_index, col in enumerate(self.matrix_df.columns):
             col_residues = sequences_2d[:, col_index]
-            passing_residues = col_residues[pass_calls]
-            failing_residues = col_residues[~pass_calls]
 
             # Iterate over possible amino acids in the matrix index
             for amino_acid in self.matrix_df.index:
@@ -161,51 +157,8 @@ class ConditionalMatrix:
                     other_signal_values = signal_values[~residue_matches_aa]
                     disfavoured_ratio = matching_signal_values.mean() / signal_values.mean()
                     suboptimal_points = (1 - disfavoured_ratio) ** 2
-
-                    # Perform Barnard's exact test, using pass/fail categorical data
-                    aa_count_passing = np.sum(passing_residues == amino_acid)
-                    other_count_passing = len(passing_residues) - aa_count_passing
-                    aa_count_failing = np.sum(failing_residues == amino_acid)
-                    other_count_failing = len(failing_residues) - aa_count_failing
-                    contingency_table = [[aa_count_passing, other_count_passing],
-                                         [aa_count_failing, other_count_failing]]
-                    barnard_exact_result = barnard_exact(contingency_table, alternative="less")
-                    barnard_pvalue = barnard_exact_result.pvalue
-                    if barnard_pvalue <= 0.05:
+                    if matching_signal_values.mean() < other_signal_values.mean():
                         self.matrix_df.at[amino_acid, col] = suboptimal_points
-                        continue
-
-                    # Perform Student's t-test to determine if the individual amino acid is significantly disfavoured
-                    if len(matching_signal_values) > 0 and len(other_signal_values) > 0:
-                        with np.errstate(divide="ignore", invalid="ignore"):
-                            with warnings.catch_warnings(record=True) as caught_warnings:
-                                warnings.simplefilter("ignore", category=RuntimeWarning)
-                                ttest_result = ttest_ind(matching_signal_values, other_signal_values, equal_var=False,
-                                                         nan_policy="omit", alternative="less")
-                        _, ttest_pvalue = ttest_result
-                    else:
-                        ttest_pvalue = 1
-                    if ttest_pvalue <= 0.05:
-                        self.matrix_df.at[amino_acid, col] = suboptimal_points
-                        continue
-
-                    # Perform Student's t-test to determine if pooled equivalent residues are significantly disfavoured
-                    equivalent_amino_acids = aa_equivalence_dict[amino_acid]
-                    residue_matches_pool = np.isin(element=col_residues, test_elements=equivalent_amino_acids)
-                    matching_pool_signals = signal_values[residue_matches_pool]
-                    other_pool_signals = signal_values[~residue_matches_pool]
-                    if len(matching_pool_signals) > 0 and len(other_pool_signals) > 0:
-                        with np.errstate(divide="ignore", invalid="ignore"):
-                            with warnings.catch_warnings(record=True) as caught_warnings:
-                                warnings.simplefilter("ignore", category=RuntimeWarning)
-                                pool_ttest_result = ttest_ind(matching_pool_signals, other_pool_signals, equal_var=False,
-                                                              nan_policy="omit", alternative="less")
-                        _, pool_ttest_pvalue = pool_ttest_result
-                    else:
-                        pool_ttest_pvalue = 1
-                    if pool_ttest_pvalue <= 0.05 and matching_signal_values.mean() < signal_values.mean():
-                        self.matrix_df.at[amino_acid, col] = suboptimal_points
-                        continue
 
 # --------------------------------------------------------------------------------------------------------------------
 
