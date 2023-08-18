@@ -4,23 +4,23 @@ import numpy as np
 import pandas as pd
 import os
 from functools import partial
-from math import e
-from scipy.stats import fisher_exact
+from scipy.stats import barnard_exact
+from scipy.optimize import minimize
 from general_utils.general_utils import unravel_seqs, check_seq_lengths
-from general_utils.matrix_utils import increment_matrix, make_empty_matrix, collapse_phospho
+from general_utils.matrix_utils import make_empty_matrix, collapse_phospho
 from general_utils.user_helper_functions import get_thresholds
 try:
-    from Matrix_Generator.config_local import data_params, matrix_params
+    from Matrix_Generator.config_local import data_params, matrix_params, aa_equivalence_dict
 except:
-    from Matrix_Generator.config import data_params, matrix_params
+    from Matrix_Generator.config import data_params, matrix_params, aa_equivalence_dict
 
 class ConditionalMatrix:
     '''
     Class that contains a position-weighted matrix (self.matrix_df) based on input data and a conditional type-position
     rule, e.g. position #1 = [D,E]
     '''
-    def __init__(self, motif_length, source_df, residue_charac_dict,
-                 data_params = data_params, matrix_params = matrix_params):
+    def __init__(self, motif_length, source_df, data_params = data_params, matrix_params = matrix_params,
+                 aa_equivalence_dict = aa_equivalence_dict):
         '''
         Function for initializing unadjusted conditional matrices from source peptide data,
         based on type-position rules (e.g. #1=Acidic)
@@ -32,9 +32,6 @@ class ConditionalMatrix:
             data_params (dict):                dictionary of data-specific params described in config.py
             matrix_params (dict):              dictionary of matrix-specific params described in config.py
         '''
-        # Construct the empty matrix dataframe
-        amino_acids = matrix_params.get("amino_acids")
-        self.matrix_df = make_empty_matrix(motif_length, amino_acids)
         
         # Extract and unravel sequences
         seq_col = data_params.get("seq_col")
@@ -68,34 +65,24 @@ class ConditionalMatrix:
         filter_position_chars = get_nth_position(sequences)
         qualifying_member_calls = np.isin(filter_position_chars, included_residues)
 
-        # Get the sequences and signal values to use for incrementing the matrix
-        logical_mask = np.logical_and(pass_calls, qualifying_member_calls)
-        masked_sequences_2d = sequences_2d[logical_mask]
-        masked_signal_values = mean_signal_values[logical_mask]
-        
-        # Assign points for positive peptides and increment the matrix
-        points_assignment_mode = matrix_params.get("points_assignment_mode")
-        mean_points = self.increment_positives(masked_sequences_2d, masked_signal_values, points_assignment_mode)
-
-        # If penalizing negatives, decrement the matrix appropriately for negative peptides
-        penalize_negatives = matrix_params.get("penalize_negatives") # boolean on whether to penalize negative peptides
-        if penalize_negatives:
-            self.decrement_negatives(pass_calls, qualifying_member_calls, sequences_2d, masked_sequences_2d,
-                                     mean_points, residue_charac_dict)
-
-        # Optionally combine phospho and non-phospho residue rows in the matrix
+        # Generate and assign the binding signal prediction matrix
+        amino_acids = matrix_params.get("amino_acids")
         include_phospho = matrix_params.get("include_phospho")
-        if not include_phospho:
-            collapse_phospho(self.matrix_df, in_place=True)
+        self.generate_signal_matrix(sequences_2d, mean_signal_values, amino_acids, include_phospho)
 
-        # Optionally set the filtering position to zero
-        clear_filtering_column = matrix_params.get("clear_filtering_column")
-        if clear_filtering_column:
-            matrix_df["#" + str(position_for_filtering)] = 0
+        # Generate and assign the suboptimal and forbidden element matrices for disfavoured residues
+        barnard_alpha = matrix_params["barnard_alpha"]
 
-        # Convert to float32 and round values
-        self.matrix_df = self.matrix_df.astype("float32")
-        self.matrix_df = self.matrix_df.round(2)
+        passing_mask = np.logical_and(pass_calls, qualifying_member_calls)
+        passing_seqs_2d = sequences_2d[passing_mask]
+        passing_signal_values = mean_signal_values[passing_mask]
+
+        failed_mask = np.logical_and(~pass_calls, qualifying_member_calls)
+        failed_seqs_2d = sequences_2d[failed_mask]
+        failed_signal_values = mean_signal_values[failed_mask]
+
+        self.generate_suboptimal_matrix(passing_seqs_2d, passing_signal_values, failed_seqs_2d, failed_signal_values,
+                                        amino_acids, aa_equivalence_dict, barnard_alpha, include_phospho)
 
     def qualifying_entries_count(self, source_df, seq_col, position_for_filtering, residues_included_at_filter_position):
         # Helper function to get the number of sequences that qualify under the current type-position rule
@@ -130,113 +117,291 @@ class ConditionalMatrix:
 
         return signal_cols
 
-    def increment_positives(self, masked_sequences_2d, masked_signal_values, points_assignment_mode = "continuous"):
-        if points_assignment_mode == "continuous":
-            continuous_constants = matrix_params["continuous_constants"]
-            self.matrix_df, mean_points = increment_matrix(None, self.matrix_df, masked_sequences_2d,
-                                                           signal_values = masked_signal_values,
-                                                           points_mode = "continuous",
-                                                           continuous_function_arguments = continuous_constants,
-                                                           return_mean_points = True)
-        elif points_assignment_mode == "thresholds":
-            thresholds_points_dict = matrix_params.get("thresholds_points_dict")
-            sorted_thresholds = sorted(thresholds_points_dict.items(), reverse=True)
-            self.matrix_df, mean_points = increment_matrix(None, self.matrix_df, masked_sequences_2d, sorted_thresholds,
-                                                           masked_signal_values, return_mean_points = True)
-        else:
-            raise ValueError(f"ConditionalMatrix initialization error: matrix_params[\"points_assignment_mode\"] is set to {points_assignment_mode}, but must be either `continuous` or `thresholds`")
+    def generate_signal_matrix(self, all_seqs_2d, all_signal_values, amino_acids, include_phospho):
+        '''
+        This function generates a matrix for predicting the binding signal that would be observed for a given peptide
 
-        return mean_points
+        Args:
+            all_seqs_2d (np.ndarray):                  all peptide sequences tested
+            all_signal_values (np.ndarray):            corresponding signal values for all peptides tested
 
-    def decrement_negatives(self, pass_calls, qualifying_member_calls, sequences_2d,
-                            masked_sequences_2d, mean_positive_points, residue_charac_dict, alpha = 0.1):
-        # Helper function that decrements the matrix based on negative peptides if indicated
+        Returns:
+            None; assigns self.signal_values_matrix
+        '''
 
-        inverse_logical_mask = np.logical_and(~pass_calls, qualifying_member_calls)
-        inverse_masked_sequences_2d = sequences_2d[inverse_logical_mask]
+        motif_length = all_seqs_2d.shape[1]
 
-        # Decrement the matrix based on inverse masked sequences
-        if len(inverse_masked_sequences_2d) > 0:
-            # Adjust for inequality in number of negative hits compared to positive
-            positive_count = len(masked_sequences_2d)
-            negative_count = len(inverse_masked_sequences_2d)
-            positive_negative_ratio = positive_count / negative_count
-            negative_points = -1 * mean_positive_points * positive_negative_ratio
+        # Generate the positive element matrix for predicting signal values
+        signal_values_matrix = make_empty_matrix(motif_length, amino_acids)
+        matrix_cols = list(signal_values_matrix.columns)
 
-            # Only use AAs that are never found in passing peptides, i.e. forbidden AAs, to decrement the matrix
-            for col_number in np.arange(inverse_masked_sequences_2d.shape[1]):
-                positive_masked_col = masked_sequences_2d[:, col_number]
-                negative_masked_col = inverse_masked_sequences_2d[:, col_number]
+        all_signal_values[all_signal_values < 0] = 0
 
-                # Only use significantly disfavoured residues for decrementation, and set others to X (not used)
-                for aa_group in residue_charac_dict.values():
-                    # Perform Fisher's exact test on pooled amino acids from this group
-                    aa_group = np.array(aa_group, dtype="U")
+        for col_index, col_name in enumerate(matrix_cols):
+            col_residues = all_seqs_2d[:, col_index]
+            unique_residues = np.unique(col_residues)
+            for aa in unique_residues:
+                matches_aa = col_residues == aa
+                signals_when_aa = all_signal_values[matches_aa]
+                signal_values_matrix.at[aa, col_name] = signals_when_aa / motif_length
 
-                    negative_group_count = np.sum(np.isin(negative_masked_col, aa_group))
-                    negative_nongroup_count = negative_count - negative_group_count
-                    positive_group_count = np.sum(np.isin(positive_masked_col, aa_group))
-                    positive_nongroup_count = positive_count - positive_group_count
+        self.signal_values_matrix = signal_values_matrix.astype("float32")
+        if not include_phospho:
+            collapse_phospho(self.signal_values_matrix, in_place=True)
 
-                    group_contingency_table = [[negative_group_count, negative_nongroup_count],
-                                               [positive_group_count, positive_nongroup_count]]
-                    group_odds_ratio, group_p_value = fisher_exact(group_contingency_table)
+    def generate_suboptimal_matrix(self, passing_seqs_2d, passing_signal_values, failed_seqs_2d, failed_signal_values,
+                                   amino_acids, aa_equivalence_dict = aa_equivalence_dict, barnard_alpha = 0.2,
+                                   include_phospho = False):
+        '''
+        This function generates a suboptimal element scoring matrix and a forbidden element matrix
 
-                    for aa in aa_group:
-                        # Perform Fisher's exact test on this amino acid specifically
-                        negative_aa_count = np.sum(negative_masked_col == aa)
-                        negative_other_count = negative_count - negative_aa_count
+        Args:
+            passing_seqs_2d (np.ndarray):              peptide sequences that bind the protein of interest
+            passing_signal_values (np.ndarray):        corresponding signal values for passing peptides
+            failed_seqs_2d (np.ndarray):               peptide sequences that do NOT bind the protein of interest
+            failed_signal_values (np.ndarray):         corresponding signal values for failing peptides
+            aa_equivalence_dict (dict):                dictionary of amino acid --> tuple of 'equivalent' amino acids
+            barnard_alpha (float):                     Barnard exact test threshold to contribute a trend to the matrix
 
-                        positive_aa_count = np.sum(positive_masked_col == aa)
-                        positive_other_count = positive_count - positive_aa_count
+        Returns:
+            None; assigns self.suboptimal_elements_matrix and self.forbidden_elements_matrix
+        '''
 
-                        contingency_table = [[negative_aa_count, negative_other_count],
-                                             [positive_aa_count, positive_other_count]]
-                        odds_ratio, p_value = fisher_exact(contingency_table)
+        motif_length = passing_seqs_2d.shape[1]
 
-                        # Set non-disfavoured residues to X such that they will not be used to decrement the matrix
-                        if (positive_negative_ratio * negative_aa_count) < positive_aa_count:
-                            negative_masked_col[negative_masked_col == aa] = "X"
-                        elif p_value > alpha and group_p_value > alpha:
-                            negative_masked_col[negative_masked_col == aa] = "X"
+        # Generate the suboptimal and forbidden element matrices
+        suboptimal_elements_matrix = make_empty_matrix(motif_length, amino_acids)
+        forbidden_elements_matrix = make_empty_matrix(motif_length, amino_acids)
+        matrix_cols = list(suboptimal_elements_matrix.columns)
 
-                inverse_masked_sequences_2d[:, col_number] = negative_masked_col
+        failed_signal_values[failed_signal_values < 0] = 0
+        passing_signal_mean = passing_signal_values.mean()
+        failed_signal_mean = failed_signal_values.mean()
+        signal_ratio = failed_signal_mean / passing_signal_mean
 
-            self.matrix_df = increment_matrix(None, self.matrix_df, inverse_masked_sequences_2d,
-                                              enforced_points = negative_points, points_mode = "enforced_points")
+        for col_index, col_name in enumerate(matrix_cols):
+            passing_col = passing_seqs_2d[:,col_index]
+            failing_col = failed_seqs_2d[:,col_index]
+            unique_residues = np.unique(np.concatenate(passing_col, failing_col))
 
-def get_sigmoid(x, k, inflection):
-    # Basic function that applies a sigmoid function to x value
+            for aa in unique_residues:
+                aa_passing_count = np.sum(passing_col == aa)
+                other_passing_count = len(passing_col) - aa_passing_count
+                aa_failing_count = np.sum(failing_col == aa)
+                other_failing_count = len(failing_col) - aa_failing_count
+                contingency_table = [[aa_passing_count, other_passing_count],
+                                     [aa_failing_count, other_failing_count]]
 
-    base_value = 1 / (1 + e ** (k * inflection))
-    upper_value = 1 / (1 + e ** (-k * (1 - inflection))) - base_value
-    y = (1 / (1 + e ** (-k * (abs(x) - inflection))) - base_value) / upper_value
+                pvalue_disfavoured = barnard_exact(contingency_table, alternative="less")
+                if pvalue_disfavoured <= barnard_alpha:
+                    suboptimal_elements_matrix.at[aa, col_name] = 1 - signal_ratio
+                    if aa_passing_count == 0:
+                        forbidden_elements_matrix.at[aa, col_name] = True
+                    continue
 
-    if x < 0:
-        y = y * -1 # apply original sign of x
+                equivalent_residues = aa_equivalence_dict[aa]
+                group_passing_count = np.sum(np.isin(passing_col, equivalent_residues))
+                nongroup_passing_count = len(passing_col) - group_passing_count
+                group_failing_count = np.sum(np.isin(failing_col, equivalent_residues))
+                nongroup_failing_count = len(failing_col) - group_failing_count
+                group_contingency_table = [[group_passing_count, nongroup_passing_count],
+                                           [group_failing_count, nongroup_failing_count]]
 
-    return y
+                group_pvalue_disfavoured = barnard_exact(group_contingency_table, alternative="less")
+                if group_pvalue_disfavoured <= barnard_alpha and pvalue_disfavoured < 1:
+                    suboptimal_elements_matrix.at[aa, col_name] = 1 - signal_ratio
+                    if aa_passing_count == 0 and group_passing_count == 0:
+                        forbidden_elements_matrix.at[aa, col_name] = True
+                    continue
 
-def apply_sigmoid(matrix_df, strength = 1, inflection = 0.5):
+        self.suboptimal_elements_matrix = suboptimal_elements_matrix.astype("float32")
+        self.forbidden_elements_matrix = forbidden_elements_matrix.astype("float32")
+        if not include_phospho:
+            collapse_phospho(self.suboptimal_elements_matrix, in_place=True)
+            collapse_phospho(self.forbidden_elements_matrix, in_place=True)
+
+# --------------------------------------------------------------------------------------------------------------------
+
+def get_mcc(predictions, actual_truths):
     '''
-    Function for scaling matrix values by a sigmoid function, suppressing small values and enhancing big ones
+    Calculates the Matthews correlation coefficient for predicted and actual boolean arrays
 
     Args:
-        matrix_df (pd.DataFrame): the matrix to apply the sigmoid function to
-        strength (int|float):     scales the function severity; must be > 1
-        inflection (int/float):   inflection point between 0 and 1
+        predictions (np.ndarray):   array of boolean predictions; must match shape of actual_truths
+        actual_truths (np.ndarray): array of boolean truth values; must match shape of predictions
 
     Returns:
-        None: operation is performed in-place
+        mcc (float): the Matthews correlation coefficient as a floating point value
     '''
 
-    k = strength * 10
+    TP_count = np.logical_and(predictions, actual_truths).sum()
+    FP_count = np.logical_and(predictions, ~actual_truths).sum()
+    TN_count = np.logical_and(~predictions, ~actual_truths).sum()
+    FN_count = np.logical_and(~predictions, actual_truths).sum()
+    mcc_numerator = (TP_count*TN_count) - (FP_count*FN_count)
+    mcc_denominator = np.sqrt((TP_count+FP_count) * (TP_count+FN_count) * (TN_count+FP_count) * (TN_count+FN_count))
+    mcc = mcc_numerator / mcc_denominator if mcc_denominator > 0 else np.nan
 
-    sigmoid_function = partial(get_sigmoid, k = k, inflection = inflection)
-    sigmoid_matrix_df = matrix_df.applymap(sigmoid_function)
-    sigmoid_matrix_df = sigmoid_matrix_df.round(2)
+    return mcc
 
-    return sigmoid_matrix_df
+def negative_accuracy(thresholds, scores_arrays, passes_bools):
+    '''
+    Helper function for use during threshold optimization by ScoredPeptideResult.optimize_thresholds()
+
+    Args:
+        thresholds (np.ndarray):    array of thresholds of shape (score_type_count,)
+        scores_arrays (np.ndarray): array of scores values of shape (datapoints_count, score_type_count)
+        passes_bools (np.ndarray):  array of actual truth values of shape (datapoints_count,)
+
+    Returns:
+        negative_accuracy (float):  negative accuracy value that will be minimized in the minimization algorithm
+    '''
+
+    predictions_2d = scores_arrays > thresholds
+    predictions = np.all(predictions_2d, axis=1)
+    accuracies = np.equal(predictions, passes_bools)
+    accuracy = np.mean(accuracies)
+
+    return -accuracy  # Minimize negative accuracy to maximize actual accuracy
+
+class ScoredPeptideResult:
+    '''
+    Class that represents the result of scoring peptides using ConditionalMatrices.score_peptides()
+    '''
+    def __init__(self, slice_scores_subsets, weights, predicted_signals_2d, suboptimal_scores_2d, forbidden_scores_2d):
+        '''
+        Initialization function to generate the score values and assign them to self
+
+        Args:
+            slice_scores_subsets (np.ndarray): array of span lengths in the motif to stratify scores by; e.g. if it is
+                                               [6,7,2], then subset scores are derived for positions 1-6, 7:13, & 14:15
+            weights (np.ndarray):              position weights previously applied to the matrices
+            predicted_signals_2d (np.ndarray): unadjusted predicted signal values for each residue for each peptide
+            suboptimal_scores_2d (np.ndarray): suboptimal element scores for each residue for each peptide
+            forbidden_scores_2d (np.ndarray):  forbidden element scores for each residue for each peptide
+        '''
+
+        # Check validity of slice_scores_subsets
+        if slice_scores_subsets is not None:
+            if slice_scores_subsets.sum() != len(weights):
+                raise ValueError(f"ScoredPeptideResult error: slice_scores_subsets sum ({slice_scores_subsets.sum()}) "
+                                 f"does not match length of weights_array ({len(weights_array)})")
+
+        # Assign predicted signals score values
+        self.predicted_signals_2d = predicted_signals_2d
+        self.predicted_signals_raw = predicted_signals_2d.sum(axis=1)
+        self.signal_adjustment_factor = weights.mean()
+        self.adjusted_predicted_signals = self.predicted_signals_raw / self.signal_adjustment_factor
+
+        # Assign suboptimal element score values
+        self.suboptimal_scores_2d = suboptimal_scores_2d
+        self.suboptimal_scores = suboptimal_scores_2d.sum(axis=1)
+
+        # Assign forbidden element score values
+        self.forbidden_scores_2d = forbidden_scores_2d
+        self.forbidden_scores = forbidden_scores_2d.sum(axis=1)
+
+        # Assign sliced score values if slice_scores_subsets was given
+        self.slice_scores_subsets = slice_scores_subsets
+        if slice_scores_subsets is not None:
+            end_position = 0
+            sliced_predicted_signals = []
+            sliced_suboptimal_scores = []
+            sliced_forbidden_scores = []
+            for subset in slice_scores_subsets:
+                start_position = end_position
+                end_position += subset
+                subset_predicted_signals = predicted_signals_2d[:,start_position:end_position+1].sum(axis=1)
+                sliced_predicted_signals.append(subset_predicted_signals)
+                subset_suboptimal_scores = suboptimal_scores_2d[:,start_position:end_position+1].sum(axis=1)
+                sliced_suboptimal_scores.append(subset_suboptimal_scores)
+                subset_forbidden_scores = forbidden_scores_2d[:,start_position:end_position+1].sum(axis=1)
+                sliced_forbidden_scores.append(subset_forbidden_scores)
+
+            self.sliced_predicted_signals = sliced_predicted_signals
+            self.sliced_suboptimal_scores = sliced_suboptimal_scores
+            self.sliced_forbidden_scores = sliced_forbidden_scores
+
+        self.optimized = False
+
+    def get_stacked_scores(self):
+        # Helper function that constructs a 2D array of scores values as columns
+
+        scores = [self.adjusted_predicted_signals, self.suboptimal_scores * -1, self.forbidden_scores * -1]
+        sign_mutlipliers = [1, -1, -1]
+
+        if self.slice_scores_subsets is not None:
+            for predicted_signals_slice in self.sliced_predicted_signals:
+                scores.append(predicted_signals_slice)
+                sign_mutlipliers.append(1)
+            for suboptimal_scores_slice in self.sliced_suboptimal_scores:
+                scores.append(suboptimal_scores_slice * -1)
+                sign_mutlipliers.append(-1)
+            for forbidden_scores_slice in self.sliced_forbidden_scores:
+                scores.append(forbidden_scores_slice * -1)
+                sign_mutlipliers.append(-1)
+
+        sign_mutlipliers = np.array(sign_mutlipliers)
+        stacked_scores = np.stack(scores).T
+
+        return sign_mutlipliers, stacked_scores
+
+    def optimize_thresholds(self, passes_bools):
+        '''
+        User-invoked optimization function to determine the optimal thresholds for the scores
+
+        Args:
+            passes_bools (np.ndarray):  array of actual truth values
+
+        Returns:
+            None; assigns results to self
+        '''
+
+        # Construct a 2D array of scores values as columns
+        sign_mutlipliers, stacked_scores = self.get_stacked_scores()
+
+        # Nelder-Mead optimization of thresholds
+        initial_thresholds = np.median(stacked_scores, axis=0)
+        optimization_function = partial(negative_accuracy, scores_arrays = stacked_scores, passes_bools = passes_bools)
+        optimization_result = minimize(optimization_function, initial_thresholds, method = "Nelder-Mead")
+        self.optimized_thresholds_signed = optimization_result.x
+        self.optimized_thresholds = self.optimized_thresholds_signed * sign_mutlipliers
+        self.sign_multipliers = sign_mutlipliers
+        self.optimized_accuracy = optimization_result.fun * -1
+
+        if optimization_result.status != 0:
+            print(optimization_result.message)
+
+        # Get predictions from optimized thresholds and calculate MCC
+        optimized_predictions_2d = stacked_scores > optimized_thresholds_signed
+        self.optimized_predictions = np.all(optimized_predictions_2d, axis=1)
+        self.mcc = get_mcc(optimized_predictions, passes_bools)
+
+        # Construct a user-readable dictionary of threshold values
+        thresholds_dict = {"adjusted_predicted_signals": self.optimized_thresholds[0],
+                           "suboptimal_scores": self.optimized_thresholds[1],
+                           "forbidden_scores": self.optimized_thresholds[2]}
+
+        if self.slice_scores_subsets is not None:
+            current_start_idx = len(thresholds_dict)
+
+            current_end_idx = current_start_idx + len(self.sliced_predicted_signals)
+            thresholds_dict["sliced_predicted_signals"] = self.optimized_thresholds[current_start_idx:current_end_idx]
+
+            current_start_idx = current_end_idx
+            current_end_idx = current_start_idx + len(self.sliced_suboptimal_scores)
+            thresholds_dict["sliced_suboptimal_scores"] = self.optimized_thresholds[current_start_idx:current_end_idx]
+
+            current_start_idx = current_end_idx
+            current_end_idx = current_start_idx + len(self.sliced_forbidden_scores)
+            thresholds_dict["sliced_forbidden_scores"] = self.optimized_thresholds[current_start_idx:current_end_idx]
+
+            thresholds_dict["slice_lengths"] = self.slice_scores_subsets
+
+        self.thresholds_dict = thresholds_dict
+
+        # Update the optimization status of the object
+        self.optimized = True
 
 class ConditionalMatrices:
     '''
@@ -256,34 +421,24 @@ class ConditionalMatrices:
             matrix_params:       same as in ConditionalMatrix()
         '''
 
+        self.motif_length = motif_length
+
         if matrix_params.get("points_assignment_mode") == "thresholds":
             if not isinstance(matrix_params.get("thresholds_points_dict"), dict):
                 matrix_params["thresholds_points_dict"] = get_thresholds(percentiles_dict, use_percentiles = True,
                                                                          show_guidance = True)
 
         # Declare dict where keys are position-type rules (e.g. "#1=Acidic") and values are corresponding weighted matrices
-        self.matrices_dict = {}
+        self.conditional_matrix_dict = {}
 
         # For generating a 3D matrix, create an empty list to hold the matrices to stack, and the mapping
         self.residue_charac_dict = residue_charac_dict
         self.chemical_class_count = len(residue_charac_dict.keys())
         self.encoded_chemical_classes = {}
         self.chemical_class_decoder = {}
-        matrices_list = []
-
-        # Get parameters for whether to use sigmoid-scaled matrices
-        use_sigmoid = matrix_params.get("use_sigmoid")
-        # Generate sigmoid-scaled version
-        sigmoid_strength = matrix_params.get("sigmoid_strength")
-        if sigmoid_strength is None:
-            sigmoid_strength = 1
-
-        sigmoid_inflection = matrix_params.get("sigmoid_inflection")
-        if sigmoid_inflection is None:
-            sigmoid_inflection = 0.5
-
-        self.sigmoid_strength = sigmoid_strength
-        self.sigmoid_inflection = sigmoid_inflection
+        signal_matrices_list = []
+        suboptimal_matrices_list = []
+        forbidden_matrices_list = []
 
         # Iterate over dict of chemical characteristic --> list of member amino acids (e.g. "Acidic" --> ["D","E"]
         self.sufficient_keys = []
@@ -302,24 +457,21 @@ class ConditionalMatrices:
                 current_matrix_params["included_residues"] = member_list
                 current_matrix_params["position_for_filtering"] = filter_position
 
-                # Generate the weighted matrix
-                conditional_matrix = ConditionalMatrix(motif_length, source_df, residue_charac_dict,
-                                                       data_params, current_matrix_params)
-                current_matrix = conditional_matrix.matrix_df
+                # Generate the matrix object
+                conditional_matrix = ConditionalMatrix(motif_length, source_df, data_params, current_matrix_params)
 
-                # Standardize the weighted matrix so that the max value is 1
-                max_values = np.max(current_matrix.values, axis=0)
-                max_values = np.maximum(max_values, 1)  # prevents divide-by-zero errors
-                current_matrix /= max_values
-
-                # If sigmoid scaling is enabled, apply the sigmoid function
-                if use_sigmoid:
-                    current_matrix = apply_sigmoid(current_matrix, sigmoid_strength, sigmoid_inflection)
-
-                # Assign the weighted matrix to the dictionary
+                # Assign the matrix object to the dict of ConditionalMatrix objects
                 dict_key_name = "#" + str(filter_position) + "=" + chemical_characteristic
-                self.matrices_dict[dict_key_name] = current_matrix
-                matrices_list.append(current_matrix)
+                self.conditional_matrix_dict[dict_key_name] = conditional_matrix
+
+                # Assign the constituent matrices to lists for 3D stacking
+                signal_matrices_list.append(conditional_matrix.signal_values_matrix.to_numpy())
+                suboptimal_matrices_list.append(conditional_matrix.suboptimal_elements_matrix.to_numpy())
+                forbidden_matrices_list.append(conditional_matrix.forbidden_elements_matrix.to_numpy())
+
+                # Assign index and columns objects; these are assumed to be the same for all matrices
+                self.index = conditional_matrix.suboptimal_elements_matrix.index
+                self.columns = conditional_matrix.suboptimal_elements_matrix.columns
 
                 # Display a warning message if insufficient seqs were passed
                 sufficient_seqs = conditional_matrix.sufficient_seqs
@@ -334,57 +486,98 @@ class ConditionalMatrices:
                     self.report.append(line+f"\n")
                     self.sufficient_keys.append(dict_key_name)
 
-        # Make an array representation of matrices_dict
-        self.index = matrices_list[0].index
-        self.columns = matrices_list[0].columns
-        self.matrix_arrays_dict = {}
-        for key, matrix_df in self.matrices_dict.items():
-            self.matrix_arrays_dict[key] = matrix_df.to_numpy()
+        # Make 3D matrices
+        stack_matrices(signal_matrices_list, suboptimal_matrices_list, forbidden_matrices_list)
 
-        # Make the 3D matrix
-        self.stacked_matrices = np.stack(matrices_list)
+        # Make array representations of the signal, suboptimal, and forbidden matrices
+        make_unweighted_dicts(self.conditional_matrix_dict)
 
         # Apply weights
         weights_array = matrix_params.get("position_weights")
         if weights_array is not None:
             self.apply_weights(weights_array, only_3d = False)
+        else:
+            self.apply_weights(np.ones(motif_length), only_3d = False)
 
-    def apply_weights(self, weights_array, only_3d = True):
+    def stack_matrices(self, signal_matrices_list, suboptimal_matrices_list, forbidden_matrices_list):
+        # Helper function to make 3D matrices for rapid scoring
+
+        self.stacked_signal_matrices = np.stack(signal_matrices_list)
+        self.stacked_suboptimal_matrices = np.stack(suboptimal_matrices_list)
+        self.stacked_forbidden_matrices = np.stack(forbidden_matrices_list)
+
+    def make_unweighted_dicts(self, conditional_matrix_dict):
+        # Helper function to make dataframe and array representations of the signal, suboptimal, and forbidden matrices
+
+        self.unweighted_matrices_dicts = {"signal": {}, "suboptimal": {}, "forbidden": {}}
+        self.unweighted_arrays_dicts = {"signal": {}, "suboptimal": {}, "forbidden": {}}
+
+        for key, conditional_matrix in conditional_matrix_dict.items():
+            self.unweighted_matrices_dicts["signal"][key] = conditional_matrix.signal_values_matrix
+            self.unweighted_arrays_dicts["signal"][key] = conditional_matrix.signal_values_matrix.to_numpy()
+            self.unweighted_matrices_dicts["suboptimal"][key] = conditional_matrix.suboptimal_elements_matrix
+            self.unweighted_arrays_dicts["suboptimal"][key] = conditional_matrix.suboptimal_elements_matrix.to_numpy()
+            self.unweighted_matrices_dicts["forbidden"][key] = conditional_matrix.forbidden_elements_matrix
+            self.unweighted_arrays_dicts["forbidden"][key] = conditional_matrix.forbidden_elements_matrix.to_numpy()
+
+    def apply_weights(self, weights, only_3d = True):
         # Method for assigning weights to the 3D matrix of matrices
 
-        self.stacked_weighted_matrices = self.stacked_matrices * weights_array
-        self.weights_array = weights_array
+        # Apply weights to 3D representations of matrices for rapid scoring
+        self.stacked_signal_weighted = self.stacked_signal_matrices * weights
+        self.stacked_suboptimal_weighted = self.stacked_suboptimal_matrices * weights
+        self.stacked_forbidden_weighted = self.stacked_forbidden_matrices * weights
+        self.weights_array = weights
 
+        # Optionally also apply weights to the other formats
         if not only_3d:
-            self.weighted_matrices_dict = {}
-            self.weighted_arrays_dict = {}
-            for key, matrix_df in self.matrices_dict.items():
-                weighted_matrix = matrix_df * weights_array
-                weighted_matrix = weighted_matrix.round(2)
-                self.weighted_matrices_dict[key] = weighted_matrix
-                self.weighted_arrays_dict[key] = weighted_matrix.to_numpy()
+            self.weighted_matrices_dicts = {}
+            self.weighted_arrays_dicts = {}
+
+            for matrix_type, matrix_dict in self.unweighted_matrices_dicts.items():
+                weighted_matrix_dict = {}
+                weighted_array_dict = {}
+                for key, matrix_df in matrix_dict.items():
+                    weighted_matrix_dict[key] = matrix_df * weights
+                    weighted_array_dict[key] = matrix_df.to_numpy() * weights
+                self.weighted_matrices_dicts[matrix_type] = weighted_matrix_dict
+                self.weighted_arrays_dicts[matrix_type] = weighted_array_dict
 
     def save(self, output_folder, save_weighted = True):
         # User-called function to save the conditional matrices as CSVs to folders for both unweighted and weighted
 
         parent_folder = os.path.join(output_folder, "Conditional_Matrices")
 
-        # Save unweighted matrices
-        unweighted_folder = os.path.join(parent_folder, "Unweighted")
-        if not os.path.exists(unweighted_folder):
-            os.makedirs(unweighted_folder)
-        for key, unweighted_matrix in self.matrices_dict.items():
-            file_path = os.path.join(unweighted_folder, key + ".csv")
-            unweighted_matrix.to_csv(file_path)
+        # Define unweighted matrix output paths
+        unweighted_folder_paths = {}
+        unweighted_parent = os.path.join(parent_folder, "Unweighted")
+        unweighted_folder_paths["signal"] = os.path.join(unweighted_parent, "Signal_Matrices")
+        unweighted_folder_paths["suboptimal"] = os.path.join(unweighted_parent, "Suboptimal_Matrices")
+        unweighted_folder_paths["forbidden"] = os.path.join(unweighted_parent, "Forbidden_Matrices")
+        for path in unweighted_folder_paths.values():
+            os.makedirs(path) if not os.path.exists(path) else None
 
-        # Save weighted matrices
+        # Save unweighted matrices
+        for matrix_type, matrix_dict in self.unweighted_matrices_dicts.items():
+            for key, matrix_df in matrix_dict.items():
+                file_path = os.path.join(unweighted_folder_paths[matrix_type], key + ".csv")
+                matrix_df.to_csv(file_path)
+
         if save_weighted:
-            weighted_folder = os.path.join(parent_folder, "Weighted")
-            if not os.path.exists(weighted_folder):
-                os.makedirs(weighted_folder)
-            for key, weighted_matrix in self.weighted_matrices_dict.items():
-                file_path = os.path.join(weighted_folder, key + ".csv")
-                weighted_matrix.to_csv(file_path)
+            # Define weighted matrix output paths
+            weighted_folder_paths = {}
+            weighted_parent = os.path.join(parent_folder, "Weighted")
+            weighted_folder_paths["signal"] = os.path.join(weighted_parent, "Weighted_Signal_Matrices")
+            weighted_folder_paths["suboptimal"] = os.path.join(weighted_parent, "Weighted_Suboptimal_Matrices")
+            weighted_folder_paths["forbidden"] = os.path.join(weighted_parent, "Weighted_Forbidden_Matrices")
+            for path in weighted_folder_paths.values():
+                os.makedirs(path) if not os.path.exists(path) else None
+
+            # Save weighted matrices
+            for matrix_type, matrix_dict in self.weighted_matrices_dicts.items():
+                for key, matrix_df in matrix_dict.items():
+                    file_path = os.path.join(weighted_folder_paths[matrix_type], key + ".csv")
+                    matrix_df.to_csv(file_path)
 
         # Save output report
         output_report_path = os.path.join(parent_folder, "conditional_matrices_report.txt")
@@ -392,29 +585,104 @@ class ConditionalMatrices:
             file.writelines(self.report)
 
         # Display saved message
-        unweighted_count = len(self.matrices_dict)
-        weighted_count = len(self.weighted_matrices_dict)
-        print(f"Saved {unweighted_count} unweighted matrices, {weighted_count} weighted matrices,",
-              f"and output report to {parent_folder}")
+        print(f"Saved unweighted matrices, weighted matrices, and output report to {parent_folder}")
 
-    def save_sigmoid_plot(self, output_folder):
-        # User-called function to save a plot of the sigmoid function used to adjust the matrix points values
+    def score_peptides(self, sequences_2d, conditional_matrices, passes_bools = None, slice_scores_subsets = None,
+                       use_weighted = False):
+        '''
+        Vectorized function to score amino acid sequences based on the dictionary of context-aware weighted matrices
 
-        import matplotlib.pyplot as plt
+        Args:
+            sequences_2d (np.ndarray):                  unravelled peptide sequences to score
+            conditional_matrices (ConditionalMatrices): conditional weighted matrices for scoring peptides
+            passes_bools (np.ndarray):                  array of actual truth values of whether each peptide is a motif
+            slice_scores_subsets (np.ndarray):          array of stretches of positions to stratify results into;
+                                                        e.g. [6,7,2] is stratified into scores for positions
+                                                        1-6, 7-13, & 14-15
+            use_weighted (bool):                        whether to use conditional_matrices.stacked_weighted_matrices
 
-        k = self.sigmoid_strength * 10
-        inflection = self.sigmoid_inflection
+        Returns:
+            result (ScoredPeptideResult):               signal, suboptimal, and forbidden score values in 1D and 2D
+        '''
 
-        # Generate the graph contents
-        x_values = np.linspace(0, 1, 101)
-        y_values = np.array([get_sigmoid(x, k, inflection) for x in x_values])
+        motif_length = sequences_2d.shape[1]
 
-        # Create the plot
-        plt.plot(x_values, y_values)
-        plt.xlabel("Original Score Value")
-        plt.ylabel("Sigmoid-Adjusted Score Value")
-        plt.title("Sigmoid Scaling of Conditional Matrix Points")
-        plt.grid(True)
+        # Get row indices for unique residues
+        unique_residues = np.unique(sequences_2d)
+        unique_residue_indices = conditional_matrices.index.get_indexer_for(unique_residues)
 
-        # Save the figure as a PNG file
-        plt.savefig(os.path.join(output_folder, "sigmoid_points_plot.png"), dpi=600)
+        if (unique_residue_indices == -1).any():
+            failed_residues = unique_residues[unique_residue_indices == -1]
+            err = f"score_seqs error: the following residues were not found by the matrix indexer: {failed_residues}"
+            raise Exception(err)
+
+        # Get the matrix row indices for all the residues
+        aa_row_indices_2d = np.ones(shape=sequences_2d.shape, dtype=int) * -1
+        for unique_residue, row_index in zip(unique_residues, unique_residue_indices):
+            aa_row_indices_2d[sequences_2d == unique_residue] = row_index
+
+        # Define residues flanking either side of the residues of interest; for out-of-bounds cases, use opposite side
+        flanking_left_2d = np.concatenate((sequences_2d[:, 0:1], sequences_2d[:, 0:-1]), axis=1)
+        flanking_right_2d = np.concatenate((sequences_2d[:, 1:], sequences_2d[:, -1:]), axis=1)
+
+        # Get integer-encoded chemical classes for each residue
+        left_encoded_classes_2d = np.zeros(flanking_left_2d.shape, dtype=int)
+        right_encoded_classes_2d = np.zeros(flanking_right_2d.shape, dtype=int)
+        for member_aa, encoded_class in conditional_matrices.encoded_chemical_classes.items():
+            left_encoded_classes_2d[flanking_left_2d == member_aa] = encoded_class
+            right_encoded_classes_2d[flanking_right_2d == member_aa] = encoded_class
+
+        # Find the matrix identifier number (1st dim of 3D matrix) for each encoded class, depending on seq position
+        encoded_positions = np.arange(motif_length) * conditional_matrices.chemical_class_count
+        left_encoded_matrix_refs = left_encoded_classes_2d + encoded_positions
+        right_encoded_matrix_refs = right_encoded_classes_2d + encoded_positions
+
+        # Flatten the encoded matrix refs, which serve as the 1st dimension referring to 3D matrices
+        left_encoded_matrix_refs_flattened = left_encoded_matrix_refs.flatten()
+        right_encoded_matrix_refs_flattened = right_encoded_matrix_refs.flatten()
+
+        # Flatten the amino acid row indices into a matching array serving as the 2nd dimension
+        aa_row_indices_flattened = aa_row_indices_2d.flatten()
+
+        # Tile the column indices into a matching array serving as the 3rd dimension
+        column_indices = np.arange(motif_length)
+        column_indices_tiled = np.tile(column_indices, len(sequences_2d))
+
+        # Assign matrices to use for scoring
+        if use_weighted:
+            stacked_signal_matrices = conditional_matrices.stacked_signal_weighted
+            stacked_suboptimal_matrices = conditional_matrices.stacked_suboptimal_weighted
+            stacked_forbidden_matrices = conditional_matrices.stacked_forbidden_weighted
+        else:
+            stacked_signal_matrices = conditional_matrices.stacked_signal_matrices
+            stacked_suboptimal_matrices = conditional_matrices.stacked_suboptimal_matrices
+            stacked_forbidden_matrices = conditional_matrices.stacked_forbidden_matrices
+
+        # Define dimensions for 3D matrix indexing
+        shape_2d = sequences_2d.shape
+        left_dim1 = left_encoded_matrix_refs_flattened
+        right_dim1 = right_encoded_matrix_refs_flattened
+        dim2 = aa_row_indices_flattened
+        dim3 = column_indices_tiled
+
+        # Calculate predicted signal values
+        left_signal_2d = stacked_signal_matrices[left_dim1, dim2, dim3].reshape(shape_2d)
+        right_signal_2d = stacked_signal_matrices[right_dim1, dim2, dim3].reshape(shape_2d)
+        predicted_signals_2d = (left_signal_2d + right_signal_2d) / 2
+
+        # Calculate suboptimal element scores
+        left_suboptimal_2d = stacked_suboptimal_matrices[left_dim1, dim2, dim3].reshape(shape_2d)
+        right_suboptimal_2d = stacked_suboptimal_matrices[right_dim1, dim2, dim3].reshape(shape_2d)
+        suboptimal_scores_2d = (left_suboptimal_2d + right_suboptimal_2d) / 2
+
+        # Calculate forbidden element scores
+        left_forbidden_2d = stacked_forbidden_matrices[left_dim1, dim2, dim3].reshape(shape_2d)
+        right_forbidden_2d = stacked_forbidden_matrices[right_dim1, dim2, dim3].reshape(shape_2d)
+        forbidden_scores_2d = (left_forbidden_2d + right_forbidden_2d) / 2
+
+        result = ScoredPeptideResult(slice_scores_subsets, self.weights_array, predicted_signals_2d,
+                                     suboptimal_scores_2d, forbidden_scores_2d)
+        if passes_bools is not None:
+            result.optimize_thresholds(passes_bools)
+
+        return result
