@@ -5,8 +5,6 @@ import pandas as pd
 import os
 import pickle
 from Matrix_Generator.ConditionalMatrix import ConditionalMatrices
-from Matrix_Generator.ForbiddenMatrix import ForbiddenMatrix
-from Matrix_Generator.conditional_weight_optimization import optimize_conditional_weights
 try:
     from Matrix_Generator.config_local import general_params, data_params, matrix_params, aa_equivalence_dict
 except:
