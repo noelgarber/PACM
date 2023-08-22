@@ -3,12 +3,11 @@
 import numpy as np
 import pandas as pd
 import os
-from functools import partial
 from scipy.stats import barnard_exact
-from scipy.optimize import minimize
 from general_utils.general_utils import unravel_seqs, check_seq_lengths
 from general_utils.matrix_utils import make_empty_matrix, collapse_phospho
 from general_utils.user_helper_functions import get_thresholds
+from Matrix_Generator.ScoredPeptideResult import ScoredPeptideResult
 try:
     from Matrix_Generator.config_local import data_params, matrix_params, aa_equivalence_dict
 except:
@@ -264,144 +263,7 @@ def negative_accuracy(thresholds, scores_arrays, passes_bools):
 
     return -accuracy  # Minimize negative accuracy to maximize actual accuracy
 
-class ScoredPeptideResult:
-    '''
-    Class that represents the result of scoring peptides using ConditionalMatrices.score_peptides()
-    '''
-    def __init__(self, slice_scores_subsets, weights, predicted_signals_2d, suboptimal_scores_2d, forbidden_scores_2d):
-        '''
-        Initialization function to generate the score values and assign them to self
-
-        Args:
-            slice_scores_subsets (np.ndarray): array of span lengths in the motif to stratify scores by; e.g. if it is
-                                               [6,7,2], then subset scores are derived for positions 1-6, 7:13, & 14:15
-            weights (np.ndarray):              position weights previously applied to the matrices
-            predicted_signals_2d (np.ndarray): unadjusted predicted signal values for each residue for each peptide
-            suboptimal_scores_2d (np.ndarray): suboptimal element scores for each residue for each peptide
-            forbidden_scores_2d (np.ndarray):  forbidden element scores for each residue for each peptide
-        '''
-
-        # Check validity of slice_scores_subsets
-        if slice_scores_subsets is not None:
-            if slice_scores_subsets.sum() != len(weights):
-                raise ValueError(f"ScoredPeptideResult error: slice_scores_subsets sum ({slice_scores_subsets.sum()}) "
-                                 f"does not match length of weights_array ({len(weights_array)})")
-
-        # Assign predicted signals score values
-        self.predicted_signals_2d = predicted_signals_2d
-        self.predicted_signals_raw = predicted_signals_2d.sum(axis=1)
-        self.signal_adjustment_factor = weights.mean()
-        self.adjusted_predicted_signals = self.predicted_signals_raw / self.signal_adjustment_factor
-
-        # Assign suboptimal element score values
-        self.suboptimal_scores_2d = suboptimal_scores_2d
-        self.suboptimal_scores = suboptimal_scores_2d.sum(axis=1)
-
-        # Assign forbidden element score values
-        self.forbidden_scores_2d = forbidden_scores_2d
-        self.forbidden_scores = forbidden_scores_2d.sum(axis=1)
-
-        # Assign sliced score values if slice_scores_subsets was given
-        self.slice_scores_subsets = slice_scores_subsets
-        if slice_scores_subsets is not None:
-            end_position = 0
-            sliced_predicted_signals = []
-            sliced_suboptimal_scores = []
-            sliced_forbidden_scores = []
-            for subset in slice_scores_subsets:
-                start_position = end_position
-                end_position += subset
-                subset_predicted_signals = predicted_signals_2d[:,start_position:end_position+1].sum(axis=1)
-                sliced_predicted_signals.append(subset_predicted_signals)
-                subset_suboptimal_scores = suboptimal_scores_2d[:,start_position:end_position+1].sum(axis=1)
-                sliced_suboptimal_scores.append(subset_suboptimal_scores)
-                subset_forbidden_scores = forbidden_scores_2d[:,start_position:end_position+1].sum(axis=1)
-                sliced_forbidden_scores.append(subset_forbidden_scores)
-
-            self.sliced_predicted_signals = sliced_predicted_signals
-            self.sliced_suboptimal_scores = sliced_suboptimal_scores
-            self.sliced_forbidden_scores = sliced_forbidden_scores
-
-        self.optimized = False
-
-    def get_stacked_scores(self):
-        # Helper function that constructs a 2D array of scores values as columns
-
-        scores = [self.adjusted_predicted_signals, self.suboptimal_scores * -1, self.forbidden_scores * -1]
-        sign_mutlipliers = [1, -1, -1]
-
-        if self.slice_scores_subsets is not None:
-            for predicted_signals_slice in self.sliced_predicted_signals:
-                scores.append(predicted_signals_slice)
-                sign_mutlipliers.append(1)
-            for suboptimal_scores_slice in self.sliced_suboptimal_scores:
-                scores.append(suboptimal_scores_slice * -1)
-                sign_mutlipliers.append(-1)
-            for forbidden_scores_slice in self.sliced_forbidden_scores:
-                scores.append(forbidden_scores_slice * -1)
-                sign_mutlipliers.append(-1)
-
-        sign_mutlipliers = np.array(sign_mutlipliers)
-        stacked_scores = np.stack(scores).T
-
-        return sign_mutlipliers, stacked_scores
-
-    def optimize_thresholds(self, passes_bools):
-        '''
-        User-invoked optimization function to determine the optimal thresholds for the scores
-
-        Args:
-            passes_bools (np.ndarray):  array of actual truth values
-
-        Returns:
-            None; assigns results to self
-        '''
-
-        # Construct a 2D array of scores values as columns
-        sign_mutlipliers, stacked_scores = self.get_stacked_scores()
-
-        # Nelder-Mead optimization of thresholds
-        initial_thresholds = np.median(stacked_scores, axis=0)
-        optimization_function = partial(negative_accuracy, scores_arrays = stacked_scores, passes_bools = passes_bools)
-        optimization_result = minimize(optimization_function, initial_thresholds, method = "Nelder-Mead")
-        self.optimized_thresholds_signed = optimization_result.x
-        self.optimized_thresholds = self.optimized_thresholds_signed * sign_mutlipliers
-        self.sign_multipliers = sign_mutlipliers
-        self.optimized_accuracy = optimization_result.fun * -1
-
-        if optimization_result.status != 0:
-            print(optimization_result.message)
-
-        # Get predictions from optimized thresholds and calculate MCC
-        optimized_predictions_2d = stacked_scores > optimized_thresholds_signed
-        self.optimized_predictions = np.all(optimized_predictions_2d, axis=1)
-        self.mcc = get_mcc(optimized_predictions, passes_bools)
-
-        # Construct a user-readable dictionary of threshold values
-        thresholds_dict = {"adjusted_predicted_signals": self.optimized_thresholds[0],
-                           "suboptimal_scores": self.optimized_thresholds[1],
-                           "forbidden_scores": self.optimized_thresholds[2]}
-
-        if self.slice_scores_subsets is not None:
-            current_start_idx = len(thresholds_dict)
-
-            current_end_idx = current_start_idx + len(self.sliced_predicted_signals)
-            thresholds_dict["sliced_predicted_signals"] = self.optimized_thresholds[current_start_idx:current_end_idx]
-
-            current_start_idx = current_end_idx
-            current_end_idx = current_start_idx + len(self.sliced_suboptimal_scores)
-            thresholds_dict["sliced_suboptimal_scores"] = self.optimized_thresholds[current_start_idx:current_end_idx]
-
-            current_start_idx = current_end_idx
-            current_end_idx = current_start_idx + len(self.sliced_forbidden_scores)
-            thresholds_dict["sliced_forbidden_scores"] = self.optimized_thresholds[current_start_idx:current_end_idx]
-
-            thresholds_dict["slice_lengths"] = self.slice_scores_subsets
-
-        self.thresholds_dict = thresholds_dict
-
-        # Update the optimization status of the object
-        self.optimized = True
+# --------------------------------------------------------------------------------------------------------------------
 
 class ConditionalMatrices:
     '''
