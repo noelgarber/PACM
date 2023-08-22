@@ -106,7 +106,7 @@ def main(input_df, general_params = general_params, data_params = data_params, m
     # Score the input data
     bait_pass_col = data_params["bait_pass_col"]
     pass_str = data_params["pass_str"]
-    passes_strs = scored_df[bait_pass_col].to_numpy()
+    passes_strs = input_df[bait_pass_col].to_numpy()
     passes_bools = np.equal(passes_strs, pass_str)
     seq_col = data_params.get("seq_col")
     convert_phospho = not matrix_params.get("include_phospho")
