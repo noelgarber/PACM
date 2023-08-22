@@ -140,9 +140,9 @@ class ConditionalMatrix:
             col_residues = all_seqs_2d[:, col_index]
             unique_residues = np.unique(col_residues)
             for aa in unique_residues:
-                matches_aa = col_residues == aa
-                signals_when_aa = all_signal_values[matches_aa]
-                signal_values_matrix.at[aa, col_name] = signals_when_aa / motif_length
+                signals_when = all_signal_values[col_residues == aa]
+                length_adjusted_value = np.median(signals_when) / motif_length
+                signal_values_matrix.at[aa, col_name] = length_adjusted_value
 
         self.signal_values_matrix = signal_values_matrix.astype("float32")
         if not include_phospho:
@@ -181,7 +181,7 @@ class ConditionalMatrix:
         for col_index, col_name in enumerate(matrix_cols):
             passing_col = passing_seqs_2d[:,col_index]
             failing_col = failed_seqs_2d[:,col_index]
-            unique_residues = np.unique(np.concatenate(passing_col, failing_col))
+            unique_residues = np.unique(np.concatenate([passing_col, failing_col]))
 
             for aa in unique_residues:
                 aa_passing_count = np.sum(passing_col == aa)
@@ -191,11 +191,11 @@ class ConditionalMatrix:
                 contingency_table = [[aa_passing_count, other_passing_count],
                                      [aa_failing_count, other_failing_count]]
 
-                pvalue_disfavoured = barnard_exact(contingency_table, alternative="less")
+                pvalue_disfavoured = barnard_exact(contingency_table, alternative="less").pvalue
                 if pvalue_disfavoured <= barnard_alpha:
                     suboptimal_elements_matrix.at[aa, col_name] = 1 - signal_ratio
                     if aa_passing_count == 0:
-                        forbidden_elements_matrix.at[aa, col_name] = True
+                        forbidden_elements_matrix.at[aa, col_name] = 1
                     continue
 
                 equivalent_residues = aa_equivalence_dict[aa]
@@ -206,11 +206,11 @@ class ConditionalMatrix:
                 group_contingency_table = [[group_passing_count, nongroup_passing_count],
                                            [group_failing_count, nongroup_failing_count]]
 
-                group_pvalue_disfavoured = barnard_exact(group_contingency_table, alternative="less")
+                group_pvalue_disfavoured = barnard_exact(group_contingency_table, alternative="less").pvalue
                 if group_pvalue_disfavoured <= barnard_alpha and pvalue_disfavoured < 1:
                     suboptimal_elements_matrix.at[aa, col_name] = 1 - signal_ratio
                     if aa_passing_count == 0 and group_passing_count == 0:
-                        forbidden_elements_matrix.at[aa, col_name] = True
+                        forbidden_elements_matrix.at[aa, col_name] = 1
                     continue
 
         self.suboptimal_elements_matrix = suboptimal_elements_matrix.astype("float32")
