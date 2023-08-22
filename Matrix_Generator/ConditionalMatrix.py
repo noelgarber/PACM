@@ -3,6 +3,9 @@
 import numpy as np
 import pandas as pd
 import os
+import multiprocessing
+from tqdm import trange
+from functools import partial
 from scipy.stats import barnard_exact
 from general_utils.general_utils import unravel_seqs, check_seq_lengths
 from general_utils.matrix_utils import make_empty_matrix, collapse_phospho
@@ -305,54 +308,40 @@ class ConditionalMatrices:
         # Iterate over dict of chemical characteristic --> list of member amino acids (e.g. "Acidic" --> ["D","E"]
         self.sufficient_keys = []
         self.insufficient_keys = []
-        self.report = ["Conditional Matrix Generation Report\n\n"]
-        for i, (chemical_characteristic, member_list) in enumerate(residue_charac_dict.items()):
-            # Map the encodings for the chemical classes
-            for aa in member_list:
-               self.encoded_chemical_classes[aa] = i
-            self.chemical_class_decoder[i] = chemical_characteristic
+        self.report = ["Conditional Matrix Generation Report\n"]
 
-            # Iterate over columns for the weighted matrix (position numbers)
-            for filter_position in np.arange(1, motif_length + 1):
-                # Assign parameters for the current type-position rule
-                current_matrix_params = matrix_params.copy()
-                current_matrix_params["included_residues"] = member_list
-                current_matrix_params["position_for_filtering"] = filter_position
+        rule_tuples = self.get_rule_tuples(residue_charac_dict, motif_length)
+        results_list = self.generate_matrices(rule_tuples, motif_length, source_df, data_params, matrix_params)
+        for results in results_list:
+            conditional_matrix, dict_key_name, report_line = results
+            self.conditional_matrix_dict[dict_key_name] = conditional_matrix
 
-                # Generate the matrix object
-                conditional_matrix = ConditionalMatrix(motif_length, source_df, data_params, current_matrix_params)
+            # Assign the constituent matrices to lists for 3D stacking
+            signal_matrices_list.append(conditional_matrix.signal_values_matrix.to_numpy())
+            suboptimal_matrices_list.append(conditional_matrix.suboptimal_elements_matrix.to_numpy())
+            forbidden_matrices_list.append(conditional_matrix.forbidden_elements_matrix.to_numpy())
 
-                # Assign the matrix object to the dict of ConditionalMatrix objects
-                dict_key_name = "#" + str(filter_position) + "=" + chemical_characteristic
-                self.conditional_matrix_dict[dict_key_name] = conditional_matrix
+            # Assign index and columns objects; these are assumed to be the same for all matrices
+            self.index = conditional_matrix.suboptimal_elements_matrix.index
+            self.columns = conditional_matrix.suboptimal_elements_matrix.columns
 
-                # Assign the constituent matrices to lists for 3D stacking
-                signal_matrices_list.append(conditional_matrix.signal_values_matrix.to_numpy())
-                suboptimal_matrices_list.append(conditional_matrix.suboptimal_elements_matrix.to_numpy())
-                forbidden_matrices_list.append(conditional_matrix.forbidden_elements_matrix.to_numpy())
+            # Assemble the status reports
+            self.report.append(report_line)
+            sufficient_seqs = conditional_matrix.sufficient_seqs
+            if not sufficient_seqs:
+                self.insufficient_keys.append(dict_key_name)
+            else:
+                self.sufficient_keys.append(dict_key_name)
 
-                # Assign index and columns objects; these are assumed to be the same for all matrices
-                self.index = conditional_matrix.suboptimal_elements_matrix.index
-                self.columns = conditional_matrix.suboptimal_elements_matrix.columns
-
-                # Display a warning message if insufficient seqs were passed
-                sufficient_seqs = conditional_matrix.sufficient_seqs
-                if not sufficient_seqs:
-                    line = f"Matrix status for {dict_key_name}: not enough source seqs meeting rule; defaulting to all"
-                    print(line)
-                    self.report.append(line+f"\n")
-                    self.insufficient_keys.append(dict_key_name)
-                else:
-                    line = f"Matrix status for {dict_key_name}: OK"
-                    print(line)
-                    self.report.append(line+f"\n")
-                    self.sufficient_keys.append(dict_key_name)
+        # Print the matrix generation report
+        for line in self.report:
+            print(line)
 
         # Make 3D matrices
-        stack_matrices(signal_matrices_list, suboptimal_matrices_list, forbidden_matrices_list)
+        self.stack_matrices(signal_matrices_list, suboptimal_matrices_list, forbidden_matrices_list)
 
         # Make array representations of the signal, suboptimal, and forbidden matrices
-        make_unweighted_dicts(self.conditional_matrix_dict)
+        self.make_unweighted_dicts(self.conditional_matrix_dict)
 
         # Apply weights
         weights_array = matrix_params.get("position_weights")
@@ -360,6 +349,94 @@ class ConditionalMatrices:
             self.apply_weights(weights_array, only_3d = False)
         else:
             self.apply_weights(np.ones(motif_length), only_3d = False)
+
+    def get_rule_tuples(self, residue_charac_dict, motif_length):
+        # Helper function that generates a list of rule tuples to be used by generate_matrices()
+
+        rule_tuples = []
+        for i, (chemical_characteristic, member_list) in enumerate(residue_charac_dict.items()):
+            # Map the encodings for the chemical classes
+            for aa in member_list:
+                self.encoded_chemical_classes[aa] = i
+            self.chemical_class_decoder[i] = chemical_characteristic
+
+            # Iterate over columns for the weighted matrix (position numbers)
+            for filter_position in np.arange(1, motif_length + 1):
+                rule_tuple = (member_list, filter_position, chemical_characteristic)
+                rule_tuples.append(rule_tuple)
+
+        return rule_tuples
+
+    def generate_matrices(self, rule_tuples, motif_length, source_df, data_params, matrix_params):
+        '''
+        Parallelized application of self.generate_matrix()
+
+        Args:
+            rule_tuples (list):       list of tuples of (member amino acid list, filter position, chemical characteristic)
+            motif_length (int):       length of the motif being studied
+            source_df (pd.DataFrame): dataframe of source data for building matrices
+            data_params (dict):       user-defined params for accessing source data, as described in ConditionalMatrix()
+            matrix_params (dict):     shared dict of matrix params defined by the user as described in ConditionalMatrix()
+
+        Returns:
+            results_list (list):  list of results tuples of (conditional_matrix, dict_key_name, report_line)
+        '''
+
+        cpus_to_use = os.cpu_count() - 1
+        pool = multiprocessing.Pool(processes=cpus_to_use)
+
+        process_partial = partial(self.generate_matrix, motif_length = motif_length, source_df = source_df,
+                                  data_params = data_params, matrix_params = matrix_params)
+
+        results_list = []
+
+        with trange(len(rule_tuples), desc="Generating conditional matrices...") as pbar:
+            for results in pool.imap_unordered(process_partial, rule_tuples):
+                results_list.append(results)
+                pbar.update()
+
+        pool.close()
+        pool.join()
+
+        return results_list
+
+    def generate_matrix(self, rule_tuple, motif_length, source_df, data_params, matrix_params):
+        '''
+        Function for generating an individual conditional matrix according to a filter position and member aa list
+
+        Args:
+            rule_tuple (tuple):       tuple of (amino acid member list, filter position, chemical characteristic)
+                                      representing the current type/position rule, e.g. #1=Acidic
+            motif_length (int):       length of the motif being studied
+            source_df (pd.DataFrame): dataframe of source data for building matrices
+            data_params (dict):       user-defined params for accessing source data, as described in ConditionalMatrix()
+            matrix_params (dict):     user-defined params for generating matrices, as described in ConditionalMatrix()
+
+        Returns:
+            conditional_matrix (ConditionalMatrix): conditional matrix object for the current type/position rule
+            dict_key_name (str):                    key name representing the current type/position rule
+            report_line (str):                      status line for the output report
+        '''
+
+        member_list, filter_position, chemical_characteristic = rule_tuple
+
+        # Assign parameters for the current type-position rule
+        current_matrix_params = matrix_params.copy()
+        current_matrix_params["included_residues"] = member_list
+        current_matrix_params["position_for_filtering"] = filter_position
+
+        # Generate the matrix object and dict key name
+        conditional_matrix = ConditionalMatrix(motif_length, source_df, data_params, current_matrix_params)
+        dict_key_name = "#" + str(filter_position) + "=" + chemical_characteristic
+
+        # Display a warning message if insufficient seqs were passed
+        sufficient_seqs = conditional_matrix.sufficient_seqs
+        if not sufficient_seqs:
+            report_line = f"Matrix status for {dict_key_name}: not enough source seqs meeting rule; defaulting to all"
+        else:
+            report_line = f"Matrix status for {dict_key_name}: OK"
+
+        return (conditional_matrix, dict_key_name, report_line + f"\n")
 
     def stack_matrices(self, signal_matrices_list, suboptimal_matrices_list, forbidden_matrices_list):
         # Helper function to make 3D matrices for rapid scoring
