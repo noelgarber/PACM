@@ -139,8 +139,8 @@ class ScoredPeptideResult:
             raise Exception(optimization_result.message)
 
         # Use optimized thresholds to make boolean predictions and calculate MCC
-        optimized_predictions_2d = self.stacked_scores > self.optimized_thresholds_signed
-        self.boolean_predictions = np.all(optimized_predictions_2d, axis=1)
+        boolean_predictions_2d = self.stacked_scores > self.optimized_thresholds_signed
+        self.boolean_predictions = np.all(boolean_predictions_2d, axis=1)
         self.mcc = get_mcc(optimized_predictions, passes_bools)
 
         # Construct a user-readable dictionary of threshold values
