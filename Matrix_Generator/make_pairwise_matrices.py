@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import os
 import pickle
+from general_utils.general_utils import unravel_seqs
 from Matrix_Generator.ConditionalMatrix import ConditionalMatrices
 try:
     from Matrix_Generator.config_local import general_params, data_params, matrix_params, aa_equivalence_dict
@@ -32,14 +33,16 @@ def apply_motif_scores(input_df, conditional_matrices, passes_bools, slice_score
         output_df (pd.DataFrame):                   input dataframe with scores and calls added
     '''
 
-    motif_length = sequences_2d.shape[1]
-
     # Get sequences only if needed; if sequences_2d is already provided, then sequences is not necessary
     if sequences_2d is None:
         seqs = input_df[seq_col].values.astype("<U")
+        motif_length = len(seqs[0]) # assumes all sequences are the same length
         sequences_2d = unravel_seqs(seqs, motif_length, convert_phospho)
+    else:
+        motif_length = sequences_2d.shape[1]
         
     # Score the input data; the result is an instance of ScoredPeptideResult
+    weights_exist = True if matrix_params.get("position_weights") is not None else False
     scored_result = conditional_matrices.score_peptides(sequences_2d, conditional_matrices, passes_bools, 
                                                         slice_scores_subsets, use_weighted = weights_exist)
 

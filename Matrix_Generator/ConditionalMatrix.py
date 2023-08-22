@@ -224,50 +224,6 @@ class ConditionalMatrix:
 
 # --------------------------------------------------------------------------------------------------------------------
 
-def get_mcc(predictions, actual_truths):
-    '''
-    Calculates the Matthews correlation coefficient for predicted and actual boolean arrays
-
-    Args:
-        predictions (np.ndarray):   array of boolean predictions; must match shape of actual_truths
-        actual_truths (np.ndarray): array of boolean truth values; must match shape of predictions
-
-    Returns:
-        mcc (float): the Matthews correlation coefficient as a floating point value
-    '''
-
-    TP_count = np.logical_and(predictions, actual_truths).sum()
-    FP_count = np.logical_and(predictions, ~actual_truths).sum()
-    TN_count = np.logical_and(~predictions, ~actual_truths).sum()
-    FN_count = np.logical_and(~predictions, actual_truths).sum()
-    mcc_numerator = (TP_count*TN_count) - (FP_count*FN_count)
-    mcc_denominator = np.sqrt((TP_count+FP_count) * (TP_count+FN_count) * (TN_count+FP_count) * (TN_count+FN_count))
-    mcc = mcc_numerator / mcc_denominator if mcc_denominator > 0 else np.nan
-
-    return mcc
-
-def negative_accuracy(thresholds, scores_arrays, passes_bools):
-    '''
-    Helper function for use during threshold optimization by ScoredPeptideResult.optimize_thresholds()
-
-    Args:
-        thresholds (np.ndarray):    array of thresholds of shape (score_type_count,)
-        scores_arrays (np.ndarray): array of scores values of shape (datapoints_count, score_type_count)
-        passes_bools (np.ndarray):  array of actual truth values of shape (datapoints_count,)
-
-    Returns:
-        negative_accuracy (float):  negative accuracy value that will be minimized in the minimization algorithm
-    '''
-
-    predictions_2d = scores_arrays > thresholds
-    predictions = np.all(predictions_2d, axis=1)
-    accuracies = np.equal(predictions, passes_bools)
-    accuracy = np.mean(accuracies)
-
-    return -accuracy  # Minimize negative accuracy to maximize actual accuracy
-
-# --------------------------------------------------------------------------------------------------------------------
-
 class ConditionalMatrices:
     '''
     Class that contains a set of conditional matrices defined using ConditionalMatrix()
@@ -334,8 +290,7 @@ class ConditionalMatrices:
                 self.sufficient_keys.append(dict_key_name)
 
         # Print the matrix generation report
-        for line in self.report:
-            print(line)
+        print("".join(self.report))
 
         # Make 3D matrices
         self.stack_matrices(signal_matrices_list, suboptimal_matrices_list, forbidden_matrices_list)
@@ -390,7 +345,8 @@ class ConditionalMatrices:
 
         results_list = []
 
-        with trange(len(rule_tuples), desc="Generating conditional matrices...") as pbar:
+        desc = "Generating conditional matrices (signal, suboptimal, & forbidden types)..."
+        with trange(len(rule_tuples), desc=desc) as pbar:
             for results in pool.imap_unordered(process_partial, rule_tuples):
                 results_list.append(results)
                 pbar.update()
