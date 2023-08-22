@@ -45,7 +45,7 @@ class ConditionalMatrix:
         num_qualifying_entries = self.qualifying_entries_count(source_df, seq_col, position_for_filtering, included_residues)
         if num_qualifying_entries < min_members: 
             self.sufficient_seqs = False
-            included_residues = amino_acids
+            included_residues = matrix_params["amino_acids"]
         else: 
             self.sufficient_seqs = True
         self.rule = (position_for_filtering, included_residues)
