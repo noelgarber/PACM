@@ -88,7 +88,7 @@ def main(image_params = image_params, general_params = general_params, data_para
 
     if generate_context_matrices:
         pairwise_results = make_pairwise_matrices(data_df, general_params, data_params, matrix_params)
-        best_fdr, best_for, best_score_threshold, scored_data_df = pairwise_results
+        scored_result, scored_data_df = pairwise_results
         if not generate_specificity_matrix:
             scored_data_df.to_csv(os.path.join(general_params.get("output_folder"), "final_scored_data.csv"))
     else:
@@ -97,13 +97,9 @@ def main(image_params = image_params, general_params = general_params, data_para
     # Generate specificity matrix and associated results as a SpecificityMatrix object
     if generate_specificity_matrix:
         specificity_matrix = make_specificity_matrix(scored_data_df, comparator_info, specificity_params, save = True)
-
-    if generate_context_matrices and generate_specificity_matrix:
-        return (scored_data_df, best_score_threshold, best_fdr, best_for, specificity_matrix)
-    elif generate_context_matrices:
-        return (scored_data_df, best_score_threshold, best_fdr, best_for)
-    elif generate_specificity_matrix:
-        return (scored_data_df, specificity_matrix)
+        return scored_data_df, specificity_matrix
+    else:
+        return scored_data_df
 
 
 # If the script is executed directly, invoke the main workflow
