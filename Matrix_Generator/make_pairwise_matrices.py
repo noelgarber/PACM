@@ -118,11 +118,11 @@ def main(input_df, general_params = general_params, data_params = data_params, m
     pass_str = data_params["pass_str"]
     passes_strs = input_df[bait_pass_col].to_numpy()
     passes_bools = np.equal(passes_strs, pass_str)
-    score_model, mcc_train, mcc_test, predictions = train_score_model(scored_result, passes_bools)
+    score_model, stats, predictions = train_score_model(scored_result, passes_bools)
     output_df["Score_Model_Predictions"] = predictions
-    print(f"Model for score interpretation, as a dense neural network: ",
-          f"\n\tMCC on training data: {mcc_train:.4f}",
-          f"\n\tMCC on testing data: {mcc_test:.4f}")
+    print(f"Model for score interpretation: ")
+    for label, stat in stats.items():
+        print(f"{label}: {stat:.4f}")
 
     # Save ConditionalMatrices object for later use in motif_predictor
     conditional_matrices_path = os.path.join(output_folder, "conditional_matrices.pkl")

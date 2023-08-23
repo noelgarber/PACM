@@ -107,5 +107,5 @@ class ScoredPeptideResult:
 
         self.sign_mutlipliers = np.array(sign_mutlipliers)
         self.stacked_scores = np.stack(scores).T
-        stacked_scores_original = np.stack(scores_original).T
-        self.scored_df = pd.DataFrame(stacked_scores_original, columns = self.score_cols)
+        self.stacked_scores_original = np.stack(scores_original).T
+        self.scored_df = pd.DataFrame(self.stacked_scores_original, columns = self.score_cols)

@@ -196,7 +196,7 @@ class ConditionalMatrix:
 
                 pvalue_disfavoured = barnard_exact(contingency_table, alternative="less").pvalue
                 if pvalue_disfavoured <= barnard_alpha:
-                    suboptimal_elements_matrix.at[aa, col_name] = 1 - signal_ratio
+                    suboptimal_elements_matrix.at[aa, col_name] = 1 - signal_ratio # TODO Why is this always the same in a given matrix?
                     if aa_passing_count == 0:
                         forbidden_elements_matrix.at[aa, col_name] = 1
                     continue
