@@ -2,57 +2,10 @@
 
 import numpy as np
 import pandas as pd
-import os
-from functools import partial
-from scipy.optimize import minimize
 try:
     from Matrix_Generator.config_local import data_params, matrix_params, aa_equivalence_dict
 except:
     from Matrix_Generator.config import data_params, matrix_params, aa_equivalence_dict
-
-def get_mcc(predictions, actual_truths):
-    '''
-    Calculates the Matthews correlation coefficient for predicted and actual boolean arrays
-
-    Args:
-        predictions (np.ndarray):   array of boolean predictions; must match shape of actual_truths
-        actual_truths (np.ndarray): array of boolean truth values; must match shape of predictions
-
-    Returns:
-        mcc (float): the Matthews correlation coefficient as a floating point value
-    '''
-
-    TP_count = np.logical_and(predictions, actual_truths).sum()
-    FP_count = np.logical_and(predictions, ~actual_truths).sum()
-    TN_count = np.logical_and(~predictions, ~actual_truths).sum()
-    FN_count = np.logical_and(~predictions, actual_truths).sum()
-    mcc_numerator = (TP_count*TN_count) - (FP_count*FN_count)
-    mcc_denominator = np.sqrt((TP_count+FP_count) * (TP_count+FN_count) * (TN_count+FP_count) * (TN_count+FN_count))
-    mcc = mcc_numerator / mcc_denominator if mcc_denominator > 0 else np.nan
-
-    return mcc
-
-def negative_accuracy(thresholds, scores_arrays, passes_bools):
-    '''
-    Helper function for use during threshold optimization by ScoredPeptideResult.optimize_thresholds()
-
-    Args:
-        thresholds (np.ndarray):    array of thresholds of shape (score_type_count,)
-        scores_arrays (np.ndarray): array of scores values of shape (datapoints_count, score_type_count)
-        passes_bools (np.ndarray):  array of actual truth values of shape (datapoints_count,)
-
-    Returns:
-        negative_accuracy (float):  negative accuracy value that will be minimized in the minimization algorithm
-    '''
-
-    predictions_2d = scores_arrays > thresholds
-    predictions = np.all(predictions_2d, axis=1)
-    accuracies = np.equal(predictions, passes_bools)
-    accuracy = np.mean(accuracies)
-
-    return -accuracy  # Minimize negative accuracy to maximize actual accuracy
-
-# --------------------------------------------------------------------------------------------------------------------
 
 class ScoredPeptideResult:
     '''
@@ -95,8 +48,6 @@ class ScoredPeptideResult:
         self.slice_scores_subsets = slice_scores_subsets
         self.slice_scores()
         self.stack_scores()
-
-        self.optimized = False
 
     def slice_scores(self):
         # Function that generates scores based on sliced subsets of peptide sequences
@@ -158,56 +109,3 @@ class ScoredPeptideResult:
         self.stacked_scores = np.stack(scores).T
         stacked_scores_original = np.stack(scores_original).T
         self.scored_df = pd.DataFrame(stacked_scores_original, columns = self.score_cols)
-
-    def optimize_thresholds(self, passes_bools):
-        '''
-        Optimization function to determine the optimal thresholds for the scores
-
-        Args:
-            passes_bools (np.ndarray):  array of actual truth values
-
-        Returns:
-            None; assigns results to self
-        '''
-
-        # Determine the optimal thresholds using Nelder-Mead optimization
-        initial_thresholds = np.median(self.stacked_scores, axis=0)
-        optimization_function = partial(negative_accuracy, scores_arrays = self.stacked_scores,
-                                        passes_bools = passes_bools)
-        optimization_result = minimize(optimization_function, initial_thresholds, method = "Nelder-Mead")
-        self.optimized_thresholds_signed = optimization_result.x
-        self.optimized_thresholds = self.optimized_thresholds_signed * self.sign_mutlipliers
-        self.optimized_accuracy = optimization_result.fun * -1
-
-        if optimization_result.status != 0:
-            raise Exception(optimization_result.message)
-
-        # Use optimized thresholds to make boolean predictions and calculate MCC
-        boolean_predictions_2d = self.stacked_scores > self.optimized_thresholds_signed
-        self.boolean_predictions = np.all(boolean_predictions_2d, axis=1)
-        self.mcc = get_mcc(self.boolean_predictions, passes_bools)
-
-        # Construct a user-readable dictionary of threshold values
-        thresholds_dict = {"adjusted_predicted_signals": self.optimized_thresholds[0],
-                           "suboptimal_scores": self.optimized_thresholds[1],
-                           "forbidden_scores": self.optimized_thresholds[2]}
-
-        if self.slice_scores_subsets is not None:
-            current_start_idx = len(thresholds_dict)
-            current_end_idx = current_start_idx + len(self.sliced_predicted_signals)
-            thresholds_dict["sliced_predicted_signals"] = self.optimized_thresholds[current_start_idx:current_end_idx]
-
-            current_start_idx = current_end_idx
-            current_end_idx = current_start_idx + len(self.sliced_suboptimal_scores)
-            thresholds_dict["sliced_suboptimal_scores"] = self.optimized_thresholds[current_start_idx:current_end_idx]
-
-            current_start_idx = current_end_idx
-            current_end_idx = current_start_idx + len(self.sliced_forbidden_scores)
-            thresholds_dict["sliced_forbidden_scores"] = self.optimized_thresholds[current_start_idx:current_end_idx]
-
-            thresholds_dict["slice_lengths"] = self.slice_scores_subsets
-
-        self.thresholds_dict = thresholds_dict
-
-        # Update the optimization status of the object
-        self.optimized = True

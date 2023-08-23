@@ -482,15 +482,13 @@ class ConditionalMatrices:
         # Display saved message
         print(f"Saved unweighted matrices, weighted matrices, and output report to {parent_folder}")
 
-    def score_peptides(self, sequences_2d, conditional_matrices, passes_bools = None, slice_scores_subsets = None,
-                       use_weighted = False):
+    def score_peptides(self, sequences_2d, conditional_matrices, slice_scores_subsets = None, use_weighted = False):
         '''
         Vectorized function to score amino acid sequences based on the dictionary of context-aware weighted matrices
 
         Args:
             sequences_2d (np.ndarray):                  unravelled peptide sequences to score
             conditional_matrices (ConditionalMatrices): conditional weighted matrices for scoring peptides
-            passes_bools (np.ndarray):                  array of actual truth values of whether each peptide is a motif
             slice_scores_subsets (np.ndarray):          array of stretches of positions to stratify results into;
                                                         e.g. [6,7,2] is stratified into scores for positions
                                                         1-6, 7-13, & 14-15
@@ -577,7 +575,5 @@ class ConditionalMatrices:
 
         result = ScoredPeptideResult(slice_scores_subsets, self.weights_array, predicted_signals_2d,
                                      suboptimal_scores_2d, forbidden_scores_2d)
-        if passes_bools is not None:
-            result.optimize_thresholds(passes_bools)
 
         return result

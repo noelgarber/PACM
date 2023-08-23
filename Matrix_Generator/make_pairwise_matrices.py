@@ -6,12 +6,14 @@ import os
 import pickle
 from general_utils.general_utils import unravel_seqs
 from Matrix_Generator.ConditionalMatrix import ConditionalMatrices
+from Matrix_Generator.ScoredPeptideResult import ScoredPeptideResult
+from Matrix_Generator.train_score_nn import train_score_model
 try:
     from Matrix_Generator.config_local import general_params, data_params, matrix_params, aa_equivalence_dict
 except:
     from Matrix_Generator.config import general_params, data_params, matrix_params, aa_equivalence_dict
 
-def apply_motif_scores(input_df, conditional_matrices, passes_bools, slice_scores_subsets, seq_col = None,
+def apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets, seq_col = None,
                        convert_phospho = True, add_residue_cols = False, in_place = False, sequences_2d = None):
     '''
     Function to apply the score_seqs() function to all sequences in the source df and add residue cols for sorting
@@ -19,7 +21,6 @@ def apply_motif_scores(input_df, conditional_matrices, passes_bools, slice_score
     Args:
         input_df (pd.DataFrame):                    df containing motif sequences to back-apply motif scores onto
         conditional_matrices (ConditionalMatrices): conditional weighted matrices for scoring peptides
-        passes_bools (np.ndarray):                  boolean calls on whether each peptide passes/fails binding
         slice_scores_subsets (np.ndarray):          array of frame lengths for stratifying 2D score arrays
         seq_col (str): 			                    col in input_df with peptide seqs to score
         convert_phospho (bool):                     whether to convert phospho-residues to non-phospho before lookups
@@ -43,13 +44,12 @@ def apply_motif_scores(input_df, conditional_matrices, passes_bools, slice_score
         
     # Score the input data; the result is an instance of ScoredPeptideResult
     weights_exist = True if matrix_params.get("position_weights") is not None else False
-    scored_result = conditional_matrices.score_peptides(sequences_2d, conditional_matrices, passes_bools, 
-                                                        slice_scores_subsets, use_weighted = weights_exist)
+    scored_result = conditional_matrices.score_peptides(sequences_2d, conditional_matrices, slice_scores_subsets,
+                                                        use_weighted = weights_exist)
 
     # Construct the output dataframe
     output_df = input_df if in_place else input_df.copy()
     output_df = pd.concat([output_df, scored_result.scored_df], axis=1)
-    output_df["Prediction"] = scored_result.boolean_predictions
 
     # Optionally add position residue columns
     if add_residue_cols and not in_place:
@@ -107,24 +107,26 @@ def main(input_df, general_params = general_params, data_params = data_params, m
     conditional_matrices.save(output_folder, save_weighted = weights_exist)
 
     # Score the input data
+    seq_col = data_params.get("seq_col")
+    convert_phospho = not matrix_params.get("include_phospho")
+    slice_scores_subsets = matrix_params.get("slice_scores_subsets")
+    scored_result, output_df = apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets, seq_col,
+                                                  convert_phospho, add_residue_cols = True, in_place = False)
+
+    # Train a simple dense neural network based on the scoring results
     bait_pass_col = data_params["bait_pass_col"]
     pass_str = data_params["pass_str"]
     passes_strs = input_df[bait_pass_col].to_numpy()
     passes_bools = np.equal(passes_strs, pass_str)
-    seq_col = data_params.get("seq_col")
-    convert_phospho = not matrix_params.get("include_phospho")
-    slice_scores_subsets = matrix_params.get("slice_scores_subsets")
-    scored_result, output_df = apply_motif_scores(input_df, conditional_matrices, passes_bools, slice_scores_subsets,
-                                                  seq_col, convert_phospho, add_residue_cols = True, in_place = False)
-    print("Conditional matrices thresholding results: ")
-    for key, value in scored_result.thresholds_dict.items():
-        print(f"\t{key} : {value}")
-    print(f"MCC = {scored_result.mcc}")
-    print(f"Accuracy = {scored_result.optimized_accuracy}")
+    score_model, mcc_train, mcc_test, predictions = train_score_model(scored_result, passes_bools)
+    output_df["Score_Model_Predictions"] = predictions
+    print(f"Model for score interpretation, as a dense neural network: ",
+          f"\n\tMCC on training data: {mcc_train:.4f}",
+          f"\n\tMCC on testing data: {mcc_test:.4f}")
 
     # Save ConditionalMatrices object for later use in motif_predictor
     conditional_matrices_path = os.path.join(output_folder, "conditional_matrices.pkl")
     with open(conditional_matrices_path, "wb") as f:
         pickle.dump(conditional_matrices, f)
 
-    return (scored_result, output_df)
+    return (output_df, scored_result, score_model)
