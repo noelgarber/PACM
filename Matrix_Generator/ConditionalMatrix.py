@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import os
+import warnings
 import multiprocessing
 from tqdm import trange
 from functools import partial
@@ -46,6 +47,26 @@ def barnard_disfavoured(test_aa, aa_col_passing, aa_col_failing, equivalent_resi
     barnard_pvalue = barnard_exact(contingency_table, alternative="less").pvalue
 
     return barnard_pvalue
+
+def welch_ttest_catch(a, b):
+    # Helper function that performs Welch's t-test on two independent samples where the alternative hypothesis is "less"
+
+    with warnings.catch_warnings(record=True) as warning_list:
+        result = ttest_ind(a, b, axis=None, equal_var=False, nan_policy="omit", alternative="less")
+        pvalue = result.pvalue
+
+        runtime_warnings = []
+        for warning in warning_list:
+            if issubclass(warning.category, RuntimeWarning):
+                runtime_warnings.append(warning)
+
+        if runtime_warnings and np.isfinite(pvalue):
+                print(f"Welch's t-test gave the following warning: {str(warning.message)}")
+                print(f"\tsample1: mean={a.mean()} | count={len(a)} | finite_count={np.isfinite(a).sum()}")
+                print(f"\tsample2: mean={b.mean()} | count={len(b)} | finite_count={np.isfinite(b).sum()}")
+                print(f"\tp-value: {pvalue}")
+
+    return pvalue, runtime_warnings
 
 class ConditionalMatrix:
     '''
@@ -217,9 +238,7 @@ class ConditionalMatrix:
                 # Test whether peptides with this aa at the current position have significantly lower signal values
                 signals_while = signal_values[full_col == aa]
                 signals_other = signal_values[full_col != aa]
-                ttest_disfavoured = ttest_ind(signals_while, signals_other,
-                                              equal_var = False, nan_policy = "omit", alternative = "less")
-                ttest_pvalue = ttest_disfavoured.pvalue
+                ttest_pvalue, _ = welch_ttest_catch(signals_while, signals_other)
 
                 # Determine the signal ratio of peptides with this aa at the current position and peptides without it
                 mean_signal_while = signals_while.mean()
@@ -242,9 +261,7 @@ class ConditionalMatrix:
                 has_equivalent_residue = np.isin(full_col, equivalent_residues)
                 signals_while_group = signal_values[has_equivalent_residue]
                 signals_while_nongroup = signal_values[~has_equivalent_residue]
-                group_ttest_disfavoured = ttest_ind(signals_while_group, signals_while_nongroup,
-                                                    equal_var = False, nan_policy = "omit", alternative = "less")
-                group_ttest_pvalue = group_ttest_disfavoured.pvalue
+                group_ttest_pvalue, _ = welch_ttest_catch(signals_while_group, signals_while_nongroup)
 
                 # Determine the signal ratio of peptides with this aa at the current position and peptides without it
                 mean_signal_group = signals_while_group.mean()
@@ -501,10 +518,15 @@ class ConditionalMatrices:
             os.makedirs(path) if not os.path.exists(path) else None
 
         # Save unweighted matrices
+        path_list = []
         for matrix_type, matrix_dict in self.unweighted_matrices_dicts.items():
             for key, matrix_df in matrix_dict.items():
                 file_path = os.path.join(unweighted_folder_paths[matrix_type], key + ".csv")
-                matrix_df.to_csv(file_path)
+                if file_path not in path_list:
+                    matrix_df.to_csv(file_path)
+                    path_list.append(file_path)
+                else:
+                    raise Exception("Error saving matrices: tried to save over a previously saved file!")
 
         if save_weighted:
             # Define weighted matrix output paths
