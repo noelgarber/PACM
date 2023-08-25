@@ -4,7 +4,7 @@ import numpy as np
 import os
 import string
 from Matrix_Generator.image_processing.image_utils import reverse_log_transform
-from tifffile import imread, imshow
+from tifffile import imread
 from scipy.signal import find_peaks
 
 class SpotArray:
@@ -154,6 +154,7 @@ class SpotArray:
 
         # Display popup of sliced image with drawn crosshairs if prompted
         if show_outlined_image:
+            from tifffile import imshow
             imshow(self.outlined_image / self.outlined_image.max())
             import matplotlib.pyplot as plt
             plt.show()
@@ -480,6 +481,7 @@ class SpotArray:
         # Show the input image if slicer debugging is enabled
         if slicer_debugging:
             print("\t\t\tshowing input image...")
+            from tifffile import imshow
             import matplotlib.pyplot as plt
             imshow(image_ndarray, cmap="gray")
             plt.show()
