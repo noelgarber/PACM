@@ -122,7 +122,7 @@ class ConditionalMatrix:
         # Generate and assign the binding signal prediction matrix
         amino_acids = matrix_params.get("amino_acids")
         include_phospho = matrix_params.get("include_phospho")
-        self.generate_signal_matrix(sequences_2d, mean_signal_values, amino_acids, include_phospho)
+        self.generate_positive_matrix(sequences_2d, mean_signal_values, amino_acids, include_phospho)
 
         # Generate and assign the suboptimal and forbidden element matrices for disfavoured residues
         barnard_alpha = matrix_params["barnard_alpha"]
@@ -169,7 +169,7 @@ class ConditionalMatrix:
 
         return signal_cols
 
-    def generate_signal_matrix(self, all_seqs_2d, all_signal_values, amino_acids, include_phospho):
+    def generate_positive_matrix(self, all_seqs_2d, all_signal_values, amino_acids, include_phospho):
         '''
         This function generates a matrix for predicting the binding signal that would be observed for a given peptide
 
@@ -178,28 +178,30 @@ class ConditionalMatrix:
             all_signal_values (np.ndarray):            corresponding signal values for all peptides tested
 
         Returns:
-            None; assigns self.signal_values_matrix
+            None; assigns self.positive_matrix
         '''
 
         motif_length = all_seqs_2d.shape[1]
 
         # Generate the positive element matrix for predicting signal values
-        signal_values_matrix = make_empty_matrix(motif_length, amino_acids)
-        matrix_cols = list(signal_values_matrix.columns)
+        positive_matrix = make_empty_matrix(motif_length, amino_acids)
+        matrix_cols = list(positive_matrix.columns)
 
         all_signal_values[all_signal_values < 0] = 0
+        standardized_signal_values = all_signal_values / np.max(all_signal_values)
 
         for col_index, col_name in enumerate(matrix_cols):
             col_residues = all_seqs_2d[:, col_index]
             unique_residues = np.unique(col_residues)
             for aa in unique_residues:
-                signals_when = all_signal_values[col_residues == aa]
-                length_adjusted_value = np.median(signals_when) / motif_length
-                signal_values_matrix.at[aa, col_name] = length_adjusted_value
+                # Generate standardized positive matrix
+                standardized_signals_when = standardized_signal_values[col_residues == aa]
+                standardized_points = np.median(standardized_signals_when)
+                positive_matrix.at[aa, col_name] = standardized_points
 
-        self.signal_values_matrix = signal_values_matrix.astype("float32")
+        self.positive_matrix = positive_matrix.astype("float32")
         if not include_phospho:
-            collapse_phospho(self.signal_values_matrix, in_place=True)
+            collapse_phospho(self.positive_matrix, in_place=True)
 
     def generate_suboptimal_matrix(self, sequences_2d, signal_values, passing_seqs_2d, failed_seqs_2d,
                                    amino_acids, aa_equivalence_dict = aa_equivalence_dict, alpha = 0.2,
@@ -322,7 +324,7 @@ class ConditionalMatrices:
         self.chemical_class_count = len(residue_charac_dict.keys())
         self.encoded_chemical_classes = {}
         self.chemical_class_decoder = {}
-        signal_matrices_list = []
+        positive_matrices_list = []
         suboptimal_matrices_list = []
         forbidden_matrices_list = []
 
@@ -338,7 +340,7 @@ class ConditionalMatrices:
             self.conditional_matrix_dict[dict_key_name] = conditional_matrix
 
             # Assign the constituent matrices to lists for 3D stacking
-            signal_matrices_list.append(conditional_matrix.signal_values_matrix.to_numpy())
+            positive_matrices_list.append(conditional_matrix.positive_matrix.to_numpy())
             suboptimal_matrices_list.append(conditional_matrix.suboptimal_elements_matrix.to_numpy())
             forbidden_matrices_list.append(conditional_matrix.forbidden_elements_matrix.to_numpy())
 
@@ -358,7 +360,7 @@ class ConditionalMatrices:
         print("".join(self.report))
 
         # Make 3D matrices
-        self.stack_matrices(signal_matrices_list, suboptimal_matrices_list, forbidden_matrices_list)
+        self.stack_matrices(positive_matrices_list, suboptimal_matrices_list, forbidden_matrices_list)
 
         # Make array representations of the signal, suboptimal, and forbidden matrices
         self.make_unweighted_dicts(self.conditional_matrix_dict)
@@ -459,10 +461,10 @@ class ConditionalMatrices:
 
         return (conditional_matrix, dict_key_name, report_line + f"\n")
 
-    def stack_matrices(self, signal_matrices_list, suboptimal_matrices_list, forbidden_matrices_list):
+    def stack_matrices(self, positive_matrices_list, suboptimal_matrices_list, forbidden_matrices_list):
         # Helper function to make 3D matrices for rapid scoring
 
-        self.stacked_signal_matrices = np.stack(signal_matrices_list)
+        self.stacked_positive_matrices = np.stack(positive_matrices_list)
         self.stacked_suboptimal_matrices = np.stack(suboptimal_matrices_list)
         self.stacked_forbidden_matrices = np.stack(forbidden_matrices_list)
 
@@ -473,8 +475,8 @@ class ConditionalMatrices:
         self.unweighted_arrays_dicts = {"signal": {}, "suboptimal": {}, "forbidden": {}}
 
         for key, conditional_matrix in conditional_matrix_dict.items():
-            self.unweighted_matrices_dicts["signal"][key] = conditional_matrix.signal_values_matrix
-            self.unweighted_arrays_dicts["signal"][key] = conditional_matrix.signal_values_matrix.to_numpy()
+            self.unweighted_matrices_dicts["signal"][key] = conditional_matrix.positive_matrix
+            self.unweighted_arrays_dicts["signal"][key] = conditional_matrix.positive_matrix.to_numpy()
             self.unweighted_matrices_dicts["suboptimal"][key] = conditional_matrix.suboptimal_elements_matrix
             self.unweighted_arrays_dicts["suboptimal"][key] = conditional_matrix.suboptimal_elements_matrix.to_numpy()
             self.unweighted_matrices_dicts["forbidden"][key] = conditional_matrix.forbidden_elements_matrix
@@ -484,7 +486,7 @@ class ConditionalMatrices:
         # Method for assigning weights to the 3D matrix of matrices
 
         # Apply weights to 3D representations of matrices for rapid scoring
-        self.stacked_signal_weighted = self.stacked_signal_matrices * weights
+        self.stacked_positive_weighted = self.stacked_positive_matrices * weights
         self.stacked_suboptimal_weighted = self.stacked_suboptimal_matrices * weights
         self.stacked_forbidden_weighted = self.stacked_forbidden_matrices * weights
         self.weights_array = weights
@@ -613,11 +615,11 @@ class ConditionalMatrices:
 
         # Assign matrices to use for scoring
         if use_weighted:
-            stacked_signal_matrices = conditional_matrices.stacked_signal_weighted
+            stacked_positive_matrices = conditional_matrices.stacked_positive_weighted
             stacked_suboptimal_matrices = conditional_matrices.stacked_suboptimal_weighted
             stacked_forbidden_matrices = conditional_matrices.stacked_forbidden_weighted
         else:
-            stacked_signal_matrices = conditional_matrices.stacked_signal_matrices
+            stacked_positive_matrices = conditional_matrices.stacked_positive_matrices
             stacked_suboptimal_matrices = conditional_matrices.stacked_suboptimal_matrices
             stacked_forbidden_matrices = conditional_matrices.stacked_forbidden_matrices
 
@@ -629,9 +631,9 @@ class ConditionalMatrices:
         dim3 = column_indices_tiled
 
         # Calculate predicted signal values
-        left_signal_2d = stacked_signal_matrices[left_dim1, dim2, dim3].reshape(shape_2d)
-        right_signal_2d = stacked_signal_matrices[right_dim1, dim2, dim3].reshape(shape_2d)
-        predicted_signals_2d = (left_signal_2d + right_signal_2d) / 2
+        left_positive_2d = stacked_positive_matrices[left_dim1, dim2, dim3].reshape(shape_2d)
+        right_positive_2d = stacked_positive_matrices[right_dim1, dim2, dim3].reshape(shape_2d)
+        positive_scores_2d = (left_positive_2d + right_positive_2d) / 2
 
         # Calculate suboptimal element scores
         left_suboptimal_2d = stacked_suboptimal_matrices[left_dim1, dim2, dim3].reshape(shape_2d)
@@ -643,7 +645,6 @@ class ConditionalMatrices:
         right_forbidden_2d = stacked_forbidden_matrices[right_dim1, dim2, dim3].reshape(shape_2d)
         forbidden_scores_2d = (left_forbidden_2d + right_forbidden_2d) / 2
 
-        result = ScoredPeptideResult(slice_scores_subsets, self.weights_array, predicted_signals_2d,
-                                     suboptimal_scores_2d, forbidden_scores_2d)
+        result = ScoredPeptideResult(slice_scores_subsets, positive_scores_2d, suboptimal_scores_2d, forbidden_scores_2d)
 
         return result
