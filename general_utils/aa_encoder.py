@@ -202,3 +202,29 @@ def encode_seq(sequence, scaling = True):
     encoded_seq = np.array(encoded_seq)
 
     return encoded_seq
+
+def encode_seqs_2d(sequences_2d, scaling = True):
+    '''
+    Semi-vectorized function that encodes a set of fixed-length sequences represented by a 2D array
+
+    Args:
+        sequences_2d (np.ndarray): 2D array where each row is a peptide represented by an array of amino acids
+        scaling (bool):            whether to scale the features; useful for neural network applications
+
+    Returns:
+        features_matrix (np.ndarray): arr of shape (seqs_2d.shape[0], len(chemical_characteristics) * seqs_2d.shape[1])
+    '''
+
+    feature_matrix_list = []
+    characteristics_dicts = scaled_chemical_characteristics if scaling else chemical_characteristics
+
+    unique_residues = np.unique(sequences_2d)
+    for characteristic_dict in characteristics_dicts.values():
+        encoded_characteristic_2d = np.full(shape=sequences_2d, fill_value=np.nan, dtype=float)
+        for aa in unique_residues:
+            encoded_characteristic_2d[sequences_2d == aa] = characteristic_dict[aa]
+        feature_matrix_list.append(encoded_characteristic_2d)
+
+    feature_matrix = np.hstack(feature_matrix_list)
+
+    return feature_matrix
