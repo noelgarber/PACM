@@ -645,6 +645,7 @@ class ConditionalMatrices:
         right_forbidden_2d = stacked_forbidden_matrices[right_dim1, dim2, dim3].reshape(shape_2d)
         forbidden_scores_2d = (left_forbidden_2d + right_forbidden_2d) / 2
 
-        result = ScoredPeptideResult(slice_scores_subsets, positive_scores_2d, suboptimal_scores_2d, forbidden_scores_2d)
+        result = ScoredPeptideResult(sequences_2d, slice_scores_subsets,
+                                     positive_scores_2d, suboptimal_scores_2d, forbidden_scores_2d)
 
         return result
