@@ -1,61 +1,56 @@
-# This script trains a dense neural network to use score values to predict whether a peptide will be positive or not
+# This script trains a locally connected neural network to predict whether a peptide will be positive or not
 
 import numpy as np
 import tensorflow as tf
 import os
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import matthews_corrcoef, precision_score, recall_score, accuracy_score
-from Matrix_Generator.ScoredPeptideResult import ScoredPeptideResult
+from general_utils.aa_encoder import encode_seqs_2d
 
-def train_score_model(scored_result, actual_truths, graph_loss = True, save_path = None):
+def train_model(sequences_2d, actual_truths, graph_loss = True, save_path = None):
     '''
     Function that trains a simple dense neural network based on scoring information and actual truth values
 
     Args:
-        scored_result (ScoredPeptideResult):  scoring results for the training data
-        actual_truths (np.ndarray):           array of bools representing experimentally observed classifications
-        graph_loss (bool):                    whether to graph the loss function decay
-        save_path (str):                      if given, the model will be saved to this folder
+        sequences_2d (np.ndarray):          peptide sequences as a 2D array, where each row is an array of amino acids
+        actual_truths (np.ndarray):         array of bools representing experimentally observed classifications
+        graph_loss (bool):                  whether to graph the loss function decay
+        save_path (str):                    if given, the model will be saved to this folder
 
     Returns:
-        model (Sequential):                   the trained model
-        mcc_train (float):                    Matthews correlation coefficient of predictions on training data
-        mcc_test (float):                     Matthews correlation coefficient of predictions on testing data
+        model (tf.keras.models.Sequential): the trained model
+        stats (dict):                       dictionary of training and testing statistics
+        complete_predictions (np.ndarray):  array of back-calculated prediction probabilities for the input data
     '''
 
-    # Assemble the matrix of features, which includes total scores, binned scores, and scores for each residue
-    feature_matrix = np.hstack([scored_result.positive_scores_2d,
-                                scored_result.suboptimal_scores_2d,
-                                scored_result.forbidden_scores_2d,
-                                scored_result.stacked_scores])
-    max_feature_vals = feature_matrix.max(axis=0)
-    max_feature_vals[max_feature_vals == 0] = 1 # avoid divide-by-zero errors
-    feature_matrix = feature_matrix / max_feature_vals
+    # Encode the sequences in terms of numerical descriptors, such as charge, hydrophobicity, etc.
+    feature_matrix, characteristic_count = encode_seqs_2d(sequences_2d, scaling=True)
 
-    # Add integer-encoded residue groups by position as additional features
-    feature_matrix = np.hstack([feature_matrix, scored_result.stacked_encoded_characs])
+    # Reshape the feature matrix to work with LocallyConnected1D
+    sample_count = feature_matrix.shape[0]
     feature_count = feature_matrix.shape[1]
+    position_count = int(feature_count / characteristic_count)
+    feature_matrix = feature_matrix.reshape(sample_count, characteristic_count, position_count)
+    feature_matrix = np.transpose(feature_matrix, (0,2,1)) # transposes to (samples, positions, characteristics)
 
     # Split the data and enforce consistent proportions of actual_truths with 'stratify'
     X_train, X_test, y_train, y_test = train_test_split(feature_matrix, actual_truths, test_size=0.3, random_state=42,
                                                         stratify=actual_truths)
 
-    # Assemble the model as a dense neural network with dropout regularization to prevent overfitting
-    neuron_counts = np.array([int(feature_count * 2/3), int(feature_count * 2/3), int(feature_count * 1/3)])
-    neuron_counts[neuron_counts < 4] = 4 # minimum of 4 neurons per layer
-    dropout_rate = 0.3
-    reg_strength = 0.001
+    # Compile locally connected neural network model
+    kernel_size = 3
+    strides = 1
+    output_frames = (feature_count - kernel_size) // strides + 1
+    dense_units = max(output_frames // 2, 1)
+
     model = tf.keras.models.Sequential([
-        tf.keras.layers.InputLayer(input_shape=(feature_count,)),
-        tf.keras.layers.Dense(neuron_counts[0], kernel_regularizer=tf.keras.regularizers.l2(reg_strength)),
+        tf.keras.layers.LocallyConnected1D(filters=output_frames, kernel_size=kernel_size, strides=strides,
+                                           input_shape=(position_count, characteristic_count)),
+        tf.keras.layers.Flatten(),
+        tf.keras.layers.Dropout(0.4),
+        tf.keras.layers.Dense(dense_units),
         tf.keras.layers.PReLU(),
-        tf.keras.layers.Dropout(dropout_rate),
-        tf.keras.layers.Dense(neuron_counts[1], kernel_regularizer=tf.keras.regularizers.l2(reg_strength)),
-        tf.keras.layers.PReLU(),
-        tf.keras.layers.Dropout(dropout_rate),
-        tf.keras.layers.Dense(neuron_counts[2], kernel_regularizer=tf.keras.regularizers.l2(reg_strength)),
-        tf.keras.layers.PReLU(),
-        tf.keras.layers.Dropout(dropout_rate),
+        tf.keras.layers.Dropout(0.4),
         tf.keras.layers.Dense(1, activation="sigmoid")
     ])
 
@@ -63,15 +58,14 @@ def train_score_model(scored_result, actual_truths, graph_loss = True, save_path
     optimizer = tf.keras.optimizers.Adam(learning_rate=0.0001)
     model.compile(optimizer=optimizer, loss="binary_crossentropy", metrics=["accuracy"])
     print("------------------------------------------------------")
-    print("Compiled model architecture for score interpretation: ")
+    print("Compiled locally connected neural network architecture: ")
     model.summary()
 
     # Train the model
     tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir='logs')
     batch_size = int(len(y_train))
-    print(f"Fitting the model to the score data; batch_size = {batch_size}")
-    history = model.fit(X_train, y_train, epochs=200, batch_size=batch_size, validation_data=(X_test, y_test),
-                        callbacks=[tensorboard_callback])
+    print(f"Fitting the model to chemical characteristic feature matrix")
+    history = model.fit(X_train, y_train, epochs=200, validation_data=(X_test,y_test), callbacks=[tensorboard_callback])
 
     # Display the loss and accuracy curves
     if graph_loss:
@@ -83,8 +77,8 @@ def train_score_model(scored_result, actual_truths, graph_loss = True, save_path
         plt.plot(history.history["val_loss"], label="validation loss", color="magenta")
 
         # Plot accuracy growth
-        plt.plot(history.history['accuracy'], label='training accuracy', color="green")
-        plt.plot(history.history['val_accuracy'], label='validation accuracy', color="red")
+        plt.plot(history.history["accuracy"], label="training accuracy", color="green")
+        plt.plot(history.history["val_accuracy"], label="validation accuracy", color="red")
 
         # Also plot lines representing naive expected accuracy given all-false predictions
         plt.plot(np.repeat(np.mean(~y_train), sample_len),
@@ -92,9 +86,9 @@ def train_score_model(scored_result, actual_truths, graph_loss = True, save_path
         plt.plot(np.repeat(np.mean(~y_test), sample_len),
                  label="all-false validation accuracy", linestyle="dashed", color = "red")
 
-        plt.title("Loss & Accuracy Curves")
+        plt.title("Training & Validation Curves")
         plt.xlabel("Epoch")
-        plt.ylabel("Loss / Accuracy")
+        plt.ylabel("Loss / Accuracy / Precision / Recall")
         plt.legend()
         plt.show()
 

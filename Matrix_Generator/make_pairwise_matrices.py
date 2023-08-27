@@ -8,6 +8,7 @@ from general_utils.general_utils import unravel_seqs
 from Matrix_Generator.ConditionalMatrix import ConditionalMatrices
 from Matrix_Generator.ScoredPeptideResult import ScoredPeptideResult
 from Matrix_Generator.train_score_nn import train_score_model
+from Matrix_Generator.train_locally_connected import train_model as train_lcnn
 try:
     from Matrix_Generator.config_local import general_params, data_params, matrix_params, aa_equivalence_dict
 except:
@@ -130,10 +131,17 @@ def main(input_df, general_params = general_params, data_params = data_params, m
     pass_str = data_params["pass_str"]
     passes_strs = input_df[bait_pass_col].to_numpy()
     passes_bools = np.equal(passes_strs, pass_str)
-    score_model, stats, predictions = train_score_model(scored_result, passes_bools, save_path = output_folder)
-    output_df["Score_Model_Predictions"] = predictions
-    print(f"Model for score interpretation: ")
-    for label, stat in stats.items():
+    score_model, score_stats, score_preds = train_score_model(scored_result, passes_bools, save_path=output_folder)
+    output_df["Score_Model_Predictions"] = score_preds
+    print(f"Statistics for score interpretation dense neural network: ")
+    for label, stat in score_stats.items():
+        print(f"{label}: {stat:.4f}")
+
+    # Also train a locally connected network based on chemical characteristics of residues for comparison
+    lcnn_model, lcnn_stats, lcnn_preds = train_lcnn(scored_result.sequences_2d, passes_bools, save_path=output_folder)
+    output_df["LCNN_Model_Predictions"] = lcnn_preds
+    print(f"Statistics for locally connected neural network: ")
+    for label, stat in lcnn_stats.items():
         print(f"{label}: {stat:.4f}")
 
     # Save ConditionalMatrices object for later use in motif_predictor
@@ -141,4 +149,4 @@ def main(input_df, general_params = general_params, data_params = data_params, m
     with open(conditional_matrices_path, "wb") as f:
         pickle.dump(conditional_matrices, f)
 
-    return (output_df, scored_result, score_model)
+    return (output_df, scored_result, score_model, lcnn_model)
