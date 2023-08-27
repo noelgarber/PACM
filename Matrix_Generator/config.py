@@ -50,33 +50,33 @@ amino_acids_phos = ("D", "E", "R", "H", "K", "S", "T", "N", "Q", "C", "G", "P", 
 
 image_params = {"use_cached_data": False,
                 "cached_data_path": None,
-                "output_folder": "",
+                "output_folder": "/home/user/data_folder/Image Data",
                 "add_peptide_seqs": True,
                 "peptide_seq_cols": ["Phos_Sequence", "No_Phos_Sequence", "BJO_Sequence"],
                 "save_pickled_data": True,
                 "buffer_width": 2,
-                "tiff_paths": ["/home/user/path/to/your/first/dataset",
-                               "/home/user/path/to/your/second/dataset"],
+                "tiff_paths": ["/home/user/data_folder/1_Major_Screen",
+                               "/home/user/data_folder/4_Novel_Motif_Screen"],
                 "pixel_encoding_base": 1,
                 "add_peptide_names": True,
                 "multiline_cols": False,
-                "peptide_names_paths": ["/home/user/path/to/your/first/dataset_peptide_names.csv",
-                                        "/home/user/path/to/your/second/dataset_peptide_names.csv"],
-                "processed_image_paths": ["/home/user/first/dataset/output/folder",
-                                          "/home/user/second/dataset/output/folder"],
-                "grid_dimensions": [[28, 6], [28, 4]],
+                "peptide_names_paths": ["/home/user/data_folder/1_Major_Screen_Coordinate_Peptide_Names_and_Sequences.csv",
+                                        "/home/user/data_folder/4_Novel_Proteome_Motifs_Coordinate_Peptide_Names_and_Sequences.csv"],
+                "processed_image_paths": ["/home/user/data_folder/Image_Data/1_Major_Screen",
+                                          "/home/user/data_folder/Image_Data/4_Novel_Motif_Screen"],
+                "grid_dimensions": [[28, 6], [28, 2], [28, 4], [28, 4]],
                 "circle_index_threshold": 1.25,
-                "last_valid_coords": ["F1", "D8"],
-                "ordered_probe_names": ["Secondary-only", "ABC1", "DEF2", "GHI3"],
+                "last_valid_coords": ["F1", "B15", "D27", "D8"],
+                "ordered_probe_names": ["Secondary-only", "ABC1", "GHI3", "DEF2"],
                 "control_probe_name": "Secondary-only",
                 "control_multiplier": 5,
                 "standardize_within_datasets": True,
-                "intra_dataset_controls": ["Peptide_XYZ"],
+                "intra_dataset_controls": ["OSBP"],
                 "max_bait_mean_col": "Max_Bait_Background-Adjusted_Mean",
                 "standardize_between_datasets": True,
-                "inter_dataset_control": "Peptide_XYZ",
+                "inter_dataset_control": "OSBP",
                 "enforce_positive_control_multiple": True,
-                "positive_control": "Peptide_XYZ",
+                "positive_control": "OSBP",
                 "positive_control_multiple": 0.05}
 
 
@@ -123,21 +123,21 @@ aa_equivalence_dict = {"D": ("D", "E"),
                        "P": ("P"),
                        "G": ("G", "A")}
 
-possible_conditional_weights = [np.array([1.0, 0.5, 0.0]),
-                                np.array([1.0, 0.5, 0.0]),
-                                np.array([1.0, 0.5, 0.0]),
-                                np.array([1.0, 0.5, 0.0]),
-                                np.array([1.0, 0.5, 0.0]),
-                                np.array([1.0, 2.0, 0.5, 0.0]),
-                                np.array([1.0, 3.0, 2.0, 0.0]),
-                                np.array([1.0, 3.0, 2.0, 0.0]),
-                                np.array([1.0, 3.0, 2.0, 0.0]),
-                                np.array([1.0, 3.0, 2.0, 0.0]),
-                                np.array([1.0, 3.0, 2.0, 0.0]),
+possible_conditional_weights = [np.array([0.5]),
+                                np.array([0.5]),
+                                np.array([0.5]),
+                                np.array([0.5]),
+                                np.array([1.0, 0.5]),
+                                np.array([2.0, 1.0, 0.5]),
+                                np.array([1.0, 3.0, 2.0, 0.5]),
+                                np.array([1.0, 3.0, 2.0]),
+                                np.array([1.0, 3.0, 2.0]),
+                                np.array([1.0, 3.0, 2.0]),
+                                np.array([1.0, 3.0, 2.0]),
                                 np.array([0.0, 1.0]),
-                                np.array([1.0, 2.0, 0.0]),
-                                np.array([1.0, 0.5, 0.0]),
-                                np.array([0.5, 0.0])]
+                                np.array([1.0, 2.0, 0.5]),
+                                np.array([0.5, 0.0]),
+                                np.array([0.0])]
 
 ''' General parameters included in general_params: 
         "motif_length":           length of the peptide motif for which matrices are being generated
@@ -149,7 +149,7 @@ possible_conditional_weights = [np.array([1.0, 0.5, 0.0]),
         "position_thresholds":    range of values for optimization, as a list, for thresholding points values '''
 
 general_params = {"motif_length": 15,
-                  "output_folder": "",
+                  "output_folder": "/home/user/data_folder/Matrix_Data",
                   "make_calls": True,
                   "aa_charac_dict": aa_charac_dict,
                   "convert_phospho": True,
@@ -177,6 +177,9 @@ data_params = {"bait": None,
         "points_assignment_mode": if "continuous", points are assigned according to a rational function that puts the 
                                   highest weight on midrange binders and a moderate weight on high-end binders; 
                                   if "thresholds", points are assigned according to thresholds_points_dict
+        "continuous_constants":   dict of constants L, k, and x_midpoint for the sigmoid (logistic) function; this is
+                                  only required if points_assignment_mode is set to "continuous"; 
+                                  when x_midpoint is None, the function will use half of the x-value at maximum signal
         "amino_acids":            amino acid alphabet to use, as a list of single-letter codes
         "include_phospho":        whether to include phospho-residues in matrices; collapses to non-phospho if False
         "min_members":            the minimum number of peptides belonging to a type-position rule for a conditional
@@ -192,24 +195,34 @@ data_params = {"bait": None,
         "chunk_size":             parallel processing chunk size for weights optimization if optimize_weights is True
         "position_weights":       array of weights reflecting the relative score contributions of each position
         "forbidden_threshold":    minimum number of peptides with a putative forbidden residue before the residue is 
-                                  considered forbidden '''
+                                  considered forbidden
+        "slice_scores_subsets":   array of sequence subsets to be scored and thresholded separately; sum must be equal 
+                                  to motif length; as an example, array[5,2,4,1,1,2] slices DEDDENEFFDAPEII as 
+                                  DEDDE NE FFDA P E II '''
 
 matrix_params = {"thresholds_points_dict": None,
                  "points_assignment_mode": "continuous",
+                 "continuous_constants": {"L": 1, "k": 5, "x_midpoint": None},
                  "amino_acids": amino_acids_phos,
                  "include_phospho": False,
-                 "min_members": 10,
-                 "clear_filtering_column": False,
+                 "min_members": 20,
+                 "barnard_alpha": 0.2,
                  "penalize_negatives": True,
                  "use_sigmoid": True,
                  "sigmoid_strength": 0.5,
                  "sigmoid_inflection": 0.3,
                  "optimize_weights": True,
-                 "possible_weights": possible_conditional_weights,
+                 "possible_weights": None,
                  "chunk_size": 1000,
-                 "position_weights": None,
-                 "fit_mode": "predictive_values",
-                 "forbidden_threshold": 3}
+                 "position_weights": np.array([1,1,1,1,1,
+                                               1,2,
+                                               3,3,3,3,
+                                               0,
+                                               1,
+                                               0,0]),
+                 "fit_mode": "R2",
+                 "forbidden_threshold": 3,
+                 "slice_scores_subsets": np.array([5,2,4,1,1,2])}
 
 
 ''' ----------------------------------------------------------------------------------------------------------------
@@ -223,8 +236,8 @@ matrix_params = {"thresholds_points_dict": None,
         "bait_pass_col":    name of column containing pass/fail information for whether peptides bind to the baits
         "pass_str":         string representing a pass in bait_pass_col, e.g. "Yes" '''
 
-comparator_info = {"comparator_set_1": ["GHI3"],
-                   "comparator_set_2": ["ABC1", "DEF2"],
+comparator_info = {"comparator_set_1": ["ABC1"],
+                   "comparator_set_2": ["DEF2", "GHI3"],
                    "seq_col": "BJO_Sequence",
                    "bait_pass_col": "One_Passes",
                    "pass_str": "Yes"}
@@ -245,7 +258,7 @@ possible_specificity_weights = [np.array([0.0, 1.0]),
                                 np.array([0.0, 0.5]),
                                 np.array([0.0, 1.0, 2.0]),
                                 np.array([0.0, 0.5]),
-                                np.array([0.0, 0.5])]
+                                np.array([0.0])]
 
 ''' Specificity matrix generation parameters contained in specificity_params: 
         "thresholds":            comma-delimited tuple of log2fc thresholds, in descending order, as floats
@@ -264,5 +277,5 @@ specificity_params = {"motif_length": 15,
                       "predefined_weights": None,
                       "optimize_weights": True,
                       "possible_weights": possible_specificity_weights,
-                      "output_folder": "",
+                      "output_folder": "/home/user/data_folder/Matrix_Data",
                       "chunk_size": 1000}
