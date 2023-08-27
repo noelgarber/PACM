@@ -97,28 +97,40 @@ def main(input_df, general_params = general_params, data_params = data_params, m
     if output_folder is None:
         output_folder = os.getcwd()
 
-    # Generate the conditional position-weighted matrices
-    percentiles_dict = general_params.get("percentiles_dict")
-    motif_length = general_params.get("motif_length")
-    aa_charac_dict = general_params.get("aa_charac_dict")
-    conditional_matrices = ConditionalMatrices(motif_length, input_df, percentiles_dict, aa_charac_dict,
-                                               data_params, matrix_params)
-    weights_exist = True if matrix_params.get("position_weights") is not None else False
-    conditional_matrices.save(output_folder, save_weighted = weights_exist)
+    # Check if there is a cached version - if there is, use this rather than generating conditional matrices again
+    cached_path = os.path.join(output_folder, "cached_conditional_matrices.pkl")
+    if os.path.isfile(cached_path):
+        with open(cached_path, "rb") as f:
+            print("Found cached conditional matrices! Loading...")
+            conditional_matrices, scored_result, output_df = pickle.load(f)
+    else:
+        # Generate the conditional position-weighted matrices
+        percentiles_dict = general_params.get("percentiles_dict")
+        motif_length = general_params.get("motif_length")
+        aa_charac_dict = general_params.get("aa_charac_dict")
+        conditional_matrices = ConditionalMatrices(motif_length, input_df, percentiles_dict, aa_charac_dict,
+                                                   data_params, matrix_params)
+        weights_exist = True if matrix_params.get("position_weights") is not None else False
+        conditional_matrices.save(output_folder, save_weighted = weights_exist)
 
-    # Score the input data
-    seq_col = data_params.get("seq_col")
-    convert_phospho = not matrix_params.get("include_phospho")
-    slice_scores_subsets = matrix_params.get("slice_scores_subsets")
-    scored_result, output_df = apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets, seq_col,
-                                                  convert_phospho, add_residue_cols = True, in_place = False)
+        # Score the input data
+        seq_col = data_params.get("seq_col")
+        convert_phospho = not matrix_params.get("include_phospho")
+        slice_scores_subsets = matrix_params.get("slice_scores_subsets")
+        scored_result, output_df = apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets, seq_col,
+                                                      convert_phospho, add_residue_cols = True, in_place = False)
+
+        # Cache the data
+        with open(cached_path, "wb") as f:
+            print(f"Cached conditional matrices were dumpted to {cached_path}")
+            pickle.dump((conditional_matrices, scored_result, output_df), f)
 
     # Train a simple dense neural network based on the scoring results
     bait_pass_col = data_params["bait_pass_col"]
     pass_str = data_params["pass_str"]
     passes_strs = input_df[bait_pass_col].to_numpy()
     passes_bools = np.equal(passes_strs, pass_str)
-    score_model, stats, predictions = train_score_model(scored_result, passes_bools)
+    score_model, stats, predictions = train_score_model(scored_result, passes_bools, save_path = output_folder)
     output_df["Score_Model_Predictions"] = predictions
     print(f"Model for score interpretation: ")
     for label, stat in stats.items():
