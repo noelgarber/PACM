@@ -222,7 +222,7 @@ def encode_seqs_2d(sequences_2d, scaling = True):
 
     unique_residues = np.unique(sequences_2d)
     for characteristic_dict in characteristics_dicts.values():
-        encoded_characteristic_2d = np.full(shape=sequences_2d, fill_value=np.nan, dtype=float)
+        encoded_characteristic_2d = np.full(shape=sequences_2d.shape, fill_value=np.nan, dtype=float)
         for aa in unique_residues:
             encoded_characteristic_2d[sequences_2d == aa] = characteristic_dict[aa]
         feature_matrix_list.append(encoded_characteristic_2d)
