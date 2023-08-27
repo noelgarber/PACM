@@ -213,10 +213,12 @@ def encode_seqs_2d(sequences_2d, scaling = True):
 
     Returns:
         features_matrix (np.ndarray): arr of shape (seqs_2d.shape[0], len(chemical_characteristics) * seqs_2d.shape[1])
+        characteristic_count (int):   number of chemical characteristics that are encoded per position
     '''
 
     feature_matrix_list = []
     characteristics_dicts = scaled_chemical_characteristics if scaling else chemical_characteristics
+    characteristic_count = len(characteristics_dicts)
 
     unique_residues = np.unique(sequences_2d)
     for characteristic_dict in characteristics_dicts.values():
@@ -227,4 +229,4 @@ def encode_seqs_2d(sequences_2d, scaling = True):
 
     feature_matrix = np.hstack(feature_matrix_list)
 
-    return feature_matrix
+    return feature_matrix, characteristic_count
