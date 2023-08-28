@@ -203,16 +203,19 @@ def encode_seq(sequence, scaling = True):
 
     return encoded_seq
 
-def encode_seqs_2d(sequences_2d, scaling = True):
+def encode_seqs_2d(sequences_2d, scaling = True, output_dims = 3):
     '''
     Semi-vectorized function that encodes a set of fixed-length sequences represented by a 2D array
 
     Args:
         sequences_2d (np.ndarray): 2D array where each row is a peptide represented by an array of amino acids
         scaling (bool):            whether to scale the features; useful for neural network applications
+        output_dims (int):         must be either 2 or 3; 2 uses np.hstack(), and 3 uses np.stack(arrs,axis=1)
 
     Returns:
-        features_matrix (np.ndarray): arr of shape (seqs_2d.shape[0], len(chemical_characteristics) * seqs_2d.shape[1])
+        features_matrix (np.ndarray): 2D or 3D feature matrix depending on selected output dims:
+                                        output_dims = 2 --> shape = (seqs_2d.shape[0], chem_chars * seqs_2d.shape[1])
+                                        output_dims = 3 --> shape = (seqs_2d.shape[0], chem_chars, seqs_2d.shape[1])
         characteristic_count (int):   number of chemical characteristics that are encoded per position
     '''
 
@@ -227,6 +230,11 @@ def encode_seqs_2d(sequences_2d, scaling = True):
             encoded_characteristic_2d[sequences_2d == aa] = characteristic_dict[aa]
         feature_matrix_list.append(encoded_characteristic_2d)
 
-    feature_matrix = np.hstack(feature_matrix_list)
+    if output_dims == 2:
+        feature_matrix = np.hstack(feature_matrix_list)
+    elif output_dims == 3:
+        feature_matrix = np.stack(feature_matrix_list, axis=1)
+    else:
+        raise ValueError(f"output_dims = {output_dims}; expected either 2 or 3")
 
     return feature_matrix, characteristic_count
