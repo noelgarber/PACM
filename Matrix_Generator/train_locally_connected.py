@@ -31,26 +31,33 @@ def train_model(sequences_2d, actual_truths, graph_loss = True, save_path = None
     feature_count = feature_matrix.shape[1]
     position_count = int(feature_count / characteristic_count)
     feature_matrix = feature_matrix.reshape(sample_count, characteristic_count, position_count)
-    feature_matrix = np.transpose(feature_matrix, (0,2,1)) # transposes to (samples, positions, characteristics)
 
     # Split the data and enforce consistent proportions of actual_truths with 'stratify'
     X_train, X_test, y_train, y_test = train_test_split(feature_matrix, actual_truths, test_size=0.3, random_state=42,
                                                         stratify=actual_truths)
 
-    # Compile locally connected neural network model
-    kernel_size = 3
-    strides = 1
-    output_frames = (feature_count - kernel_size) // strides + 1
-    dense_units = max(output_frames // 2, 1)
+    '''
+    Model architecture setup; note that: 
+        - The input data must be of shape (sample_count, characteristic_count, position_count)
+        - For a single datapoint, the input tensor is of shape (characteristic_count, position_count)
+        - The LocallyConnected1D layer slides over positions in the sequence and uses separate weights per region/frame
+        - The output tensor is of shape (lc_filters, position_count - kernel_size + 1)
+        - This tensor is flattened and passed to a Dense layer, which is then passed to another Dense layer
+        - The final layer is a Dense layer with 1 unit and a sigmoid activation for binary classification
+    '''
+    lc_kernel_size = 2
+    lc_strides = 1
+    dropout_rate = 0.3
 
     model = tf.keras.models.Sequential([
-        tf.keras.layers.LocallyConnected1D(filters=output_frames, kernel_size=kernel_size, strides=strides,
-                                           input_shape=(position_count, characteristic_count)),
+        tf.keras.layers.LocallyConnected1D(filters=8, kernel_size=lc_kernel_size, strides=lc_strides,
+                                           input_shape=(characteristic_count, position_count)),
+        tf.keras.layers.Dropout(dropout_rate),
+        tf.keras.layers.LocallyConnected1D(filters=4, kernel_size=lc_kernel_size, strides=lc_strides),
+        tf.keras.layers.Dropout(dropout_rate),
         tf.keras.layers.Flatten(),
-        tf.keras.layers.Dropout(0.4),
-        tf.keras.layers.Dense(dense_units),
         tf.keras.layers.PReLU(),
-        tf.keras.layers.Dropout(0.4),
+        tf.keras.layers.Dropout(dropout_rate),
         tf.keras.layers.Dense(1, activation="sigmoid")
     ])
 
@@ -63,9 +70,8 @@ def train_model(sequences_2d, actual_truths, graph_loss = True, save_path = None
 
     # Train the model
     tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir='logs')
-    batch_size = int(len(y_train))
     print(f"Fitting the model to chemical characteristic feature matrix")
-    history = model.fit(X_train, y_train, epochs=200, validation_data=(X_test,y_test), callbacks=[tensorboard_callback])
+    history = model.fit(X_train, y_train, epochs=1000, validation_data=(X_test,y_test), callbacks=[tensorboard_callback])
 
     # Display the loss and accuracy curves
     if graph_loss:
