@@ -31,3 +31,6 @@ Old*
 #Ignore PyCharm idea files
 *.idea
 .pybiomart.sqlite
+
+# Ignore logs
+logs
