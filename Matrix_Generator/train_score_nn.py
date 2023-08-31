@@ -26,8 +26,7 @@ def train_score_model(scored_result, actual_truths, graph_loss = True, save_path
     # Assemble the matrix of features, which includes total scores, binned scores, and scores for each residue
     feature_matrix = np.hstack([scored_result.positive_scores_2d,
                                 scored_result.suboptimal_scores_2d,
-                                scored_result.forbidden_scores_2d,
-                                scored_result.stacked_scores])
+                                scored_result.forbidden_scores_2d])
     max_feature_vals = feature_matrix.max(axis=0)
     max_feature_vals[max_feature_vals == 0] = 1 # avoid divide-by-zero errors
     feature_matrix = feature_matrix / max_feature_vals
@@ -41,10 +40,11 @@ def train_score_model(scored_result, actual_truths, graph_loss = True, save_path
                                                         stratify=actual_truths)
 
     # Assemble the model as a dense neural network with dropout regularization to prevent overfitting
-    neuron_counts = np.array([int(feature_count * 2/3), int(feature_count * 2/3), int(feature_count * 1/3)])
+    neuron_counts = np.array([int(feature_count * 1/4), int(feature_count * 1/4), int(feature_count * 1/4)])
     neuron_counts[neuron_counts < 4] = 4 # minimum of 4 neurons per layer
+    print(f"Neuron counts: {neuron_counts}")
     dropout_rate = 0.3
-    reg_strength = 0.001
+    reg_strength = 0.01
     model = tf.keras.models.Sequential([
         tf.keras.layers.InputLayer(input_shape=(feature_count,)),
         tf.keras.layers.Dense(neuron_counts[0], kernel_regularizer=tf.keras.regularizers.l2(reg_strength)),
@@ -60,7 +60,7 @@ def train_score_model(scored_result, actual_truths, graph_loss = True, save_path
     ])
 
     # Define the optimizer and compile the model
-    optimizer = tf.keras.optimizers.Adam(learning_rate=0.0001)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=0.0005)
     model.compile(optimizer=optimizer, loss="binary_crossentropy", metrics=["accuracy"])
     print("------------------------------------------------------")
     print("Compiled model architecture for score interpretation: ")
@@ -69,7 +69,7 @@ def train_score_model(scored_result, actual_truths, graph_loss = True, save_path
     # Train the model
     tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir='logs')
     batch_size = int(len(y_train))
-    print(f"Fitting the model to the score data; batch_size = {batch_size}")
+    print(f"Fitting the model to the score data; input shape = {X_train.shape[0], X_train.shape[1]}")
     history = model.fit(X_train, y_train, epochs=200, batch_size=batch_size, validation_data=(X_test, y_test),
                         callbacks=[tensorboard_callback])
 
