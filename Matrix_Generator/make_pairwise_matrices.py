@@ -136,17 +136,26 @@ def main(input_df, general_params = general_params, data_params = data_params, m
     print(f"Statistics for score interpretation dense neural network: ")
     for label, stat in score_stats.items():
         print(f"{label}: {stat:.4f}")
-
+    '''
     # Also train a locally connected network based on chemical characteristics of residues for comparison
-    lcnn_model, lcnn_stats, lcnn_preds = train_lcnn(scored_result.sequences_2d, passes_bools, save_path=output_folder)
+    graph_loss = True
+    nn_index_handling = matrix_params.get("nn_index_handling")
+    if nn_index_handling is not None:
+        collapse_indices = nn_index_handling.get("collapse_indices")
+        remove_indices = nn_index_handling.get("remove_indices")
+    else:
+        collapse_indices, remove_indices = None, None
+    lcnn_model, lcnn_stats, lcnn_preds = train_lcnn(scored_result.sequences_2d, passes_bools, graph_loss, output_folder,
+                                                    collapse_indices, remove_indices)
     output_df["LCNN_Model_Predictions"] = lcnn_preds
     print(f"Statistics for locally connected neural network: ")
     for label, stat in lcnn_stats.items():
         print(f"{label}: {stat:.4f}")
+    '''
 
     # Save ConditionalMatrices object for later use in motif_predictor
     conditional_matrices_path = os.path.join(output_folder, "conditional_matrices.pkl")
     with open(conditional_matrices_path, "wb") as f:
         pickle.dump(conditional_matrices, f)
 
-    return (output_df, scored_result, score_model, lcnn_model)
+    return (output_df, scored_result, score_model)

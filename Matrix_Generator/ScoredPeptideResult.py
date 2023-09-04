@@ -114,9 +114,12 @@ class ScoredPeptideResult:
         Function that creates an encoded representation of sequences by chemical group
         '''
 
-        self.charac_arrays = {}
+        self.charac_encodings_dict = {}
+        binary_encoded_characs = []
         for charac, member_list in aa_charac_dict.items():
             is_member = np.isin(self.sequences_2d, member_list)
-            self.charac_arrays[charac] = is_member
+            binary_encoded_characs.append(is_member.astype(int))
+            self.charac_encodings_dict[charac] = is_member
 
-        self.stacked_encoded_characs = np.hstack(list(self.charac_arrays.values()))
+        # Create a 3D representation of shape (sample_count, position_count, channel_count); each charac is a channel
+        self.encoded_characs_3d = np.stack(binary_encoded_characs, axis=2)

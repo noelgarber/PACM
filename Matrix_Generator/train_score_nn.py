@@ -23,55 +23,59 @@ def train_score_model(scored_result, actual_truths, graph_loss = True, save_path
         mcc_test (float):                     Matthews correlation coefficient of predictions on testing data
     '''
 
-    # Assemble the matrix of features, which includes total scores, binned scores, and scores for each residue
-    feature_matrix = np.hstack([scored_result.positive_scores_2d,
-                                scored_result.suboptimal_scores_2d,
-                                scored_result.forbidden_scores_2d])
-    max_feature_vals = feature_matrix.max(axis=0)
-    max_feature_vals[max_feature_vals == 0] = 1 # avoid divide-by-zero errors
-    feature_matrix = feature_matrix / max_feature_vals
+    # Standardize the input data
+    input_scores_matrices = [scored_result.positive_scores_2d,
+                             scored_result.suboptimal_scores_2d,
+                             scored_result.forbidden_scores_2d]
+    stacking_matrices = []
+    for input_score_matrix in input_scores_matrices:
+        max_vals = input_score_matrix.max(axis=0)
+        max_vals[max_vals == 0] = 1 # avoids divide-by-zero
+        standardized_matrix = input_score_matrix / max_vals
+        stacking_matrices.append(standardized_matrix)
 
-    # Add integer-encoded residue groups by position as additional features
-    feature_matrix = np.hstack([feature_matrix, scored_result.stacked_encoded_characs])
-    feature_count = feature_matrix.shape[1]
+    # Construct the feature matrix of shape (sample_count, position_count, channels_count)
+    feature_matrix = np.stack(stacking_matrices, axis=2)
+
+    # Concatenate with chemical characteristic classification matrix
+    feature_matrix = np.concatenate([feature_matrix, scored_result.encoded_characs_3d], axis=2)
+    position_count = feature_matrix.shape[1]
+    channels_count = feature_matrix.shape[2]
 
     # Split the data and enforce consistent proportions of actual_truths with 'stratify'
     X_train, X_test, y_train, y_test = train_test_split(feature_matrix, actual_truths, test_size=0.3, random_state=42,
                                                         stratify=actual_truths)
 
-    # Assemble the model as a dense neural network with dropout regularization to prevent overfitting
-    neuron_counts = np.array([int(feature_count * 1/4), int(feature_count * 1/4), int(feature_count * 1/4)])
-    neuron_counts[neuron_counts < 4] = 4 # minimum of 4 neurons per layer
-    print(f"Neuron counts: {neuron_counts}")
-    dropout_rate = 0.3
-    reg_strength = 0.01
-    model = tf.keras.models.Sequential([
-        tf.keras.layers.InputLayer(input_shape=(feature_count,)),
-        tf.keras.layers.Dense(neuron_counts[0], kernel_regularizer=tf.keras.regularizers.l2(reg_strength)),
-        tf.keras.layers.PReLU(),
-        tf.keras.layers.Dropout(dropout_rate),
-        tf.keras.layers.Dense(neuron_counts[1], kernel_regularizer=tf.keras.regularizers.l2(reg_strength)),
-        tf.keras.layers.PReLU(),
-        tf.keras.layers.Dropout(dropout_rate),
-        tf.keras.layers.Dense(neuron_counts[2], kernel_regularizer=tf.keras.regularizers.l2(reg_strength)),
-        tf.keras.layers.PReLU(),
-        tf.keras.layers.Dropout(dropout_rate),
-        tf.keras.layers.Dense(1, activation="sigmoid")
-    ])
+    # Initialize the model
+    model = tf.keras.models.Sequential()
+
+    # In the 1st LocallyConnected1D layer, we slide over 4-aa frames, i.e. each aa has a ±3 aa region of influence
+    model.add(tf.keras.layers.LocallyConnected1D(filters=8, kernel_size=4, strides=1, activation="tanh",
+                                                 input_shape=(position_count, channels_count)))
+    model.add(tf.keras.layers.Dropout(0.4))
+
+    # In the 2nd LocallyConnected1D layer, we slide over 4-position frames again, using the filters as channels
+    model.add(tf.keras.layers.LocallyConnected1D(filters=4, kernel_size=4, strides=1, activation="tanh"))
+    model.add(tf.keras.layers.Dropout(0.4))
+
+    # In the 3rd LocallyConnected1D layer, we slide over 3-position frames, with only 1 filter
+    model.add(tf.keras.layers.LocallyConnected1D(filters=1, kernel_size=3, strides=1, activation="tanh"))
+    model.add(tf.keras.layers.Dropout(0.4))
+
+    # In the final layer, we flatten the inputs and feed to a single neuron for binary classification
+    model.add(tf.keras.layers.Flatten())
+    model.add(tf.keras.layers.Dense(1, activation="sigmoid"))
 
     # Define the optimizer and compile the model
-    optimizer = tf.keras.optimizers.Adam(learning_rate=0.0005)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=0.0002)
     model.compile(optimizer=optimizer, loss="binary_crossentropy", metrics=["accuracy"])
     print("------------------------------------------------------")
-    print("Compiled model architecture for score interpretation: ")
+    print("Compiled LCNN architecture: ")
     model.summary()
 
     # Train the model
-    tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir='logs')
-    batch_size = int(len(y_train))
-    print(f"Fitting the model to the score data; input shape = {X_train.shape[0], X_train.shape[1]}")
-    history = model.fit(X_train, y_train, epochs=200, batch_size=batch_size, validation_data=(X_test, y_test),
-                        callbacks=[tensorboard_callback])
+    print(f"Fitting the model to score/characteristic feature matrix")
+    history = model.fit(X_train, y_train, epochs=300, validation_data=(X_test,y_test))
 
     # Display the loss and accuracy curves
     if graph_loss:
@@ -83,8 +87,8 @@ def train_score_model(scored_result, actual_truths, graph_loss = True, save_path
         plt.plot(history.history["val_loss"], label="validation loss", color="magenta")
 
         # Plot accuracy growth
-        plt.plot(history.history['accuracy'], label='training accuracy', color="green")
-        plt.plot(history.history['val_accuracy'], label='validation accuracy', color="red")
+        plt.plot(history.history["accuracy"], label="training accuracy", color="green")
+        plt.plot(history.history["val_accuracy"], label="validation accuracy", color="red")
 
         # Also plot lines representing naive expected accuracy given all-false predictions
         plt.plot(np.repeat(np.mean(~y_train), sample_len),
@@ -92,9 +96,9 @@ def train_score_model(scored_result, actual_truths, graph_loss = True, save_path
         plt.plot(np.repeat(np.mean(~y_test), sample_len),
                  label="all-false validation accuracy", linestyle="dashed", color = "red")
 
-        plt.title("Loss & Accuracy Curves")
+        plt.title("Training & Validation Curves")
         plt.xlabel("Epoch")
-        plt.ylabel("Loss / Accuracy")
+        plt.ylabel("Loss / Accuracy / Precision / Recall")
         plt.legend()
         plt.show()
 
