@@ -376,3 +376,18 @@ def add_number_suffix(number):
         suffix = "th"
 
     return f"{number}{suffix}"
+
+def input_delimited(message, delimiter, expected_count):
+    # Simple function that prompts the user for input delimited by a specified character
+
+    success = False
+    output = None
+    while not success:
+        input_text = input(message)
+        output = input_text.split(delimiter)
+        if len(output) == expected_count:
+            success = True
+        else:
+            print(f"\tExpected list length of {expected_count} when split with \"{delimiter}\", but got {len(output)}")
+
+    return output
