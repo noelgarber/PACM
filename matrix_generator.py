@@ -88,7 +88,7 @@ def main(image_params = image_params, general_params = general_params, data_para
 
     if generate_context_matrices:
         pairwise_results = make_pairwise_matrices(data_df, general_params, data_params, matrix_params)
-        scored_data_df, scored_result, score_model, lcnn_model = pairwise_results
+        scored_data_df, scored_result, score_model = pairwise_results
         if not generate_specificity_matrix:
             scored_data_df.to_csv(os.path.join(general_params.get("output_folder"), "final_scored_data.csv"))
     else:
