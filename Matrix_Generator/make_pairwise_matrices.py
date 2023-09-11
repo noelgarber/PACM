@@ -14,7 +14,7 @@ try:
 except:
     from Matrix_Generator.config import general_params, data_params, matrix_params, aa_equivalence_dict
 
-def apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets, seq_col = None,
+def apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets, actual_truths = None, seq_col = None,
                        convert_phospho = True, add_residue_cols = False, in_place = False, sequences_2d = None):
     '''
     Function to apply the score_seqs() function to all sequences in the source df and add residue cols for sorting
@@ -23,6 +23,7 @@ def apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets, seq
         input_df (pd.DataFrame):                    df containing motif sequences to back-apply motif scores onto
         conditional_matrices (ConditionalMatrices): conditional weighted matrices for scoring peptides
         slice_scores_subsets (np.ndarray):          array of frame lengths for stratifying 2D score arrays
+        actual_truths (np.ndarray):                 array of experimentally confirmed truth values of input peptides
         seq_col (str): 			                    col in input_df with peptide seqs to score
         convert_phospho (bool):                     whether to convert phospho-residues to non-phospho before lookups
         add_residue_cols (bool):                    whether to add columns containing individual residue letters
@@ -45,8 +46,8 @@ def apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets, seq
         
     # Score the input data; the result is an instance of ScoredPeptideResult
     weights_exist = True if matrix_params.get("position_weights") is not None else False
-    scored_result = conditional_matrices.score_peptides(sequences_2d, conditional_matrices, slice_scores_subsets,
-                                                        use_weighted = weights_exist)
+    scored_result = conditional_matrices.score_peptides(sequences_2d, actual_truths, slice_scores_subsets,
+                                                        use_weighted=weights_exist)
 
     # Construct the output dataframe
     output_df = input_df if in_place else input_df.copy()
@@ -118,8 +119,10 @@ def main(input_df, general_params = general_params, data_params = data_params, m
         seq_col = data_params.get("seq_col")
         convert_phospho = not matrix_params.get("include_phospho")
         slice_scores_subsets = matrix_params.get("slice_scores_subsets")
-        scored_result, output_df = apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets, seq_col,
-                                                      convert_phospho, add_residue_cols = True, in_place = False)
+        # TODO Define actual_truths
+        scored_result, output_df = apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets,
+                                                      actual_truths, seq_col, convert_phospho,
+                                                      add_residue_cols = True, in_place = False)
 
         # Cache the data
         with open(cached_path, "wb") as f:
