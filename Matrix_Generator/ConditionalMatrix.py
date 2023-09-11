@@ -554,12 +554,13 @@ class ConditionalMatrices:
         # Display saved message
         print(f"Saved unweighted matrices, weighted matrices, and output report to {parent_folder}")
 
-    def score_peptides(self, sequences_2d, conditional_matrices, slice_scores_subsets = None, use_weighted = False):
+    def score_peptides(self, sequences_2d, actual_truths, slice_scores_subsets = None, use_weighted = False):
         '''
         Vectorized function to score amino acid sequences based on the dictionary of context-aware weighted matrices
 
         Args:
             sequences_2d (np.ndarray):                  unravelled peptide sequences to score
+            actual_truths (np.ndarray):                 array of boolean calls for whether peptides bind in experiments
             conditional_matrices (ConditionalMatrices): conditional weighted matrices for scoring peptides
             slice_scores_subsets (np.ndarray):          array of stretches of positions to stratify results into;
                                                         e.g. [6,7,2] is stratified into scores for positions
@@ -574,7 +575,7 @@ class ConditionalMatrices:
 
         # Get row indices for unique residues
         unique_residues = np.unique(sequences_2d)
-        unique_residue_indices = conditional_matrices.index.get_indexer_for(unique_residues)
+        unique_residue_indices = self.index.get_indexer_for(unique_residues)
 
         if (unique_residue_indices == -1).any():
             failed_residues = unique_residues[unique_residue_indices == -1]
@@ -593,12 +594,12 @@ class ConditionalMatrices:
         # Get integer-encoded chemical classes for each residue
         left_encoded_classes_2d = np.zeros(flanking_left_2d.shape, dtype=int)
         right_encoded_classes_2d = np.zeros(flanking_right_2d.shape, dtype=int)
-        for member_aa, encoded_class in conditional_matrices.encoded_chemical_classes.items():
+        for member_aa, encoded_class in self.encoded_chemical_classes.items():
             left_encoded_classes_2d[flanking_left_2d == member_aa] = encoded_class
             right_encoded_classes_2d[flanking_right_2d == member_aa] = encoded_class
 
         # Find the matrix identifier number (1st dim of 3D matrix) for each encoded class, depending on seq position
-        encoded_positions = np.arange(motif_length) * conditional_matrices.chemical_class_count
+        encoded_positions = np.arange(motif_length) * self.chemical_class_count
         left_encoded_matrix_refs = left_encoded_classes_2d + encoded_positions
         right_encoded_matrix_refs = right_encoded_classes_2d + encoded_positions
 
@@ -615,13 +616,13 @@ class ConditionalMatrices:
 
         # Assign matrices to use for scoring
         if use_weighted:
-            stacked_positive_matrices = conditional_matrices.stacked_positive_weighted
-            stacked_suboptimal_matrices = conditional_matrices.stacked_suboptimal_weighted
-            stacked_forbidden_matrices = conditional_matrices.stacked_forbidden_weighted
+            stacked_positive_matrices = self.stacked_positive_weighted
+            stacked_suboptimal_matrices = self.stacked_suboptimal_weighted
+            stacked_forbidden_matrices = self.stacked_forbidden_weighted
         else:
-            stacked_positive_matrices = conditional_matrices.stacked_positive_matrices
-            stacked_suboptimal_matrices = conditional_matrices.stacked_suboptimal_matrices
-            stacked_forbidden_matrices = conditional_matrices.stacked_forbidden_matrices
+            stacked_positive_matrices = self.stacked_positive_matrices
+            stacked_suboptimal_matrices = self.stacked_suboptimal_matrices
+            stacked_forbidden_matrices = self.stacked_forbidden_matrices
 
         # Define dimensions for 3D matrix indexing
         shape_2d = sequences_2d.shape
@@ -645,7 +646,7 @@ class ConditionalMatrices:
         right_forbidden_2d = stacked_forbidden_matrices[right_dim1, dim2, dim3].reshape(shape_2d)
         forbidden_scores_2d = (left_forbidden_2d + right_forbidden_2d) / 2
 
-        result = ScoredPeptideResult(sequences_2d, slice_scores_subsets,
-                                     positive_scores_2d, suboptimal_scores_2d, forbidden_scores_2d)
+        result = ScoredPeptideResult(sequences_2d, slice_scores_subsets, positive_scores_2d, suboptimal_scores_2d,
+                                     forbidden_scores_2d, actual_truths = actual_truths)
 
         return result
