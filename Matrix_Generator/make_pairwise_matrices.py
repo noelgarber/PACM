@@ -119,7 +119,10 @@ def main(input_df, general_params = general_params, data_params = data_params, m
         seq_col = data_params.get("seq_col")
         convert_phospho = not matrix_params.get("include_phospho")
         slice_scores_subsets = matrix_params.get("slice_scores_subsets")
-        # TODO Define actual_truths
+        pass_str = data_params.get("pass_str")
+        pass_col = data_params.get("bait_pass_col")
+        pass_values = input_df[pass_col].to_numpy()
+        actual_truths = pass_values == pass_str
         scored_result, output_df = apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets,
                                                       actual_truths, seq_col, convert_phospho,
                                                       add_residue_cols = True, in_place = False)

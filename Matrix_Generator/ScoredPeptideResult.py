@@ -41,11 +41,14 @@ def objective_function(concatenated_weights, actual_truths, positives_2d, subopt
     weighted_scores = weighted_positives + weighted_suboptimals + weighted_forbiddens
 
     precision, recall, thresholds = precision_recall_curve(actual_truths, weighted_scores)
-    f1_scores = 2 * (precision * recall) / (precision + recall)
+    precision_recall_products = precision * recall
+    precision_recall_sums = precision + recall
+    valid_f1_scores = 2 * precision_recall_products[precision_recall_sums != 0] / precision_recall_sums[precision_recall_sums != 0]
+    max_f1_score = np.nanmax(valid_f1_scores)
 
-    output = f1_scores.max() * -1
+    minimizable_output = max_f1_score * -1
 
-    return output
+    return minimizable_output
 
 def optimize_weights(actual_truths, positives_2d, suboptimals_2d, forbiddens_2d):
     '''
@@ -70,7 +73,7 @@ def optimize_weights(actual_truths, positives_2d, suboptimals_2d, forbiddens_2d)
     positions_count = positives_2d.shape[1]
     initial_weights = np.ones(positions_count+3, dtype=float)
     callback = lambda xk: print(f"\tCurrent array: {xk}")
-    options = {"maxiter": 20000, "adaptive": True}
+    options = {"maxiter": 2000, "adaptive": True}
 
     result = minimize(partial_objective, initial_weights, method="nelder-mead", callback=callback, options=options)
     position_weights = result.x[:-3]
