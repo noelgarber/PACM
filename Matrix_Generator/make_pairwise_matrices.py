@@ -14,8 +14,9 @@ try:
 except:
     from Matrix_Generator.config import general_params, data_params, matrix_params, aa_equivalence_dict
 
-def apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets, actual_truths = None, seq_col = None,
-                       convert_phospho = True, add_residue_cols = False, in_place = False, sequences_2d = None):
+def apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets = None, actual_truths = None,
+                       seq_col = None, convert_phospho = True, add_residue_cols = False, in_place = False,
+                       sequences_2d = None):
     '''
     Function to apply the score_seqs() function to all sequences in the source df and add residue cols for sorting
 
@@ -133,6 +134,7 @@ def main(input_df, general_params = general_params, data_params = data_params, m
             pickle.dump((conditional_matrices, scored_result, output_df), f)
 
     # Train a simple dense neural network based on the scoring results
+    '''
     bait_pass_col = data_params["bait_pass_col"]
     pass_str = data_params["pass_str"]
     passes_strs = input_df[bait_pass_col].to_numpy()
@@ -142,7 +144,7 @@ def main(input_df, general_params = general_params, data_params = data_params, m
     print(f"Statistics for score interpretation dense neural network: ")
     for label, stat in score_stats.items():
         print(f"{label}: {stat:.4f}")
-    '''
+    
     # Also train a locally connected network based on chemical characteristics of residues for comparison
     graph_loss = True
     nn_index_handling = matrix_params.get("nn_index_handling")
@@ -164,4 +166,4 @@ def main(input_df, general_params = general_params, data_params = data_params, m
     with open(conditional_matrices_path, "wb") as f:
         pickle.dump(conditional_matrices, f)
 
-    return (output_df, scored_result, score_model)
+    return (output_df, scored_result)
