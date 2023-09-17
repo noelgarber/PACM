@@ -6,6 +6,7 @@ import warnings
 from functools import partial
 from sklearn.metrics import precision_recall_curve, matthews_corrcoef
 from scipy.optimize import minimize
+from Matrix_Generator.random_search import RandomSearchOptimizer
 try:
     from Matrix_Generator.config_local import aa_charac_dict
 except:
@@ -15,71 +16,50 @@ except:
                       Define optimization functions for determining position and score weights
     ---------------------------------------------------------------------------------------------------------------- '''
 
-def objective_function(concatenated_weights, actual_truths, positives_2d, suboptimals_2d, forbiddens_2d):
+def points_objective(weights, actual_truths, points_2d):
     '''
-    Objective function to minimize, based on f1-scoring and application of variable weights
 
     Args:
-        concatenated_weights (np.ndarray): array of weights of shape (positions_count+3,), where there are 3 extra
-                                           weights for total positive, total suboptimal, & total forbidden scores
-        actual_truths (np.ndarray):        array of actual truth values as binary integer-encoded labels
-        positives_2d (np.ndarray):         2D array of positive score values, where axis=1 represents positions
-        suboptimals_2d (np.ndarray):       2D array of suboptimal score values, where axis=1 represents positions
-        forbiddens_2d (np.ndarray):        2D array of forbidden score values, where axis=1 represents positions
+        weights (np.ndarray):       array of weights of shape (positions_count,)
+        actual_truths (np.ndarray): array of actual truth values as binary integer-encoded labels
+        points_2d (np.ndarray):     2D array of points values, where axis=1 represents positions
 
     Returns:
-        output (float):  f1-score with reversed sign, such that minimization results in maximizing actual f1-score
+        max_f1_score (float):       best f1 score
     '''
 
-    position_weights = concatenated_weights[:-3]
-    positive_weight, suboptimal_weight, forbidden_weight = concatenated_weights[-3:]
+    weighted_points = np.multiply(points_2d, weights).sum(axis=1)
 
-    weighted_positives = np.multiply(positives_2d, position_weights).sum(axis=1) * positive_weight
-    weighted_suboptimals = np.multiply(suboptimals_2d, position_weights).sum(axis=1) * suboptimal_weight * -1
-    weighted_forbiddens = np.multiply(forbiddens_2d, position_weights).sum(axis=1) * forbidden_weight * -1
-
-    weighted_scores = weighted_positives + weighted_suboptimals + weighted_forbiddens
-
-    precision, recall, thresholds = precision_recall_curve(actual_truths, weighted_scores)
+    precision, recall, thresholds = precision_recall_curve(actual_truths, weighted_points)
     precision_recall_products = precision * recall
     precision_recall_sums = precision + recall
     valid_f1_scores = 2 * precision_recall_products[precision_recall_sums != 0] / precision_recall_sums[precision_recall_sums != 0]
     max_f1_score = np.nanmax(valid_f1_scores)
 
-    minimizable_output = max_f1_score * -1
+    return max_f1_score
 
-    return minimizable_output
-
-def optimize_weights(actual_truths, positives_2d, suboptimals_2d, forbiddens_2d):
+def type_objective(weights, actual_truths, weighted_points_sums):
     '''
-    Function that applies Nelder-Mead optimization to find ideal position and score weights to maximize f1-score
 
     Args:
-        actual_truths (np.ndarray):  array of actual truth values as binary integer-encoded labels
-        positives_2d (np.ndarray):   2D array of positive score values, where axis=1 represents positions
-        suboptimals_2d (np.ndarray): 2D array of suboptimal score values, where axis=1 represents positions
-        forbiddens_2d (np.ndarray):  2D array of forbidden score values, where axis=1 represents positions
+        weights (np.ndarray):              array of weights of shape (type_count,)
+        actual_truths (np.ndarray):        array of actual truth values as binary integer-encoded labels
+        weighted_points_sums (np.ndarray): 2D array of shape (peptides_count, type_count)
 
     Returns:
-        None
+        max_f1_score (float):              best f1 score
     '''
 
-    partial_objective = partial(objective_function, actual_truths = actual_truths,
-                                positives_2d = positives_2d,
-                                suboptimals_2d = suboptimals_2d,
-                                forbiddens_2d = forbiddens_2d)
+    weighted_total_points = np.multiply(weighted_points_sums, weights).sum(axis=1)
 
-    print("Beginning Nelder-Mead optimization of weights")
-    positions_count = positives_2d.shape[1]
-    initial_weights = np.ones(positions_count+3, dtype=float)
-    callback = lambda xk: print(f"\tCurrent array: {xk}")
-    options = {"maxiter": 2000, "adaptive": True}
+    precision, recall, thresholds = precision_recall_curve(actual_truths, weighted_total_points)
+    precision_recall_products = precision * recall
+    precision_recall_sums = precision + recall
+    valid_f1_scores = 2 * precision_recall_products[precision_recall_sums != 0] / precision_recall_sums[
+        precision_recall_sums != 0]
+    max_f1_score = np.nanmax(valid_f1_scores)
 
-    result = minimize(partial_objective, initial_weights, method="nelder-mead", callback=callback, options=options)
-    position_weights = result.x[:-3]
-    positive_score_weight, suboptimal_score_weight, forbidden_score_weight = result.x[-3:]
-
-    return position_weights, positive_score_weight, suboptimal_score_weight, forbidden_score_weight
+    return max_f1_score
 
 
 ''' ----------------------------------------------------------------------------------------------------------------
@@ -133,7 +113,7 @@ class ScoredPeptideResult:
         self.forbidden_scores = forbidden_scores_2d.sum(axis=1)
 
         # Apply and assess score weightings
-        self.handle_weights(actual_truths, predefined_weights)
+        self.process_weights(actual_truths, predefined_weights) # optimizes weights if no predefined weights
 
         # Assign sliced score values if slice_scores_subsets was given
         self.slice_scores_subsets = slice_scores_subsets
@@ -143,7 +123,7 @@ class ScoredPeptideResult:
         # Encode source residues with integer values; these will be used for NN training
         self.encode_residues(aa_charac_dict)
 
-    def handle_weights(self, actual_truths = None, predefined_weights = None):
+    def process_weights(self, actual_truths = None, predefined_weights = None):
         '''
         Parent function to either optimize weights or apply predefined weights (or all ones if not given)
 
@@ -158,10 +138,7 @@ class ScoredPeptideResult:
 
         if actual_truths is not None and predefined_weights is None:
             # Optimize weights for combining sets of scores
-            results = optimize_weights(actual_truths, self.positive_scores_2d,
-                                       self.suboptimal_scores_2d, self.forbidden_scores_2d)
-            position_weights, positive_weight, suboptimal_weight, forbidden_weight = results
-            self.apply_weights(position_weights, positive_weight, suboptimal_weight, forbidden_weight)
+            self.optimize_weights(actual_truths)
             self.evaluate_weighted_scores(actual_truths)
         elif predefined_weights is not None:
             # Apply predefined weights and assess them
@@ -174,6 +151,67 @@ class ScoredPeptideResult:
             position_weights = np.ones(positions_count, dtype=float)
             positive_weight, suboptimal_weight, forbidden_weight = np.ones(3, dtype=float)
             self.apply_weights(position_weights, positive_weight, suboptimal_weight, forbidden_weight)
+
+    def optimize_weights(self, actual_truths, search_sample=2000):
+        '''
+        Function that applies random search optimization to find ideal position and score weights to maximize f1-score
+
+        Args:
+            actual_truths (np.ndarray):  array of actual truth values as binary integer-encoded labels
+            search_sample (int):         number of weights arrays to test per search run of RandomSearchOptimizer()
+
+        Returns:
+            None
+        '''
+
+        # Get weights for each set of points
+        print(f"---\n",
+              f"Optimizing weights for each 2D points array...")
+        points_types = [self.positive_scores_2d, self.suboptimal_scores_2d, self.forbidden_scores_2d]
+        value_range = (0.0, 10.0)
+        points_types_weights = []
+        for points_type_2d in points_types:
+            objective = partial(points_objective, actual_truths=actual_truths, points_2d=points_type_2d)
+            array_len = points_type_2d.shape[1]
+            points_optimizer = RandomSearchOptimizer(objective, array_len, value_range, mode="maximize")
+            done = False
+            while not done:
+                points_optimizer.search(search_sample)
+                done = input("\tHit enter to search again, or enter any key to proceed:  ") != ""
+            points_types_weights.append(points_optimizer.best_array)
+
+        self.positives_weights, self.suboptimals_weights, self.forbiddens_weights = points_types_weights
+
+        # Apply weights by points type
+        self.weighted_positives_2d = np.multiply(self.positive_scores_2d, self.positives_weights)
+        self.weighted_suboptimals_2d = np.multiply(self.suboptimal_scores_2d, self.suboptimals_weights)
+        self.weighted_forbiddens_2d = np.multiply(self.forbidden_scores_2d, self.forbiddens_weights)
+
+        self.weighted_positives = self.weighted_positives_2d.sum(axis=1)
+        self.weighted_suboptimals = self.weighted_suboptimals_2d.sum(axis=1)
+        self.weighted_forbiddens = self.weighted_forbiddens_2d.sum(axis=1)
+
+        # Get weights for each point type
+        print(f"---\n",
+              f"Optimizing weights for summed positives, suboptimals, and forbiddens...")
+
+        weighted_points_sums = [self.weighted_positives, self.weighted_suboptimals, self.weighted_forbiddens]
+        weighted_points_sums = np.stack(weighted_points_sums, axis=1)
+
+        objective = partial(type_objective, actual_truths=actual_truths, weighted_points_sums=weighted_points_sums)
+        array_len = weighted_points_sums.shape[1]
+        value_range = (0.0, 2.0)
+        type_optimizer = RandomSearchOptimizer(objective, array_len, value_range, mode="maximize")
+        done = False
+        while not done:
+            type_optimizer.search(search_sample)
+            done = input("\tHit enter to search again, or enter any key to proceed:  ") != ""
+        type_weights = type_optimizer.best_array
+        self.positive_score_weight, self.suboptimal_score_weight, self.forbidden_score_weight = type_weights
+
+        self.weighted_scores = np.multiply(weighted_points_sums, type_weights).sum(axis=1)
+        best_f1_score = type_optimizer.x
+        print(f"Done! f1-score = {best_f1_score}", "\n---")
 
     def apply_weights(self, position_weights, positive_score_weight, suboptimal_score_weight, forbidden_score_weight):
         '''
@@ -242,8 +280,7 @@ class ScoredPeptideResult:
 
         # Generate text report
         self.weights_report = [f"---\n",
-                               f"Nelder-Mead Weight Optimization Report\n",
-                               f"Final optimized array: {final_weights}\n",
+                               f"Weighting Accuracy Report\n",
                                f"Weighted score threshold: {self.weighted_score_threshold}\n",
                                f"Accuracy={self.weighted_accuracy}\n",
                                f"MCC={self.weighted_mcc}\n",
