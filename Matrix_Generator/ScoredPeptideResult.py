@@ -16,19 +16,22 @@ except:
                       Define optimization functions for determining position and score weights
     ---------------------------------------------------------------------------------------------------------------- '''
 
-def points_objective(weights, actual_truths, points_2d):
+def points_objective(weights, actual_truths, points_2d, invert_points = False):
     '''
 
     Args:
         weights (np.ndarray):       array of weights of shape (positions_count,)
         actual_truths (np.ndarray): array of actual truth values as binary integer-encoded labels
         points_2d (np.ndarray):     2D array of points values, where axis=1 represents positions
+        invert_points (bool):       set to True if lower points values are better, otherwise set to False
 
     Returns:
         max_f1_score (float):       best f1 score
     '''
 
     weighted_points = np.multiply(points_2d, weights).sum(axis=1)
+    if invert_points:
+        weighted_points = weighted_points * -1
 
     precision, recall, thresholds = precision_recall_curve(actual_truths, weighted_points)
     precision_recall_products = precision * recall
@@ -60,6 +63,34 @@ def type_objective(weights, actual_truths, weighted_points_sums):
     max_f1_score = np.nanmax(valid_f1_scores)
 
     return max_f1_score
+
+def optimize_points_2d(points_objective, actual_truths, points_2d, value_range, mode, invert_points = False):
+    '''
+    Helper function that applies random search optimization of weights for a 2D points matrix
+
+    Args:
+        points_objective (function): objective function for optimization; must take a 1D array and return a float
+        actual_truths (np.ndarray):  array of actual boolean truths
+        points_2d (np.ndarray):      2D points array, where rows are scored peptides and columns are sequence positions
+        value_range (iterable):      range of allowed weights values
+        mode (str):                  optimization mode; must either be "maximize" or "minimize"
+        invert_points (bool):        set to True if lower points values are better, otherwise set to False
+
+    Returns:
+        best_weights (np.ndarray):   best position weights for the given points matrix
+    '''
+
+    objective = partial(points_objective, actual_truths=actual_truths, points_2d=points_2d, invert_points=invert_points)
+    array_len = points_2d.shape[1]
+    search_sample = 5000
+    points_optimizer = RandomSearchOptimizer(objective, array_len, value_range, mode)
+    done = False
+    while not done:
+        points_optimizer.search(search_sample)
+        search_again = input("\tSearch again? (Y/N)  ")
+        done = search_again != "Y"
+
+    return points_optimizer.best_array
 
 
 ''' ----------------------------------------------------------------------------------------------------------------
@@ -152,7 +183,7 @@ class ScoredPeptideResult:
             positive_weight, suboptimal_weight, forbidden_weight = np.ones(3, dtype=float)
             self.apply_weights(position_weights, positive_weight, suboptimal_weight, forbidden_weight)
 
-    def optimize_weights(self, actual_truths, search_sample=2000):
+    def optimize_weights(self, actual_truths, search_sample=5000):
         '''
         Function that applies random search optimization to find ideal position and score weights to maximize f1-score
 
@@ -167,20 +198,13 @@ class ScoredPeptideResult:
         # Get weights for each set of points
         print(f"---\n",
               f"Optimizing weights for each 2D points array...")
-        points_types = [self.positive_scores_2d, self.suboptimal_scores_2d, self.forbidden_scores_2d]
         value_range = (0.0, 10.0)
-        points_types_weights = []
-        for points_type_2d in points_types:
-            objective = partial(points_objective, actual_truths=actual_truths, points_2d=points_type_2d)
-            array_len = points_type_2d.shape[1]
-            points_optimizer = RandomSearchOptimizer(objective, array_len, value_range, mode="maximize")
-            done = False
-            while not done:
-                points_optimizer.search(search_sample)
-                done = input("\tHit enter to search again, or enter any key to proceed:  ") != ""
-            points_types_weights.append(points_optimizer.best_array)
-
-        self.positives_weights, self.suboptimals_weights, self.forbiddens_weights = points_types_weights
+        self.positives_weights = optimize_points_2d(points_objective, actual_truths, self.positive_scores_2d,
+                                                    value_range, mode = "maximize", invert_points = False)
+        self.suboptimals_weights = optimize_points_2d(points_objective, actual_truths, self.suboptimal_scores_2d,
+                                                      value_range, mode = "maximize", invert_points = True)
+        self.forbiddens_weights = optimize_points_2d(points_objective, actual_truths, self.forbidden_scores_2d,
+                                                     value_range, mode = "maximize", invert_points = True)
 
         # Apply weights by points type
         self.weighted_positives_2d = np.multiply(self.positive_scores_2d, self.positives_weights)
@@ -192,10 +216,10 @@ class ScoredPeptideResult:
         self.weighted_forbiddens = self.weighted_forbiddens_2d.sum(axis=1)
 
         # Get weights for each point type
-        print(f"---\n",
-              f"Optimizing weights for summed positives, suboptimals, and forbiddens...")
+        print(f"---",
+              f"\nOptimizing weights for summed positives, suboptimals, and forbiddens...")
 
-        weighted_points_sums = [self.weighted_positives, self.weighted_suboptimals, self.weighted_forbiddens]
+        weighted_points_sums = [self.weighted_positives, self.weighted_suboptimals * -1, self.weighted_forbiddens * -1]
         weighted_points_sums = np.stack(weighted_points_sums, axis=1)
 
         objective = partial(type_objective, actual_truths=actual_truths, weighted_points_sums=weighted_points_sums)
@@ -205,7 +229,8 @@ class ScoredPeptideResult:
         done = False
         while not done:
             type_optimizer.search(search_sample)
-            done = input("\tHit enter to search again, or enter any key to proceed:  ") != ""
+            search_again = input("\tSearch again? (Y/N)  ")
+            done = search_again != "Y"
         type_weights = type_optimizer.best_array
         self.positive_score_weight, self.suboptimal_score_weight, self.forbidden_score_weight = type_weights
 
@@ -284,8 +309,8 @@ class ScoredPeptideResult:
                                f"Weighted score threshold: {self.weighted_score_threshold}\n",
                                f"Accuracy={self.weighted_accuracy}\n",
                                f"MCC={self.weighted_mcc}\n",
-                               f"Precision={self.weighted_precision}",
-                               f"Recall={self.weighted_recall})\n",
+                               f"Precision={self.weighted_precision}\n",
+                               f"Recall={self.weighted_recall}\n",
                                f"f1_score={self.weighted_f1_score}\n",
                                f"---\n"]
 
