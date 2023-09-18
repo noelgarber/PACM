@@ -130,7 +130,7 @@ class ScoredPeptideResult:
     '''
     def __init__(self, seqs_2d, slice_scores_subsets,
                  positive_scores_2d, suboptimal_scores_2d, forbidden_scores_2d, actual_truths = None,
-                 predefined_weights = None):
+                 predefined_weights = None, fig_path = None):
         '''
         Initialization function to generate the score values and assign them to self
 
@@ -144,6 +144,7 @@ class ScoredPeptideResult:
             actual_truths (np.ndarray):        array of actual binary calls for each peptide
             predefined_weights (tuple):        tuple of (position_weights, positive_score_weight,
                                                suboptimal_score_weight, forbidden_score_weight)
+            fig_path (str):                    desired file name, as full path, to save precision/recall graph
         '''
 
         # Check validity of slice_scores_subsets
@@ -171,18 +172,10 @@ class ScoredPeptideResult:
         self.forbidden_scores = forbidden_scores_2d.sum(axis=1)
 
         # Apply and assess score weightings, and assign them to a dataframe
-        self.process_weights(actual_truths, predefined_weights) # optimizes weights if no predefined weights
+        self.process_weights(actual_truths, predefined_weights, fig_path) # optimizes weights if no predefined weights
         self.generate_scored_df()
 
-        # Assign sliced score values if slice_scores_subsets was given
-        '''self.slice_scores_subsets = slice_scores_subsets
-        self.slice_scores()
-        self.stack_scores()
-
-        # Encode source residues with integer values; these will be used for NN training
-        self.encode_residues(aa_charac_dict)'''
-
-    def process_weights(self, actual_truths = None, predefined_weights = None):
+    def process_weights(self, actual_truths = None, predefined_weights = None, fig_path = None):
         '''
         Parent function to either optimize weights or apply predefined weights (or all ones if not given)
 
@@ -190,6 +183,8 @@ class ScoredPeptideResult:
             actual_truths (np.ndarray):        array of actual binary calls for each peptide
             predefined_weights (tuple):        tuple of (positive_score_weights, suboptimal_score_weights,
                                                forbidden_score_weights, type_weights)
+            fig_path (str):                    desired file name, as full path, to save precision/recall graph
+
 
         Returns:
             None
@@ -197,7 +192,7 @@ class ScoredPeptideResult:
 
         if actual_truths is not None and predefined_weights is None:
             # Optimize weights for combining sets of scores
-            self.optimize_weights(actual_truths)
+            self.optimize_weights(actual_truths, fig_path)
             self.evaluate_weighted_scores(actual_truths)
         elif predefined_weights is not None:
             # Apply predefined weights and assess them
@@ -211,13 +206,14 @@ class ScoredPeptideResult:
             positive_weight, suboptimal_weight, forbidden_weight = np.ones(3, dtype=float)
             self.apply_weights(position_weights, positive_weight, suboptimal_weight, forbidden_weight)
 
-    def optimize_weights(self, actual_truths, search_sample=5000):
+    def optimize_weights(self, actual_truths, fig_path = None):
         '''
         Function that applies random search optimization to find ideal position and score weights to maximize f1-score
 
         Args:
             actual_truths (np.ndarray):  array of actual truth values as binary integer-encoded labels
             search_sample (int):         number of weights arrays to test per search run of RandomSearchOptimizer()
+            fig_path (str):              desired file name, as full path, to save precision/recall graph
 
         Returns:
             None
@@ -226,13 +222,14 @@ class ScoredPeptideResult:
         # Get weights for each set of points
         print(f"---\n",
               f"Optimizing weights for each 2D points array...")
-        weights_value_range = (0.0, 10.0)
+        weights_range = (0.0, 10.0)
         positions_count = self.positive_scores_2d.shape[1]
+        mode = "maximize"
         combined_2d = np.hstack([self.positive_scores_2d,
                                  self.suboptimal_scores_2d * -1,
                                  self.forbidden_scores_2d * -1])
         combined_weights, best_f1_score = optimize_points_2d(points_objective, actual_truths, combined_2d,
-                                                             weights_value_range, mode = "maximize", invert = False)
+                                                             weights_range, mode, invert = False, fig_path = fig_path)
         self.positives_weights = combined_weights[:positions_count]
         self.suboptimals_weights = combined_weights[positions_count:positions_count*2]
         self.forbiddens_weights = combined_weights[positions_count*2:positions_count*3]
@@ -339,7 +336,8 @@ class ScoredPeptideResult:
                        self.weighted_positives.reshape(-1,1),
                        self.weighted_suboptimals.reshape(-1,1),
                        self.weighted_forbiddens.reshape(-1,1),
-                       self.weighted_scores.reshape(-1,1)]
+                       self.weighted_scores.reshape(-1,1),
+                       self.standardized_weighted_scores.reshape(-1,1)]
         arrays_fused = np.hstack(arrays_list)
 
         # Construct column titles
@@ -354,7 +352,7 @@ class ScoredPeptideResult:
         col_titles.extend(["Weighted_Suboptimal_#" + position for position in positions])
         col_titles.extend(["Weighted_Forbidden_#" + position for position in positions])
         col_titles.extend(["Weighted_Positive_Score", "Weighted_Suboptimal_Score", "Weighted_Forbidden_Score"])
-        col_titles.extend(["Weighted_Total_Score"])
+        col_titles.extend(["Weighted_Total_Score", "Standardized_Weighted_Score"])
 
         # Make the dataframe
         self.scored_df = pd.DataFrame(arrays_fused, columns=col_titles)

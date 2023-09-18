@@ -7,8 +7,6 @@ import pickle
 from general_utils.general_utils import unravel_seqs
 from Matrix_Generator.ConditionalMatrix import ConditionalMatrices
 from Matrix_Generator.ScoredPeptideResult import ScoredPeptideResult
-from Matrix_Generator.train_score_nn import train_score_model
-from Matrix_Generator.train_locally_connected import train_model as train_lcnn
 try:
     from Matrix_Generator.config_local import general_params, data_params, matrix_params, aa_equivalence_dict
 except:
@@ -16,7 +14,7 @@ except:
 
 def apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets = None, actual_truths = None,
                        seq_col = None, convert_phospho = True, add_residue_cols = False, in_place = False,
-                       sequences_2d = None):
+                       sequences_2d = None, precision_recall_path = None):
     '''
     Function to apply the score_seqs() function to all sequences in the source df and add residue cols for sorting
 
@@ -31,6 +29,7 @@ def apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets = No
         in_place (bool):                            whether to apply operations in-place; add_residue_cols not supported
         sequences_2d (np.ndarray):                  unravelled peptide sequences; optionally provide this upfront for
                                                     performance improvement in loops
+        precision_recall_path (str):                output file path for saving the precision/recall graph
 
     Returns:
         result (ScoredPeptideResult):               result object containing signal, suboptimal, and forbidden scores
@@ -48,7 +47,7 @@ def apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets = No
     # Score the input data; the result is an instance of ScoredPeptideResult
     weights_exist = True if matrix_params.get("position_weights") is not None else False
     scored_result = conditional_matrices.score_peptides(sequences_2d, actual_truths, slice_scores_subsets,
-                                                        use_weighted=weights_exist)
+                                                        weights_exist, precision_recall_path)
 
     # Construct the output dataframe
     output_df = input_df if in_place else input_df.copy()
@@ -123,43 +122,17 @@ def main(input_df, general_params = general_params, data_params = data_params, m
         pass_str = data_params.get("pass_str")
         pass_col = data_params.get("bait_pass_col")
         pass_values = input_df[pass_col].to_numpy()
-        actual_truths = pass_values == pass_str
+        actual_truths = np.equal(pass_values, pass_str)
+        precision_recall_path = os.path.join(output_folder, "precision_recall_graph.pdf")
         scored_result, output_df = apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets,
                                                       actual_truths, seq_col, convert_phospho,
-                                                      add_residue_cols = True, in_place = False)
+                                                      add_residue_cols = True, in_place = False,
+                                                      precision_recall_path = precision_recall_path)
 
         # Cache the data
         with open(cached_path, "wb") as f:
             print(f"Cached conditional matrices were dumpted to {cached_path}")
             pickle.dump((conditional_matrices, scored_result, output_df), f)
-
-    # Train a simple dense neural network based on the scoring results
-    '''
-    bait_pass_col = data_params["bait_pass_col"]
-    pass_str = data_params["pass_str"]
-    passes_strs = input_df[bait_pass_col].to_numpy()
-    passes_bools = np.equal(passes_strs, pass_str)
-    score_model, score_stats, score_preds = train_score_model(scored_result, passes_bools, save_path=output_folder)
-    output_df["Score_Model_Predictions"] = score_preds
-    print(f"Statistics for score interpretation dense neural network: ")
-    for label, stat in score_stats.items():
-        print(f"{label}: {stat:.4f}")
-    
-    # Also train a locally connected network based on chemical characteristics of residues for comparison
-    graph_loss = True
-    nn_index_handling = matrix_params.get("nn_index_handling")
-    if nn_index_handling is not None:
-        collapse_indices = nn_index_handling.get("collapse_indices")
-        remove_indices = nn_index_handling.get("remove_indices")
-    else:
-        collapse_indices, remove_indices = None, None
-    lcnn_model, lcnn_stats, lcnn_preds = train_lcnn(scored_result.sequences_2d, passes_bools, graph_loss, output_folder,
-                                                    collapse_indices, remove_indices)
-    output_df["LCNN_Model_Predictions"] = lcnn_preds
-    print(f"Statistics for locally connected neural network: ")
-    for label, stat in lcnn_stats.items():
-        print(f"{label}: {stat:.4f}")
-    '''
 
     # Save ConditionalMatrices object for later use in motif_predictor
     conditional_matrices_path = os.path.join(output_folder, "conditional_matrices.pkl")
