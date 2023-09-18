@@ -97,11 +97,12 @@ def optimize_points_2d(points_objective, actual_truths, points_2d, value_range, 
 
     Returns:
         best_weights (np.ndarray):   best position weights for the given points matrix
+        x (float):                   value of points_objective for best_weights
     '''
 
     objective = partial(points_objective, actual_truths=actual_truths, points_2d=points_2d, invert_points=invert)
     array_len = points_2d.shape[1]
-    search_sample = 5000
+    search_sample = 10000
     points_optimizer = RandomSearchOptimizer(objective, array_len, value_range, mode)
     done = False
     while not done:
@@ -111,12 +112,12 @@ def optimize_points_2d(points_objective, actual_truths, points_2d, value_range, 
 
     # Plot PPV/NPV
     weighted_points = np.multiply(points_2d, points_optimizer.best_array).sum(axis=1)
-    if invert_points:
+    if invert:
         weighted_points = weighted_points * -1
     precision_values, recall_values, thresholds = precision_recall_curve(actual_truths, weighted_points)
     plot_precision_recall(precision_values[:-1], recall_values[:-1], thresholds, fig_path)
 
-    return points_optimizer.best_array
+    return points_optimizer.best_array, points_optimizer.x
 
 
 ''' ----------------------------------------------------------------------------------------------------------------
@@ -225,13 +226,16 @@ class ScoredPeptideResult:
         # Get weights for each set of points
         print(f"---\n",
               f"Optimizing weights for each 2D points array...")
-        value_range = (0.0, 10.0)
-        self.positives_weights = optimize_points_2d(points_objective, actual_truths, self.positive_scores_2d,
-                                                    value_range, mode = "maximize", invert_points = False)
-        self.suboptimals_weights = optimize_points_2d(points_objective, actual_truths, self.suboptimal_scores_2d,
-                                                      value_range, mode = "maximize", invert_points = True)
-        self.forbiddens_weights = optimize_points_2d(points_objective, actual_truths, self.forbidden_scores_2d,
-                                                     value_range, mode = "maximize", invert_points = True)
+        weights_value_range = (0.0, 10.0)
+        positions_count = self.positive_scores_2d.shape[1]
+        combined_2d = np.hstack([self.positive_scores_2d,
+                                 self.suboptimal_scores_2d * -1,
+                                 self.forbidden_scores_2d * -1])
+        combined_weights, best_f1_score = optimize_points_2d(points_objective, actual_truths, combined_2d,
+                                                             weights_value_range, mode = "maximize", invert = False)
+        self.positives_weights = combined_weights[:positions_count]
+        self.suboptimals_weights = combined_weights[positions_count:positions_count*2]
+        self.forbiddens_weights = combined_weights[positions_count*2:positions_count*3]
 
         # Apply weights by points type
         self.weighted_positives_2d = np.multiply(self.positive_scores_2d, self.positives_weights)
@@ -242,31 +246,13 @@ class ScoredPeptideResult:
         self.weighted_suboptimals = self.weighted_suboptimals_2d.sum(axis=1)
         self.weighted_forbiddens = self.weighted_forbiddens_2d.sum(axis=1)
 
-        # Get weights for each point type
-        print(f"---",
-              f"\nOptimizing weights for summed positives, suboptimals, and forbiddens...")
-
-        weighted_points_sums = [self.weighted_positives, self.weighted_suboptimals * -1, self.weighted_forbiddens * -1]
-        weighted_points_sums = np.stack(weighted_points_sums, axis=1)
-
-        objective = partial(type_objective, actual_truths=actual_truths, weighted_points_sums=weighted_points_sums)
-        array_len = weighted_points_sums.shape[1]
-        value_range = (0.0, 2.0)
-        type_optimizer = RandomSearchOptimizer(objective, array_len, value_range, mode="maximize")
-        done = False
-        while not done:
-            type_optimizer.search(search_sample)
-            search_again = input("\tSearch again? (Y/N)  ")
-            done = search_again != "Y"
-        self.type_weights = type_optimizer.best_array
-        self.positive_score_weight, self.suboptimal_score_weight, self.forbidden_score_weight = self.type_weights
-
-        self.weighted_scores = np.multiply(weighted_points_sums, self.type_weights).sum(axis=1)
+        # Get total scores
+        self.weighted_scores = np.multiply(combined_2d, combined_weights).sum(axis=1)
         self.standardized_weighted_scores = self.weighted_scores - self.weighted_scores.min()
         self.standardized_weighted_scores = self.standardized_weighted_scores / self.standardized_weighted_scores.max()
-        best_f1_score = type_optimizer.x
         print(f"Done! f1-score = {best_f1_score}", "\n---")
 
+        # Plot precisions and recalls for different thresholds
         precisions, recalls, thresholds = precision_recall_curve(actual_truths, self.standardized_weighted_scores)
         plot_precision_recall(precisions[:-1], recalls[:-1], thresholds)
 
