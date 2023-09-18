@@ -2,11 +2,10 @@
 
 import numpy as np
 import pandas as pd
-import warnings
 import matplotlib.pyplot as plt
+import os
 from functools import partial
 from sklearn.metrics import precision_recall_curve, matthews_corrcoef
-from scipy.optimize import minimize
 from Matrix_Generator.random_search import RandomSearchOptimizer
 try:
     from Matrix_Generator.config_local import aa_charac_dict
@@ -17,14 +16,20 @@ except:
                       Define optimization functions for determining position and score weights
     ---------------------------------------------------------------------------------------------------------------- '''
 
-def plot_precision_recall(precision_values, recall_values, thresholds):
+def plot_precision_recall(precision_values, recall_values, thresholds, save_path = None):
     # Helper function that plots precision against recall
+
+    if save_path is not None:
+        save_folder = save_path.rsplit("/",1)[0]
+        if not os.path.exists(save_folder):
+            os.makedirs(save_folder)
 
     plt.plot(thresholds, precision_values, marker='o', linestyle='-', label="Precision")
     plt.plot(thresholds, recall_values, marker='o', linestyle='-', label="Recall")
     plt.xlabel("Score Threshold")
     plt.ylabel("Precision/Recall")
     plt.legend()
+    plt.savefig(save_path, format="pdf") if save_path is not None else None
     plt.show()
 
 def points_objective(weights, actual_truths, points_2d, invert_points = False):
@@ -77,7 +82,7 @@ def type_objective(weights, actual_truths, weighted_points_sums):
 
     return max_f1_score
 
-def optimize_points_2d(points_objective, actual_truths, points_2d, value_range, mode, invert_points = False):
+def optimize_points_2d(points_objective, actual_truths, points_2d, value_range, mode, invert = False, fig_path = None):
     '''
     Helper function that applies random search optimization of weights for a 2D points matrix
 
@@ -87,13 +92,14 @@ def optimize_points_2d(points_objective, actual_truths, points_2d, value_range, 
         points_2d (np.ndarray):      2D points array, where rows are scored peptides and columns are sequence positions
         value_range (iterable):      range of allowed weights values
         mode (str):                  optimization mode; must either be "maximize" or "minimize"
-        invert_points (bool):        set to True if lower points values are better, otherwise set to False
+        invert (bool):               set to True if lower points values are better, otherwise set to False
+        fig_path (str):              file path to save the figure as
 
     Returns:
         best_weights (np.ndarray):   best position weights for the given points matrix
     '''
 
-    objective = partial(points_objective, actual_truths=actual_truths, points_2d=points_2d, invert_points=invert_points)
+    objective = partial(points_objective, actual_truths=actual_truths, points_2d=points_2d, invert_points=invert)
     array_len = points_2d.shape[1]
     search_sample = 5000
     points_optimizer = RandomSearchOptimizer(objective, array_len, value_range, mode)
@@ -108,7 +114,7 @@ def optimize_points_2d(points_objective, actual_truths, points_2d, value_range, 
     if invert_points:
         weighted_points = weighted_points * -1
     precision_values, recall_values, thresholds = precision_recall_curve(actual_truths, weighted_points)
-    plot_precision_recall(precision_values[:-1], recall_values[:-1], thresholds)
+    plot_precision_recall(precision_values[:-1], recall_values[:-1], thresholds, fig_path)
 
     return points_optimizer.best_array
 
@@ -257,7 +263,7 @@ class ScoredPeptideResult:
 
         self.weighted_scores = np.multiply(weighted_points_sums, self.type_weights).sum(axis=1)
         self.standardized_weighted_scores = self.weighted_scores - self.weighted_scores.min()
-        self.standardized_weighted_scores = self.standardized_weighted_scores / self.standardized_weighted_scores.mean()
+        self.standardized_weighted_scores = self.standardized_weighted_scores / self.standardized_weighted_scores.max()
         best_f1_score = type_optimizer.x
         print(f"Done! f1-score = {best_f1_score}", "\n---")
 
@@ -344,8 +350,10 @@ class ScoredPeptideResult:
         # Fuse the data together into one array
         arrays_list = [self.positive_scores_2d, self.suboptimal_scores_2d, self.forbidden_scores_2d,
                        self.weighted_positives_2d, self.weighted_suboptimals_2d, self.weighted_forbiddens_2d,
-                       self.weighted_positives, self.weighted_suboptimals, self.weighted_forbiddens,
-                       self.weighted_scores]
+                       self.weighted_positives.reshape(-1,1),
+                       self.weighted_suboptimals.reshape(-1,1),
+                       self.weighted_forbiddens.reshape(-1,1),
+                       self.weighted_scores.reshape(-1,1)]
         arrays_fused = np.hstack(arrays_list)
 
         # Construct column titles
@@ -364,69 +372,3 @@ class ScoredPeptideResult:
 
         # Make the dataframe
         self.scored_df = pd.DataFrame(arrays_fused, columns=col_titles)
-
-    '''
-    def slice_scores(self):
-        # Function that generates scores based on sliced subsets of peptide sequences
-
-        self.score_cols = ["Positive_Score_Adjusted", "Suboptimal_Element_Score", "Forbidden_Element_Score"]
-
-        if self.slice_scores_subsets is not None:
-            end_position = 0
-            self.sliced_positive_scores = []
-            self.sliced_suboptimal_scores = []
-            self.sliced_forbidden_scores = []
-
-            for subset in self.slice_scores_subsets:
-                start_position = end_position
-                end_position += subset
-                suffix_str = str(start_position) + "-" + str(end_position)
-
-                subset_positive_scores = self.positive_scores_2d[:, start_position:end_position + 1].sum(axis=1)
-                self.sliced_positive_scores.append(subset_positive_scores)
-                self.score_cols.append("Positive_Score_" + suffix_str)
-
-                subset_suboptimal_scores = self.suboptimal_scores_2d[:, start_position:end_position + 1].sum(axis=1)
-                self.sliced_suboptimal_scores.append(subset_suboptimal_scores)
-                self.score_cols.append("Suboptimal_Score_" + suffix_str)
-
-                subset_forbidden_scores = self.forbidden_scores_2d[:, start_position:end_position + 1].sum(axis=1)
-                self.sliced_forbidden_scores.append(subset_forbidden_scores)
-                self.score_cols.append("Forbidden_Score_" + suffix_str)
-
-        else:
-            warnings.warn(RuntimeWarning("slice_scores_subsets was not given, so scores have not been sliced"))
-            self.sliced_positive_scores = None
-            self.sliced_suboptimal_scores = None
-            self.sliced_forbidden_scores = None
-
-    def stack_scores(self):
-        #Helper function that constructs a 2D array of scores values as columns
-
-        scores = [self.positive_scores_adjusted, self.suboptimal_scores, self.forbidden_scores]
-
-        if self.slice_scores_subsets is not None:
-            for positive_scores_slice in self.sliced_positive_scores:
-                scores.append(positive_scores_slice)
-            for suboptimal_scores_slice in self.sliced_suboptimal_scores:
-                scores.append(suboptimal_scores_slice)
-            for forbidden_scores_slice in self.sliced_forbidden_scores:
-                scores.append(forbidden_scores_slice)
-
-        # Stack the scores and also use them to construct a dataframe
-        self.stacked_scores = np.stack(scores).T
-        self.scored_df = pd.DataFrame(self.stacked_scores, columns = self.score_cols)
-
-    def encode_residues(self, aa_charac_dict = aa_charac_dict):
-        #Function that creates an encoded representation of sequences by chemical group
-
-        self.charac_encodings_dict = {}
-        binary_encoded_characs = []
-        for charac, member_list in aa_charac_dict.items():
-            is_member = np.isin(self.sequences_2d, member_list)
-            binary_encoded_characs.append(is_member.astype(int))
-            self.charac_encodings_dict[charac] = is_member
-
-        # Create a 3D representation of shape (sample_count, position_count, channel_count); each charac is a channel
-        self.encoded_characs_3d = np.stack(binary_encoded_characs, axis=2)
-    '''
