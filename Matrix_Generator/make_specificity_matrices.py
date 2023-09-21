@@ -78,15 +78,15 @@ def process_weights(weights_array_chunks, specificity_matrix):
 
     return (best_weights, best_mean_mcc)
 
-def find_optimal_weights(specificity_matrix, motif_length, chunk_size = 1000):
+def find_optimal_weights(specificity_matrix, motif_length, chunk_size = 1000, ignore_positions = None):
     '''
     Parent function for finding optimal position weights to generate an optimally weighted specificity matrix
 
     Args:
         specificity_matrix (SpecificityMatrix): the specificity matrix object
         motif_length (int):                     length of the motif being studied
-        possible_weights (list):                list of arrays of possible weights at each position of the motif
         chunk_size (int):                       the number of position weights to process at a time
+        ignore_positions (iterable):            positions to force to 0 for weights arrays
 
     Returns:
         specificity_matrix (SpecificityMatrix): the fitted SpecificityMatrix object containing matrices and scored data
@@ -96,6 +96,10 @@ def find_optimal_weights(specificity_matrix, motif_length, chunk_size = 1000):
     sample_size = 1000000
     value_range = (0.0, 4.0)
     trial_weights = np.random.uniform(value_range[0], value_range[1], size=(sample_size, motif_length))
+    if ignore_positions is not None:
+        for position in ignore_positions:
+            trial_weights[:,position] = 0
+
     all_zero_rows = np.all(trial_weights == 0, axis=1)
     trial_weights = trial_weights[~all_zero_rows]
 
@@ -140,7 +144,8 @@ def main(source_df, comparator_info = comparator_info, specificity_params = spec
         # Determine optimal weights by maximizing the R2 value against a permuted array of weights arrays
         motif_length = specificity_params["motif_length"]
         chunk_size = specificity_params["chunk_size"]
-        specificity_matrix = find_optimal_weights(specificity_matrix, motif_length, chunk_size)
+        ignore_positions = specificity_params["ignore_positions"]
+        specificity_matrix = find_optimal_weights(specificity_matrix, motif_length, chunk_size, ignore_positions)
 
     # Save the results
     output_folder = specificity_params.get("output_folder")
