@@ -68,7 +68,8 @@ def process_weights(weights_array_chunks, specificity_matrix):
         for chunk_results in pool.imap_unordered(process_partial, weights_array_chunks):
             if chunk_results[1] > best_mean_mcc:
                 best_weights, best_mean_mcc = chunk_results
-                print(f"New record: mean_mcc = {best_mean_mcc} for weights: {best_weights}")
+                formatted_weights = ", ".join(best_weights.round(2).astype(str))
+                print(f"\nNew record: mean_mcc = {best_mean_mcc} for weights: [{formatted_weights}]")
 
             pbar.update()
 
@@ -77,7 +78,7 @@ def process_weights(weights_array_chunks, specificity_matrix):
 
     return (best_weights, best_mean_mcc)
 
-def find_optimal_weights(specificity_matrix, motif_length, possible_weights = None, chunk_size = 1000):
+def find_optimal_weights(specificity_matrix, motif_length, chunk_size = 1000):
     '''
     Parent function for finding optimal position weights to generate an optimally weighted specificity matrix
 
@@ -92,11 +93,13 @@ def find_optimal_weights(specificity_matrix, motif_length, possible_weights = No
     '''
 
     # Get the permuted weights and break into chunks for parallelization
-    permuted_weights = permute_weights(motif_length, possible_weights)
-    all_zero_rows = np.all(permuted_weights == 0, axis=1)
-    permuted_weights = permuted_weights[~all_zero_rows]
+    sample_size = 1000000
+    value_range = (0.0, 4.0)
+    trial_weights = np.random.uniform(value_range[0], value_range[1], size=(sample_size, motif_length))
+    all_zero_rows = np.all(trial_weights == 0, axis=1)
+    trial_weights = trial_weights[~all_zero_rows]
 
-    weights_array_chunks = [permuted_weights[i:i + chunk_size] for i in range(0, len(permuted_weights), chunk_size)]
+    weights_array_chunks = [trial_weights[i:i + chunk_size] for i in range(0, len(trial_weights), chunk_size)]
 
     # Run the parallelized optimization process
     results = process_weights(weights_array_chunks, specificity_matrix)
@@ -136,8 +139,8 @@ def main(source_df, comparator_info = comparator_info, specificity_params = spec
     if optimize_weights:
         # Determine optimal weights by maximizing the R2 value against a permuted array of weights arrays
         motif_length = specificity_params["motif_length"]
-        possible_weights, chunk_size = specificity_params["possible_weights"], specificity_params["chunk_size"]
-        specificity_matrix = find_optimal_weights(specificity_matrix, motif_length, possible_weights, chunk_size)
+        chunk_size = specificity_params["chunk_size"]
+        specificity_matrix = find_optimal_weights(specificity_matrix, motif_length, chunk_size)
 
     # Save the results
     output_folder = specificity_params.get("output_folder")
