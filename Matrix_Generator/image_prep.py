@@ -106,12 +106,12 @@ def assign_data_values(data_df, spot_arrays, multiline_cols = True):
             col_prefix = spot_array.probe_name + "\nCopy " + str(spot_array.copy_number) + "\nScan " + str(spot_array.scan_number)
             uas_col = col_prefix + "\nRaw_Spot_Signal"
             bas_col = col_prefix + "\nBackground-Adjusted_Signal"
-            ei_col = col_prefix + "\nEllipsoid_Index"
+            ei_col = col_prefix + "\nCall_Index"
         else:
             col_prefix = spot_array.probe_name + "_Copy-" + str(spot_array.copy_number)
             uas_col = col_prefix + "_Raw_Spot_Signal"
             bas_col = col_prefix + "_Background-Adjusted_Signal"
-            ei_col = col_prefix + "_Ellipsoid_Index"
+            ei_col = col_prefix + "_Call_Index"
 
         #Assign column names to dict by probe name
         dict_value_append(uas_cols_dict, spot_array.probe_name, uas_col)
@@ -121,11 +121,11 @@ def assign_data_values(data_df, spot_arrays, multiline_cols = True):
 
         #Assign dataframe values
         for spot_coord, signal_tuple in spot_array.spot_info_dict.items():
-            unadjusted_signal, background_adjusted_signal, ellipsoid_index, _, _ = signal_tuple
+            unadjusted_signal, background_adjusted_signal, call_index, _, _ = signal_tuple
 
             data_df.at[spot_coord, uas_col] = unadjusted_signal
             data_df.at[spot_coord, bas_col] = background_adjusted_signal
-            data_df.at[spot_coord, ei_col] = ellipsoid_index
+            data_df.at[spot_coord, ei_col] = call_index
 
     # Return dicts of column names
     return uas_cols_dict, bas_cols_dict, ei_cols_dict, new_cols_dict
@@ -190,7 +190,7 @@ def prepare_sorted_cols(data_df, probes_ordered, cols_dict, seqs_cols):
         for col_tuple in col_tuples:
             sorted_cols.append(col_tuple[2]) # Appends unadjusted signal column name
             sorted_cols.append(col_tuple[3]) # Appends background_adjusted_signal column name
-            sorted_cols.append(col_tuple[4]) # Appends ellipsoid_index column name
+            sorted_cols.append(col_tuple[4]) # Appends call_index column name
         data_df.insert(1, current_probe + "_call", "")
         sorted_cols.append(current_probe + "_call")
 

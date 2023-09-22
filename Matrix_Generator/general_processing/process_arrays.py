@@ -75,7 +75,7 @@ def conditional_log2fc(input_df, bait_pair, control_signal_cols, bait1_signal_co
     '''
     Conditionally calculates log2fc based on whether it is interpretable.
     For a log2fc value to be interpretable, the function requires that:
-        => at least one of the baits passes the ellipsoid_index test, and
+        => at least one of the baits passes the call_index test, and
         => at least one of the baits exceeds a threshold defined as the control value * a defined multiplier
 
     Args:
@@ -83,7 +83,7 @@ def conditional_log2fc(input_df, bait_pair, control_signal_cols, bait1_signal_co
         bait_pair (tuple): a tuple of (bait1, bait2)
         bait1_signal_cols (list): a list of column names holding bait1 signal values
         bait2_signal_cols (list): a list of column names holding bait2 signal values
-        pass_cols (dict): dictionary where bait name --> column name holding significance calls based on ellipsoid_index
+        pass_cols (dict): dictionary where bait name --> column name holding significance calls based on call_index
         control_multiplier (float): the multiple of the control value that a hit must exceed to be considered significant
 
     Returns:
@@ -102,14 +102,14 @@ def conditional_log2fc(input_df, bait_pair, control_signal_cols, bait1_signal_co
     bait1_signal_means = output_df[bait1_signal_cols].mean(axis=1)
     bait2_signal_means = output_df[bait2_signal_cols].mean(axis=1)
 
-    # Determine if at least one of the baits exceeds the control by the required multiplier for each entry, and whether they pass ellipsoid_index tests
+    # Determine if at least one of the baits exceeds the control by the required multiplier for each entry, and whether they pass call_index tests
     passes_control = np.logical_or(bait1_signal_means > control_multiplier * control_signal_means,
                                    bait2_signal_means > control_multiplier * control_signal_means)
 
     # Calculate the log2fc values
     log2fc_vals = bait1_signal_means.combine(bait2_signal_means, log2fc)
 
-    # Use a boolean mask that requires that at least 1 bait to pass the ellipsoid_index test, and also that at least 1 bait passes control
+    # Use a boolean mask that requires that at least 1 bait to pass the call_index test, and also that at least 1 bait passes control
     pass_cols_pair = [pass_cols.get(bait_pair[0]), pass_cols.get(bait_pair[1])]
     mask = ((output_df[pass_cols_pair[0]] == "Pass") | (output_df[pass_cols_pair[1]] == "Pass")) & passes_control
 
@@ -125,7 +125,7 @@ def one_passes(input_df, bait_cols_dict, bait_pass_cols, control_probe_name, con
     Args:
         input_df (pd.DataFrame):            the input dataframe to test
         bait_col_dict (dict):               a dictionary where each key-value pair is a bait name and a list of columns pointing to background-adjusted values for that bait
-        bait_pass_cols (dict):              dictionary where bait name --> column name holding significance calls based on ellipsoid_index
+        bait_pass_cols (dict):              dictionary where bait name --> column name holding significance calls based on call_index
         control_probe_name (str):           the name of the control probe)
         control_multiplier (float):         the multiple of the control value that a hit must exceed to be considered significant
         calculate_individual_passes (bool): whether to also calculate individual pass cols for each bait
@@ -152,20 +152,20 @@ def one_passes(input_df, bait_cols_dict, bait_pass_cols, control_probe_name, con
 
     # -------------------------------------- Determine & Assign One_Passes Column --------------------------------------
 
-    # Determine if at least one of the baits exceeds the control by the required multiplier for each entry, and whether they pass ellipsoid_index tests
+    # Determine if at least one of the baits exceeds the control by the required multiplier for each entry, and whether they pass call_index tests
     bait_signal_means_list = list(bait_signal_means_dict.values())
     bait_signal_means_stacked = np.vstack(bait_signal_means_list)
     control_signal_means_stacked = np.vstack([control_signal_means] * bait_signal_means_stacked.shape[0])
     passes_control = np.any(bait_signal_means_stacked > control_multiplier * control_signal_means_stacked, axis=0)
 
-    # Use a boolean mask that requires that at least 1 bait to pass the ellipsoid_index test
+    # Use a boolean mask that requires that at least 1 bait to pass the call_index test
     pass_conditions = []
     for pass_col in bait_pass_cols.values():
         pass_conditions.append(output_df[pass_col] == "Pass")
-    ellipsoid_index_mask = np.logical_or.reduce(pass_conditions)
+    call_index_mask = np.logical_or.reduce(pass_conditions)
 
     # Combine the two conditions with an 'and' operator
-    mask = np.logical_and(passes_control, ellipsoid_index_mask)
+    mask = np.logical_and(passes_control, call_index_mask)
 
     # Apply the log2fc values conditionally using the mask
     output_df.loc[mask, "One_Passes"] = "Yes"
@@ -179,10 +179,10 @@ def one_passes(input_df, bait_cols_dict, bait_pass_cols, control_probe_name, con
 
             # Test if the bait passes the ellipsoid index test
             bait_pass_col = bait_pass_cols.get(bait)
-            ellipsoid_index_mask = output_df[bait_pass_col] == "Pass"
+            call_index_mask = output_df[bait_pass_col] == "Pass"
 
             # Combine the testing conditions and apply
-            mask = np.logical_and(passes_control, ellipsoid_index_mask)
+            mask = np.logical_and(passes_control, call_index_mask)
             sig_col = bait + "_Passes"
             col_idx = output_df.columns.get_loc(bait_pass_col) + 1  # Get the index of the column after bait_pass_col
             output_df.insert(col_idx, sig_col, "")  # Insert the new column after bait_pass_col
@@ -300,7 +300,7 @@ def main_processing(data_df, controls_list, bait_cols_dict, bait_pass_cols, cont
         controls_list (list):       list containing the control peptide names
         bait_cols_dict (dict):      dict where each key-value pair is a bait name and a list of columns pointing
                                     to background-adjusted values for that bait
-        bait_pass_cols (dict):      bait name --> column name holding significance calls based on ellipsoid_index
+        bait_pass_cols (dict):      bait name --> column name holding significance calls based on call_index
         control_probe_name (str):   the name of the control probe)
         control_multiplier (float): multiplier of control values for significance testing
         max_bait_mean_col (str):    the destination column name for assigning max bait signal values
@@ -318,7 +318,7 @@ def main_processing(data_df, controls_list, bait_cols_dict, bait_pass_cols, cont
     if df_standardization:
         output_df, _ = standardize_dataframe(output_df, controls_list, bait_cols_dict, control_probe_name)
 
-    # Calculate log2fc conditionally for each bait pair, if >1 bait passes the ellipsoid_index test and exceeds control
+    # Calculate log2fc conditionally for each bait pair, if >1 bait passes the call_index test and exceeds control
     output_df = apply_log2fc(output_df, bait_cols_dict, bait_pass_cols, control_probe_name, control_multiplier)
 
     # Check if each hit passes significance for at least one bait

@@ -22,6 +22,116 @@ def check_array_dims(array, expected_ndim, array_name = None):
     else:
         raise TypeError(f"{array_name} has {array.ndim} dimensions, but {expected_ndim} were expected")
 
+def mask_circle(y_coord, x_coord, image_snippet, source_image, spot_radius):
+    '''
+    Helper function that quantifies results based on midpoint coordinates
+
+    Args:
+        y_coord (int):              y-coordinate of the spot midpoint
+        x_coord (int):              x-coordinate of the spot midpoint
+        image_snippet (np.ndarray): clipped grayscale image containing only the current spot
+        source_image (np.ndarray):  full source grayscale image
+        spot_radius (int):          radius of the spot
+
+    Returns:
+        results_dict (dict):        dictionary of quantified results
+    '''
+
+    current_midpoint = (y_coord, x_coord)
+    inverted_current_midpoint = (x_coord, y_coord)  # cv2 takes (x,y) instead of (y,x)
+
+    # Draw a circle (as a mask) around the defined current midpoint
+    mask = np.zeros(source_image.shape, dtype=np.uint8)
+    cv2.circle(mask, inverted_current_midpoint, spot_radius, 255, -1)
+
+    # Calculate pixel value median, sum, and count inside the defined circle
+    inside_sum = np.sum(source_image[mask == 255])
+    inside_median = np.median(source_image[mask == 255])
+    if inside_sum < 0:
+        inside_sum = 0
+    inside_count = len(source_image[mask == 255])
+
+    # Find image snippet borders in source image
+    y_top = y_coord - image_snippet.shape[0]
+    y_bottom = y_coord + image_snippet.shape[0]
+    x_left = x_coord - image_snippet.shape[1]
+    x_right = x_coord + image_snippet.shape[1]
+
+    # Avoid out-of-bounds errors
+    if y_top < 0:
+        y_top = 0
+    if y_bottom > source_image.shape[0] - 1:
+        y_bottom = source_image.shape[0] - 1
+    if x_left < 0:
+        x_left = 0
+    if x_right > source_image.shape[1] - 1:
+        x_right = source_image.shape[1] - 1
+
+    # Calculate pixel value sum and count outside the circle, bounded by the image_snippet borders
+    square_around_spot = source_image[y_top:y_bottom, x_left:x_right]
+    square_mask_segment = mask[y_top:y_bottom, x_left:x_right]
+    outside_sum = np.sum(square_around_spot[square_mask_segment == 0])
+    outside_median = np.median(square_around_spot[square_mask_segment == 0])
+    if outside_sum < 0:
+        outside_sum = 0
+    outside_count = len(square_around_spot[square_mask_segment == 0])
+
+    # Calculate median and mean pixel values, and a call index for pass/fail determination
+    inside_expected = outside_median * inside_count
+    if inside_expected > 0:
+        call_index = inside_sum / inside_expected
+    elif inside_expected == 0:
+        call_index = np.inf
+    else:
+        raise ValueError(f"mask_circle got a negative value for inside_expected ({inside_expected}), but it must be >0")
+
+    results_dict = {
+        "inside_sum": inside_sum,
+        "outside_sum": outside_sum,
+        "inside_count": inside_count,
+        "outside_count": outside_count,
+        "inside_median": inside_median,
+        "outside_median": outside_median,
+        "inside_expected": inside_expected,
+        "call_index": call_index,
+        "spot_midpoint": current_midpoint,
+    }
+
+    return results_dict
+
+def test_value(testing_value, previous_record):
+    '''
+    Helper function that tests a given value against a previous record and handles infinities
+
+    Args:
+        testing_value (int|float):   current value to test
+        previous_record (int|float): best value prior to this
+
+    Returns:
+        better (bool):               whether testing_value is better than previous_record
+    '''
+
+    if np.isfinite(previous_record):
+        if np.isfinite(testing_value):
+            # Check whether the testing value is better than the previous record if both are finite
+            better = np.greater(testing_value, previous_record)
+        elif testing_value == np.inf and previous_record > 0:
+            # Do not replace a nonzero finite maximized_value with an infinity when possible
+            better = False
+        elif testing_value == np.inf and previous_record == 0:
+            # Only replace maximized_value with infinity when maximized_value is 0.0
+            better = True
+        else:
+            better = False
+    else:
+        if testing_value > 0 and previous_record == np.inf:
+            # Replace infinity with finite nonzero value when possible
+            better = True
+        else:
+            better = False
+
+    return better
+
 def spot_circle_scan(image_snippet, source_image, midpoint_coords, enforced_radius = None, alphanumeric_coords = None,
                      radius_variance_multiplier = 0.33, radius_shrink_multiplier = 0.9,
                      value_to_maximize = "inside_sum", verbose = False):
@@ -46,7 +156,7 @@ def spot_circle_scan(image_snippet, source_image, midpoint_coords, enforced_radi
                                                 "outside_sum" (float):     sum of pixel values outside the circle
                                                 "inside_count" (int):      pixel count within the defined circle
                                                 "outside_count" (int):     pixel count outside the defined circle
-                                                "ellipsoid_index" (float): ratio of mean pixel values inside/outside
+                                                "call_index" (float): ratio of mean pixel values inside/outside
                                                 "spot_midpoint" (tuple):   coordinates of the spot midpoint
     '''
 
@@ -81,87 +191,45 @@ def spot_circle_scan(image_snippet, source_image, midpoint_coords, enforced_radi
     max_variance = int(radius_variance_multiplier * spot_radius)
 
     # Begin the cycle for scanning around the given coordinates to find optimal coordinates
-    maximized_value = -1000
+    maximized_value = 0
     y_midpoint, x_midpoint = midpoint_coords  # coordinates refer to source_image, not image snippet
     final_midpoint, results_dict = None, None
 
-    for y_deviated in np.arange(y_midpoint - max_variance, y_midpoint + max_variance):
-        for x_deviated in np.arange(x_midpoint - max_variance, x_midpoint + max_variance):
+    y_values = np.arange(y_midpoint - max_variance, y_midpoint + max_variance)
+    x_values = np.arange(x_midpoint - max_variance, x_midpoint + max_variance)
+
+    for y_deviated in y_values:
+        for x_deviated in x_values:
             current_midpoint = (y_deviated, x_deviated)
-            inverted_current_midpoint = (x_deviated, y_deviated)  # cv2 takes (x,y) instead of (y,x)
-
-            # Draw a circle (as a mask) around the defined current midpoint
-            mask = np.zeros(source_image.shape, dtype=np.uint8)
-            cv2.circle(mask, inverted_current_midpoint, spot_radius, 255, -1)
-
-            # Calculate pixel value sum and count inside the defined circle
-            inside_sum = np.sum(source_image[mask == 255])
-            if inside_sum < 0:
-                inside_sum = 0
-            inside_count = len(source_image[mask == 255])
-
-            # Find image snippet borders in source image
-            y_top = y_midpoint - image_snippet.shape[0]
-            y_bottom = y_midpoint + image_snippet.shape[0]
-            x_left = x_midpoint - image_snippet.shape[1]
-            x_right = x_midpoint + image_snippet.shape[1]
-
-            # Avoid out-of-bounds errors
-            if y_top < 0:
-                y_top = 0
-            if y_bottom > source_image.shape[0]-1:
-                y_bottom = source_image.shape[0]-1
-            if x_left < 0:
-                x_left = 0
-            if x_right > source_image.shape[1]-1:
-                x_right = source_image.shape[1]-1
-
-            # Calculate pixel value sum and count outside the circle, bounded by the image_snippet borders
-            square_around_spot = source_image[y_top:y_bottom, x_left:x_right]
-            square_mask_segment = mask[y_top:y_bottom, x_left:x_right]
-            outside_sum = np.sum(square_around_spot[square_mask_segment == 0])
-            if outside_sum < 0:
-                outside_sum = 0
-            outside_count = len(square_around_spot[square_mask_segment == 0])
-
-            # Calculate the mean pixel value inside and outside the defined circle, and an index ratio of them
-            mean_inside = inside_sum / inside_count
-            mean_outside = outside_sum / outside_count
-            if mean_inside != 0 and mean_outside != 0:
-                ellipsoid_index = mean_inside / mean_outside
-            elif mean_inside != 0 and mean_outside == 0:
-                ellipsoid_index = 999
-            else:
-                ellipsoid_index = 0
+            y_coord, x_coord = current_midpoint
+            current_results_dict = mask_circle(y_coord, x_coord, image_snippet, source_image, spot_radius)
 
             # Set the testing value based on the user-defined mode
             if value_to_maximize == "inside_sum":
-                testing_value = inside_sum
+                testing_value = current_results_dict["inside_sum"]
             elif value_to_maximize == "mean_inside":
-                testing_value = mean_inside
-            elif value_to_maximize == "ellipsoid_index":
-                testing_value = ellipsoid_index
+                testing_value = current_results_dict["mean_inside"]
+            elif value_to_maximize == "call_index":
+                testing_value = current_results_dict["call_index"]
             else:
-                raise ValueError(f"spot_circle_scan error: value_to_maximize is set to {value_to_maximize}, but must be one of [\"inside_sum\", \"mean_inside\", \"ellipsoid_index\"]")
+                raise ValueError(f"spot_circle_scan error: value_to_maximize is set to {value_to_maximize}, but must be one of [\"inside_sum\", \"mean_inside\", \"call_index\"]")
 
-            # If the testing value is better than the last iteration, set the results dict
-            if testing_value >= maximized_value:
+            # Set the results dict if better
+            set_results = test_value(testing_value, maximized_value)
+            if set_results:
                 maximized_value = testing_value
                 final_midpoint = current_midpoint
-                results_dict = {
-                    "inside_sum": inside_sum,
-                    "outside_sum": outside_sum,
-                    "inside_count": inside_count,
-                    "outside_count": outside_count,
-                    "ellipsoid_index": ellipsoid_index,
-                    "spot_midpoint": current_midpoint,
-                }
+                results_dict = current_results_dict
 
+    # Manually set results if final_midpoint is not automatically determined
     if final_midpoint is None:
-        raise Exception("spot_circle_scan error: final_midpoint is None")
-    elif results_dict is None:
-        raise Exception("spot_circle_scan error: results_dict is None")
-    elif verbose:
+        final_midpoint = midpoint_coords
+        print(f"\tspot_circle_scan warning: for the spot at {midpoint_coords}, an optimized final_midpoint could not",
+              f"be automatically determined, so the initial coordinates were used")
+        y_coord, x_coord = final_midpoint
+        results_dict = mask_circle(y_coord, x_coord, image_snippet, source_image, spot_radius)
+
+    if verbose:
         print(f"\tfinal_midpoint = {final_midpoint}")
         print(f"\tresults_dict = {results_dict}")
 

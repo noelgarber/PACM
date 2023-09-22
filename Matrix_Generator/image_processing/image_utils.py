@@ -113,18 +113,15 @@ def circle_stats(grayscale_image, center, radius, buffer_width = 0):
     sum_inside = np.sum(flat_image[flat_mask])
     sum_outside = np.sum(flat_image[~flat_dilated_mask])
 
-    # Calculate the ellipsoid index
-    mean_intensity_inside = sum_inside / pixels_inside
-    mean_intensity_outside = sum_outside / pixels_outside
-    if mean_intensity_outside > 0:
-        ellipsoid_index = mean_intensity_inside / mean_intensity_outside
-    else:
-        ellipsoid_index = "inf"
+    # Calculate the call index
+    median_outside = np.median(flat_image[~flat_dilated_mask])
+    expected_inside = pixels_inside * median_outside
+    call_index = sum_inside / expected_inside if expected_inside > 0 else np.nan
 
     # Find the background-adjusted sum of pixels inside the defined circle
-    background_adjusted_inside_sum = sum_inside - (pixels_inside * mean_intensity_outside)
+    background_adjusted_inside = sum_inside - expected_inside
 
-    return pixels_inside, pixels_outside, sum_inside, sum_outside, ellipsoid_index, background_adjusted_inside_sum
+    return pixels_inside, pixels_outside, sum_inside, sum_outside, call_index, background_adjusted_inside
 
 def reverse_log_transform(array, base = 1):
     '''

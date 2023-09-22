@@ -34,7 +34,7 @@ class SpotArray:
         self.sliced_image (np.ndarray):       color image showing red borders between spots and mean peak coords in blue
         self.outlined_image (arr):            the sliced image with outlines/crosshairs added to mark spot centers
         self.spot_info_dict (dict):           key (str) [alphanumeric spot coordinates] =>
-                                              (unadjusted_signal, background_adjusted_signal, ellipsoid_index,
+                                              (unadjusted_signal, background_adjusted_signal, call_index,
                                               spot_midpoint, top_left_corner)
 
     Methods:
@@ -143,8 +143,8 @@ class SpotArray:
             plt.show()
 
         # Make a dictionary holding alphanumeric spot coordinates as keys --> tuples of
-        # (unadjusted_signal, background_adjusted_signal, ellipsoid_index, peak_intersect, top_left_corner)
-        print("\t\tcomputing background-adjusted signal and ellipsoid_index...") if verbose else None
+        # (unadjusted_signal, background_adjusted_signal, call_index, peak_intersect, top_left_corner)
+        print("\t\tcomputing background-adjusted signal and call_index...") if verbose else None
         self.outlined_image, self.spot_info_dict = self.ellipsoid_constrain(spot_images = image_slices, dilation_factor = ellipsoid_dilation_factor,
                                                                             centering_mode = center_spots_mode, buffer_width = buffer_width, verbose = verbose)
 
@@ -640,7 +640,7 @@ class SpotArray:
         Function that returns a dictionary of spot coordinates where the value is a tuple of:
             unadjusted_signal (float): sum of pixel values inside the ellipse defining the spot
             background_adjusted_signal (float): sum of pixel values inside the spot ellipse, minus area-adjusted signal from outside the ellipse
-            ellipsoid_index (float): the ratio of mean pixel values inside the spot ellipse to mean pixel values outside the ellipse
+            call_index (float): the ratio of mean pixel values inside the spot ellipse to mean pixel values outside the ellipse
             spot_midpoint (tuple): a tuple representing coordinates of the center of the defined spot ellipse
             top_left_corner (tuple): a tuple representing coordinates of the top left corner of each spot image snippet
             stitched_image (np.ndarray): if hough_stitch mode is used, is an image showing the outlined detected spots
@@ -661,7 +661,7 @@ class SpotArray:
             verbose (bool): whether to display debugging information
 
         Returns:
-            output_dict (dict): a dictionary of spot coordinates where the value is a tuple of (unadjusted_signal, background_adjusted_signal, ellipsoid_index, spot_midpoint, top_left_corner, stitched_image)
+            output_dict (dict): a dictionary of spot coordinates where the value is a tuple of (unadjusted_signal, background_adjusted_signal, call_index, spot_midpoint, top_left_corner, stitched_image)
         '''
 
         print("\t\t\trunning ellipsoid_constrain()...") if verbose else None
@@ -702,13 +702,13 @@ class SpotArray:
                 final_midpoint_coords, results = spot_circle_scan(image_snippet = spot_image, source_image = self.linear_array,
                                                                   midpoint_coords = spot_midpoint_coords, enforced_radius = spot_radius_min,
                                                                   alphanumeric_coords = spot_coordinates, radius_variance_multiplier = 0.33,
-                                                                  radius_shrink_multiplier = 0.9, value_to_maximize = "ellipsoid_index", verbose = False)
+                                                                  radius_shrink_multiplier = 0.9, value_to_maximize = "call_index", verbose = False)
 
                 # Append midpoint coordinates to the list for drawing circles later
                 final_midpoints_list.append(final_midpoint_coords)
 
                 # Declare quantified metrics
-                ellipsoid_index = results.get("ellipsoid_index")
+                call_index = results.get("call_index")
                 spot_midpoint = results.get("spot_midpoint")
                 mean_intensity_outside = results.get("outside_sum") / results.get("outside_count")
                 background_adjusted_signal = results.get("inside_sum") - (results.get("inside_count") * mean_intensity_outside)
@@ -717,7 +717,7 @@ class SpotArray:
             elif centering_mode == "hough" or centering_mode == "hough_stitch":
                 from Matrix_Generator.image_processing.hough_circle_detector import detect_circle as hough_detect_circle
                 results = hough_detect_circle(spot_image, dilate_to_edge = True, verbose = True)
-                ellipsoid_index = results.get("ellipsoid_index")
+                call_index = results.get("call_index")
                 spot_midpoint = results.get("spot_midpoint")
                 mean_intensity_outside = results.get("outside_sum") / results.get("outside_count")
                 background_adjusted_signal = results.get("inside_sum") - (results.get("inside_count") * mean_intensity_outside)
@@ -738,13 +738,13 @@ class SpotArray:
                 spot_radius = spot_radii.min() * dilation_factor  # enforce circles when ellipsoids are oblong
 
                 # Quantify the defined circle
-                pixels_inside, pixels_outside, unadjusted_signal, sum_outside, ellipsoid_index, background_adjusted_signal = circle_stats(grayscale_image,
-                                                                                                                                          center = spot_midpoint,
-                                                                                                                                          radius = spot_radius,
-                                                                                                                                          buffer_width = buffer_width)
+                pixels_inside, pixels_outside, unadjusted_signal, sum_outside, call_index, background_adjusted_signal = circle_stats(grayscale_image,
+                                                                                                                                     center = spot_midpoint,
+                                                                                                                                     radius = spot_radius,
+                                                                                                                                     buffer_width = buffer_width)
 
             # To the output dict, add a tuple containing the background-adjusted signal and the ellipsoid index
-            output_dict[spot_coordinates] = (unadjusted_signal, background_adjusted_signal, ellipsoid_index, spot_midpoint, top_left_corner)
+            output_dict[spot_coordinates] = (unadjusted_signal, background_adjusted_signal, call_index, spot_midpoint, top_left_corner)
             coordinates_list.append(spot_coordinates)
 
         # If a method was used that supports circling the detected spots, generate an image showing circles in green
@@ -786,7 +786,7 @@ class SpotArray:
         deviation = int((crosshair_width - 1) / 2)
 
         for spot_coordinates, value_tuple in spot_info.items():
-            unadjusted_signal, background_adjusted_signal, ellipsoid_index, peak_intersect, top_left_corner = value_tuple
+            unadjusted_signal, background_adjusted_signal, call_index, peak_intersect, top_left_corner = value_tuple
             real_peak_intersect = (top_left_corner[0] + peak_intersect[0], top_left_corner[1] + peak_intersect[1])
 
             # Draw horizontal green crosshair
