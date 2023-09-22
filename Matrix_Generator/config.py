@@ -35,7 +35,7 @@ amino_acids_phos = ("D", "E", "R", "H", "K", "S", "T", "N", "Q", "C", "G", "P", 
         "circle_index_threshold":             call index threshold used for making positive/negative calls 
         "last_valid_coords":                  list of last valid alphanumeric spot coords where data ends in each set
         "ordered_probe_names":                list of bait probe names in the order they should appear in the output df 
-        "control_probe_name":                 name of the negative control probe, e.g. Secondary-only or Mock 
+        "control_probe_name":                 name of the negative control probe, e.g. Control or Mock 
         "control_multiplier":                 multiplier for control signal values to test against bait signal values 
         "standardize_within_datasets":        whether to standardize dataframes within themselves, between baits
         "intra_dataset_controls":             list of controls to use for intra-dataset standardization
@@ -50,25 +50,25 @@ amino_acids_phos = ("D", "E", "R", "H", "K", "S", "T", "N", "Q", "C", "G", "P", 
 
 image_params = {"use_cached_data": False,
                 "cached_data_path": None,
-                "output_folder": "/home/user/data_folder/Image Data",
+                "output_folder": "/home/user123/Dropbox (Example Research)/Sample Project/SPOT Peptide Screens/Straightened_TIFFs/Unsharp Mask with Despeckling/Image Data",
                 "add_peptide_seqs": True,
                 "peptide_seq_cols": ["Phos_Sequence", "No_Phos_Sequence", "BJO_Sequence"],
                 "save_pickled_data": True,
                 "buffer_width": 2,
-                "tiff_paths": ["/home/user/data_folder/1_Major_Screen",
-                               "/home/user/data_folder/4_Novel_Motif_Screen"],
+                "tiff_paths": ["/home/user123/Dropbox (Example Research)/Sample Project/SPOT Peptide Screens/Straightened_TIFFs/Unsharp Mask with Despeckling/1_Major_Screen",
+                               "/home/user123/Dropbox (Example Research)/Sample Project/SPOT Peptide Screens/Straightened_TIFFs/Unsharp Mask with Despeckling/4_Novel_FFAT_Screen"],
                 "pixel_encoding_base": 1,
                 "add_peptide_names": True,
                 "multiline_cols": False,
-                "peptide_names_paths": ["/home/user/data_folder/1_Major_Screen_Coordinate_Peptide_Names_and_Sequences.csv",
-                                        "/home/user/data_folder/4_Novel_Proteome_Motifs_Coordinate_Peptide_Names_and_Sequences.csv"],
-                "processed_image_paths": ["/home/user/data_folder/Image_Data/1_Major_Screen",
-                                          "/home/user/data_folder/Image_Data/4_Novel_Motif_Screen"],
+                "peptide_names_paths": ["/home/user123/Dropbox (Example Research)/Sample Project/SPOT Peptide Screens/Straightened_TIFFs/Unsharp Mask with Despeckling/1_Major_Screen_Coordinate_Peptide_Names_and_Sequences.csv",
+                                        "/home/user123/Dropbox (Example Research)/Sample Project/SPOT Peptide Screens/Straightened_TIFFs/Unsharp Mask with Despeckling/4_Novel_Proteome_FFATs_Coordinate_Peptide_Names_and_Sequences.csv"],
+                "processed_image_paths": ["/home/user123/Dropbox (Example Research)/Sample Project/SPOT Peptide Screens/Straightened_TIFFs/Unsharp Mask with Despeckling/Image_Data/1_Major_Screen",
+                                          "/home/user123/Dropbox (Example Research)/Sample Project/SPOT Peptide Screens/Straightened_TIFFs/Unsharp Mask with Despeckling/Image_Data/4_Novel_FFAT_Screen"],
                 "grid_dimensions": [[28, 6], [28, 2], [28, 4], [28, 4]],
                 "circle_index_threshold": 1.25,
                 "last_valid_coords": ["F1", "B15", "D27", "D8"],
-                "ordered_probe_names": ["Secondary-only", "ABC1", "GHI3", "DEF2"],
-                "control_probe_name": "Secondary-only",
+                "ordered_probe_names": ["Control", "ABC3", "ABC2", "ABC1"],
+                "control_probe_name": "Control",
                 "control_multiplier": 5,
                 "standardize_within_datasets": True,
                 "intra_dataset_controls": ["OSBP"],
@@ -149,7 +149,7 @@ possible_conditional_weights = [np.array([0.5]),
         "position_thresholds":    range of values for optimization, as a list, for thresholding points values '''
 
 general_params = {"motif_length": 15,
-                  "output_folder": "/home/user/data_folder/Matrix_Data",
+                  "output_folder": "/home/user123/Dropbox (Example Research)/Sample Project/SPOT Peptide Screens/Straightened_TIFFs/Unsharp Mask with Despeckling/Matrix_Data",
                   "make_calls": True,
                   "aa_charac_dict": aa_charac_dict,
                   "convert_phospho": True,
@@ -222,7 +222,9 @@ matrix_params = {"thresholds_points_dict": None,
                                                0,0]),
                  "fit_mode": "R2",
                  "forbidden_threshold": 3,
-                 "slice_scores_subsets": np.array([5,2,4,1,1,2])}
+                 "slice_scores_subsets": np.array([5,2,4,1,1,2]),
+                 "nn_index_handling": {"collapse_indices": [(0,4)],
+                                       "remove_indices": [7, 9, 10]}}
 
 
 ''' ----------------------------------------------------------------------------------------------------------------
@@ -236,8 +238,8 @@ matrix_params = {"thresholds_points_dict": None,
         "bait_pass_col":    name of column containing pass/fail information for whether peptides bind to the baits
         "pass_str":         string representing a pass in bait_pass_col, e.g. "Yes" '''
 
-comparator_info = {"comparator_set_1": ["ABC1"],
-                   "comparator_set_2": ["DEF2", "GHI3"],
+comparator_info = {"comparator_set_1": ["ABC3"],
+                   "comparator_set_2": ["ABC1", "ABC2"],
                    "seq_col": "BJO_Sequence",
                    "bait_pass_col": "One_Passes",
                    "pass_str": "Yes"}
@@ -248,14 +250,14 @@ possible_specificity_weights = [np.array([0.0, 1.0]),
                                 np.array([0.0, 1.0]),
                                 np.array([0.0, 1.0]),
                                 np.array([0.0, 1.0]),
-                                np.array([0.0, 1.0]),
-                                np.array([0.0, 1.0, 2.0]),
+                                np.array([0.0, 0.5, 1.0]),
+                                np.array([0.0, 0.5, 1.0, 2.0]),
                                 np.array([0.0, 1.0, 2.0, 3.0]),
-                                np.array([0.0, 1.0, 2.0, 3.0]),
-                                np.array([0.0, 1.0, 2.0, 3.0]),
-                                np.array([0.0, 1.0, 2.0, 3.0]),
-                                np.array([0.0, 1.0, 2.0, 3.0]),
-                                np.array([0.0, 0.5]),
+                                np.array([1.0, 2.0, 3.0]),
+                                np.array([1.0, 2.0, 3.0]),
+                                np.array([1.0, 2.0, 3.0]),
+                                np.array([1.0, 2.0, 3.0]),
+                                np.array([0.0]),
                                 np.array([0.0, 1.0, 2.0]),
                                 np.array([0.0, 0.5]),
                                 np.array([0.0])]
@@ -277,5 +279,6 @@ specificity_params = {"motif_length": 15,
                       "predefined_weights": None,
                       "optimize_weights": True,
                       "possible_weights": possible_specificity_weights,
-                      "output_folder": "/home/user/data_folder/Matrix_Data",
-                      "chunk_size": 1000}
+                      "output_folder": "/home/user123/Dropbox (Example Research)/Sample Project/SPOT Peptide Screens/Straightened_TIFFs/Unsharp Mask with Despeckling/Matrix_Data",
+                      "chunk_size": 1000,
+                      "ignore_positions": (11, 14)}
