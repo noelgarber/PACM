@@ -8,7 +8,6 @@ import pickle
 from tqdm import trange
 from functools import partial
 from Matrix_Generator.SpecificityMatrix import SpecificityMatrix
-from general_utils.weights_utils import permute_weights
 try:
     from Matrix_Generator.config_local import comparator_info, specificity_params
 except:
@@ -141,7 +140,7 @@ def main(source_df, comparator_info = comparator_info, specificity_params = spec
     # Optionally optimize matrix weights; not necessary if predefined weights are given as this is automatic
     optimize_weights = specificity_params.get("optimize_weights")
     if optimize_weights:
-        # Determine optimal weights by maximizing the R2 value against a permuted array of weights arrays
+        # Determine optimal weights by maximizing the R2 value against a large randomized array of weights arrays
         motif_length = specificity_params["motif_length"]
         chunk_size = specificity_params["chunk_size"]
         ignore_positions = specificity_params["ignore_positions"]
@@ -151,6 +150,7 @@ def main(source_df, comparator_info = comparator_info, specificity_params = spec
     output_folder = specificity_params.get("output_folder")
     if save:
         specificity_matrix.save(output_folder)
+        specificity_matrix.plot_regression(output_folder, use_weighted=optimize_weights)
 
     # Save the SpecificityMatrix object for reloading when scoring novel motifs
     specificity_matrix_path = os.path.join(output_folder, "specificity_matrix.pkl")

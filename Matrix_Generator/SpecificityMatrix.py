@@ -5,6 +5,7 @@ import pandas as pd
 import os
 from general_utils.user_helper_functions import get_comparator_baits
 from general_utils.matrix_utils import collapse_phospho
+from Matrix_Generator.sigmoid_regression import fit_sigmoid
 try:
     from Matrix_Generator.config_local import amino_acids, amino_acids_phos, comparator_info, specificity_params
 except:
@@ -344,6 +345,33 @@ class SpecificityMatrix:
         with open(statistics_path, "w") as file:
             file.writelines(output_lines)
         print(f"Saved specificity matrices regression statistics to {statistics_path}")
+
+    def plot_regression(self, output_folder, use_weighted = True):
+        '''
+        Performs logistic regression on scores vs. log2fc values of source data and then graphs the results
+
+        Args:
+            output_folder (str): the folder to save the graphs into
+            use_weighted (bool): whether to save a graph for weighted scores if they were calculated
+
+        Returns:
+            None
+        '''
+
+        x_values = self.scored_source_df["least_different_log2fc"].to_numpy()
+        y_values = self.scored_source_df["Unweighted_Specificity_Score"].to_numpy()
+        x_label = "Least Different log2fc"
+        y_label = "Unweighted Specificity Score"
+        title = "Correlation of Unweighted Specificity Score and Actual Signal Differences"
+        save_as = os.path.join(output_folder, "unweighted_correlation_graph.pdf")
+        fit_sigmoid(x_values, y_values, save_as, x_label, y_label, title)
+
+        if use_weighted:
+            y_values = self.scored_source_df["Weighted_Specificity_Score"].to_numpy()
+            y_label = "Weighted Specificity Score"
+            title = "Correlation of Weighted Specificity Score and Actual Signal Differences"
+            save_as = os.path.join(output_folder, "weighted_correlation_graph.pdf")
+            fit_sigmoid(x_values, y_values, save_as, x_label, y_label, title)
 
     def score_motifs(self, motif_seqs_2d, use_weighted = True):
         '''
