@@ -102,7 +102,7 @@ def optimize_points_2d(points_objective, actual_truths, points_2d, value_range, 
 
     objective = partial(points_objective, actual_truths=actual_truths, points_2d=points_2d, invert_points=invert)
     array_len = points_2d.shape[1]
-    search_sample = 1000000
+    search_sample = 10000000
     points_optimizer = RandomSearchOptimizer(objective, array_len, value_range, mode)
     done = False
     while not done:
