@@ -33,6 +33,11 @@ class RandomSearchOptimizer():
         self.best_array = None
         self.x = np.inf if mode == "minimize" else -np.inf
 
+        # Calculate and display baseline accuracy of all-ones weights
+        baseline_weights = np.ones(shape=self.array_len, dtype=float)
+        self.baseline_x = self.objective_function(baseline_weights)
+        print(f"Initialized RandomSearchOptimizer; baseline unweighted accuracy objective x={self.baseline_x}")
+
     def search(self, sample_size):
         '''
         Main search function that can be run any number of times for any sample size; updates best_array continuously
