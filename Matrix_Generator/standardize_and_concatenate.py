@@ -190,7 +190,7 @@ def main_workflow(image_params = image_params):
     _, concatenated_percentiles_dict = find_max_bait_signal(concatenated_df, bait_cols_dict, control_probe_name,
                                                             max_bait_mean_col, return_percentiles_dict = True)
 
-    return concatenated_df, concatenated_percentiles_dict
+    return concatenated_df, bait_cols_dict, concatenated_percentiles_dict
 
 # If the script is executed directly, invoke the main workflow and save the dataframe
 if __name__ == "__main__":
