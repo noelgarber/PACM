@@ -20,11 +20,11 @@ def get_data(image_params = image_params, output_folder = None, verbose = False)
 
     # Get the standardized concatenated dataframe containing all of the quantified peptide spot data
     print("Processing and standardizing the SPOT image data...") if verbose else None
-    data_df, percentiles_dict = standardized_concatenate(image_params)
+    data_df, bait_cols_dict, percentiles_dict = standardized_concatenate(image_params)
     reindexed_data_df = data_df.reset_index(drop = False)
     reindexed_data_df.to_csv(os.path.join(output_folder, "standardized_and_concatenated_data.csv"))
 
-    return reindexed_data_df, percentiles_dict
+    return reindexed_data_df, bait_cols_dict, percentiles_dict
 
 def main(image_params = image_params, general_params = general_params, data_params = data_params,
          matrix_params = matrix_params, comparator_info = comparator_info, specificity_params = specificity_params,
@@ -70,7 +70,8 @@ def main(image_params = image_params, general_params = general_params, data_para
     else:
         # Obtain and quantify the data
         image_output_folder = image_params.get("output_folder")
-        data_df, percentiles_dict = get_data(image_params, image_output_folder, verbose)
+        data_df, bait_cols_dict, percentiles_dict = get_data(image_params, image_output_folder, verbose)
+        data_params["bait_cols_dict"] = bait_cols_dict
 
         # Optionally save pickled quantified data for future runs
         save_pickled_data = image_params.get("save_pickled_data")
@@ -83,7 +84,6 @@ def main(image_params = image_params, general_params = general_params, data_para
         return data_df
 
     # Generate pairwise position-weighted matrices
-
     general_params["percentiles_dict"] = percentiles_dict
 
     if generate_context_matrices:
