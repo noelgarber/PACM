@@ -134,10 +134,12 @@ class SpecificityMatrix:
                         log2fc_cols.append(bait1 + "_" + bait2 + "_log2fc")
 
         # Get least different values and bait pairs
-        log2fc_array = self.scored_source_df[log2fc_cols].to_numpy()
-        log2fc_array[np.isnan(log2fc_array)] = np.inf
-        least_different_indices = np.nanargmin(log2fc_array, axis=1)
-        self.least_different_values = np.min(log2fc_array, axis=1)
+        log2fc_values = self.scored_source_df[log2fc_cols].to_numpy()
+        magnitudes = np.abs(log2fc_values)
+        all_nan = np.all(np.isnan(magnitudes), axis=1)
+        least_different_indices = np.zeros(shape=len(magnitudes), dtype=int)
+        least_different_indices[~all_nan] = np.nanargmin(magnitudes[~all_nan], axis=1)
+        self.least_different_values = log2fc_values[np.arange(len(log2fc_values)), least_different_indices]
         least_different_cols = np.array(log2fc_cols)[least_different_indices]
         self.least_different_baits = [col.rsplit("_", 1)[0] for col in least_different_cols]
 
