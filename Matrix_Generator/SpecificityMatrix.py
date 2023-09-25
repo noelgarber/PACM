@@ -182,7 +182,7 @@ class SpecificityMatrix:
         passing_scaling_values = 1 / (1 + np.exp(-k * (passing_max_signals - x0)))
 
         filtered_log2fc_values = self.passing_log2fc_values.copy()
-        filtered_log2fc_values[np.abs(filtered_log2fc_values) < 0.5] = 0
+        filtered_log2fc_values[np.abs(filtered_log2fc_values) < 1.0] = 0
         passing_points_values = self.passing_log2fc_values * passing_scaling_values
 
         # Adjust for more hits being specific to one bait vs. the other
