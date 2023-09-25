@@ -60,6 +60,7 @@ class SpecificityMatrix:
         # Get the multiplier to adjust for asymmetric distribution of bait specificities in the data
         self.thresholds = specificity_params["thresholds"]
         self.matching_points = specificity_params["matching_points"]
+        self.matching_points = specificity_params["matching_points"]
         self.extreme_thresholds = (self.thresholds[0], self.thresholds[3])
         passes_col, pass_str = comparator_info.get("bait_pass_col"), comparator_info.get("pass_str")
         self.set_bias_ratio(self.extreme_thresholds, passes_col, pass_str)
@@ -68,6 +69,8 @@ class SpecificityMatrix:
         sequence_col = comparator_info.get("seq_col")
         self.source_sequences = source_df[sequence_col].to_numpy()
         self.significance_array = self.scored_source_df[passes_col].to_numpy() == pass_str
+        max_bait_mean_col = specificity_params["max_bait_mean_col"]
+        self.max_signal_vals = source_df[max_bait_mean_col].to_numpy()
         self.include_phospho = specificity_params.get("include_phospho")
 
         # Generate the unweighted specificity matrix, calculate unweighted scores, and generate statistics
@@ -164,57 +167,59 @@ class SpecificityMatrix:
         return matrix_df
 
     def make_specificity_matrix(self):
-        # Function for generating a position-weighted matrix by assigning points based on seqs and their log2fc values
-
-        # Check if thresholds are sorted
-        if not np.all(np.array(self.thresholds)[:-1] >= np.array(self.thresholds)[1:]) or len(self.thresholds) != 4:
-            raise ValueError(f"thresholds were set to {self.thresholds}, but must be in descending order as a tuple of",
-                             f"(upper_positive, middle_positive, middle_negative, upper_negative)")
+        '''
+        Function for generating a position-weighted matrix by assigning points based on seqs and their log2fc values
+        '''
 
         # Extract the significant sequences and log2fc values as numpy arrays
-        self.positive_indices = np.where(self.significance_array)[0]
-        self.positive_seqs = self.source_sequences[self.positive_indices]
-        self.positive_log2fc_values = self.least_different_values[self.positive_indices]
+        self.passing_indices = np.where(self.significance_array)[0]
+        self.passing_seqs = self.source_sequences[self.passing_indices]
+        self.passing_log2fc_values = self.least_different_values[self.passing_indices]
+
+        # Get points scaling values using equation: points = 1 / (1+e**(-k(x-x0)))
+        max_signals = self.max_signal_vals.copy()
+        max_signals[max_signals < 0] = 0
+        passing_max_signals = max_signals[self.passing_indices]
+        passing_max_signals = passing_max_signals - passing_max_signals.min()
+        passing_max_signals = passing_max_signals / passing_max_signals.max()
+
+        x0 = np.median(passing_max_signals) # sigmoid inflection is at median magnitude
+        k = 10
+        passing_scaling_values = 1 / (1 + np.exp(-k * (passing_max_signals - x0)))
+
+        passing_points_values = self.passing_log2fc_values * passing_scaling_values
+
+        # Adjust for more hits being specific to one bait vs. the other
+        minus_points_sum = np.mean(passing_points_values[passing_points_values < 0])
+        plus_points_sum = np.mean(passing_points_values[passing_points_values > 0])
+        bias_ratio = np.abs(plus_points_sum / minus_points_sum)
+        adjusted_points_values = passing_points_values.copy()
+        adjusted_points_values[adjusted_points_values < 0] *= bias_ratio
 
         # Check that all the sequences are the same length
-        positive_seq_lengths = np.char.str_len(self.positive_seqs.astype(str))
+        positive_seq_lengths = np.char.str_len(self.passing_seqs.astype(str))
         same_length = np.all(positive_seq_lengths == positive_seq_lengths[0])
         if not same_length:
             raise ValueError(f"source sequences have varying length, but must all be one length")
         self.motif_length = positive_seq_lengths[0]
 
-        # Find where log2fc values pass each threshold
-        passes_upper_positive = np.where(self.positive_log2fc_values >= self.thresholds[0])
-        passes_middle_positive = np.where(np.logical_and(self.positive_log2fc_values >= self.thresholds[1],
-                                                         self.positive_log2fc_values < self.thresholds[0]))
-        passes_middle_negative = np.where(np.logical_and(self.positive_log2fc_values <= self.thresholds[2],
-                                                         self.positive_log2fc_values > self.thresholds[3]))
-        passes_upper_negative = np.where(self.positive_log2fc_values <= self.thresholds[3])
+        # Convert sequences to array of arrays
+        self.passing_seqs = self.passing_seqs.astype("<U")
+        positive_seqs_unravelled = self.passing_seqs.view("U1")
+        self.passing_seqs_2d = np.reshape(positive_seqs_unravelled, (-1, self.motif_length))
 
-        # Get an array of points values matching the sequences
-        self.positive_points_values = np.zeros_like(self.positive_log2fc_values)
-        self.positive_points_values[passes_upper_positive] = self.matching_points[0]
-        self.positive_points_values[passes_middle_positive] = self.matching_points[1]
-        self.positive_points_values[passes_middle_negative] = self.matching_points[2] * self.bias_ratio
-        self.positive_points_values[passes_upper_negative] = self.matching_points[3] * self.bias_ratio
+        # Build the matrix
+        unique_residues = np.unique(self.passing_seqs_2d)
+        cols = np.char.add("#", np.arange(1, self.motif_length + 1).astype(str))
+        matrix_df = pd.DataFrame(index=unique_residues, columns=cols, dtype=float).fillna(0.0)
 
-        # Convert sequences to array of arrays, and do the same for matching points
-        self.positive_seqs = self.positive_seqs.astype("<U")
-        positive_seqs_unravelled = self.positive_seqs.view("U1")
-        self.positive_seqs_2d = np.reshape(positive_seqs_unravelled, (-1, self.motif_length))
-        self.positive_points_2d = np.repeat(self.positive_points_values[:, np.newaxis], len(self.positive_seqs), axis=1)
-
-        # Make a new matrix and apply points to it
-        matrix_indices = np.unique(self.positive_seqs_2d)
-        column_names = np.char.add("#", np.arange(1, self.motif_length + 1).astype(str))
-        matrix_df = pd.DataFrame(index=matrix_indices, columns=column_names).fillna(0)
-
-        for column_name, residues_column, points_column in zip(column_names, np.transpose(self.positive_seqs_2d),
-                                                               np.transpose(self.positive_points_2d)):
-            unique_residues, counts = np.unique(residues_column, return_counts=True)
-            indices = np.searchsorted(unique_residues, residues_column)
-            sums = np.bincount(indices, weights=points_column)
-            matrix_df.loc[unique_residues, column_name] = sums
+        for col_name, col_slice in zip(cols, np.transpose(self.passing_seqs_2d)):
+            col_unique_residues = np.unique(col_slice)
+            for aa in col_unique_residues:
+                qualifying_points = adjusted_points_values[col_slice == aa]
+                if not np.all(~np.isfinite(qualifying_points)):
+                    qualifying_points_sum = np.nansum(qualifying_points)
+                    matrix_df.at[aa, col_name] = qualifying_points_sum
 
         # Add missing amino acid rows if necessary and reorder matrix_df by aa_list
         matrix_df = self.reorder_matrix(matrix_df)
@@ -231,34 +236,34 @@ class SpecificityMatrix:
         scoring_matrix = self.weighted_matrix_df if use_weighted else self.matrix_df
 
         # Get the indices for the matrix for each amino acid at each position
-        sequence_count = len(self.positive_points_2d)
+        sequence_count = len(self.passing_log2fc_values)
         indexer = scoring_matrix.index.get_indexer
-        row_indices = indexer(self.positive_seqs_2d.ravel()).reshape(self.positive_seqs_2d.shape)
+        row_indices = indexer(self.passing_seqs_2d.ravel()).reshape(self.passing_seqs_2d.shape)
         column_indices = np.arange(self.motif_length)[np.newaxis, :].repeat(sequence_count, axis=0)
 
         # Calculate the points
         all_score_values = np.full(shape=len(self.source_sequences), fill_value=np.nan, dtype=float)
         if use_weighted:
-            self.positive_weighted_points = scoring_matrix.values[row_indices, column_indices]
-            self.positive_weighted_scores = self.positive_weighted_points.sum(axis=1)
-            all_score_values[self.positive_indices] = self.positive_weighted_scores
+            self.passing_weighted_points = scoring_matrix.values[row_indices, column_indices]
+            self.passing_weighted_scores = self.passing_weighted_points.sum(axis=1)
+            all_score_values[self.passing_indices] = self.passing_weighted_scores
             self.scored_source_df["Weighted_Specificity_Score"] = all_score_values
         else:
-            self.positive_unweighted_points = scoring_matrix.values[row_indices, column_indices]
-            self.positive_unweighted_scores = self.positive_unweighted_points.sum(axis=1)
-            all_score_values[self.positive_indices] = self.positive_unweighted_scores
+            self.passing_unweighted_points = scoring_matrix.values[row_indices, column_indices]
+            self.passing_unweighted_scores = self.passing_unweighted_points.sum(axis=1)
+            all_score_values[self.passing_indices] = self.passing_unweighted_scores
             self.scored_source_df["Unweighted_Specificity_Score"] = all_score_values
 
     def set_specificity_statistics(self, use_weighted = True):
         # Function to evaluate specificity score correlation with actual log2fc values that are observed
 
         # Get the valid score values and log2fc values
-        valid_indices = np.where(np.isfinite(self.positive_log2fc_values))
+        valid_indices = np.where(np.isfinite(self.passing_log2fc_values))
         if use_weighted:
-            valid_score_values = self.positive_weighted_scores[valid_indices]
+            valid_score_values = self.passing_weighted_scores[valid_indices]
         else:
-            valid_score_values = self.positive_unweighted_scores[valid_indices]
-        valid_log2fc_values = self.positive_log2fc_values[valid_indices]
+            valid_score_values = self.passing_unweighted_scores[valid_indices]
+        valid_log2fc_values = self.passing_log2fc_values[valid_indices]
 
         # Get the pairs of score thresholds for calling specific peptides
         score_range = np.linspace(valid_score_values.min(), valid_score_values.max(), 100)

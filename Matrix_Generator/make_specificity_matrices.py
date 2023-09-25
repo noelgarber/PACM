@@ -92,7 +92,7 @@ def find_optimal_weights(specificity_matrix, motif_length, chunk_size = 1000, ig
     '''
 
     # Get the permuted weights and break into chunks for parallelization
-    sample_size = 5000000
+    sample_size = 1000000
     value_range = (0.0, 4.0)
     trial_weights = np.random.uniform(value_range[0], value_range[1], size=(sample_size, motif_length))
     if ignore_positions is not None:
