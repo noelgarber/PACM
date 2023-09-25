@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import os
+from sklearn.metrics import precision_recall_curve
 from general_utils.user_helper_functions import get_comparator_baits
 from general_utils.matrix_utils import collapse_phospho
 from Matrix_Generator.sigmoid_regression import fit_sigmoid
@@ -11,27 +12,19 @@ try:
 except:
     from Matrix_Generator.config import amino_acids, amino_acids_phos, comparator_info, specificity_params
 
-def mcc_2d(ground_truths, predicted_2d):
-    '''
-    Helper function to calculate Matthews correlation coefficient (MCC) across rows of 2D arrays
+def optimize_f1(actual_truths, score_values):
+    # Helper function that optimizes f1-score using a precision-recall curve
 
-    Args:
-        ground_truths (np.ndarray):   1D array of ground truth values as bools
-        predicted_2d (np.ndarray):    2D array where rows are predicted truth values as bools
+    precision, recall, thresholds = precision_recall_curve(actual_truths, score_values)
+    precision_recall_products = precision * recall
+    precision_recall_sums = precision + recall
+    precision_recall_sums[precision_recall_sums == 0] = np.nan
+    f1_scores = 2 * precision_recall_products / precision_recall_sums
+    best_idx = np.nanargmax(f1_scores)
+    best_f1 = f1_scores[best_idx]
+    best_threshold = thresholds[best_idx]
 
-    Returns:
-        mcc_values (np.ndarray):      array of MCC values; shape is equal to len(ground_truths_2d)
-    '''
-
-    TPs = np.sum(ground_truths & predicted_2d, axis=1)
-    TNs = np.sum(~ground_truths & ~predicted_2d, axis=1)
-    FPs = np.sum(~ground_truths & predicted_2d, axis=1)
-    FNs = np.sum(ground_truths & ~predicted_2d, axis=1)
-
-    mcc_values = (TPs * TNs - FPs * FNs) / np.sqrt((TPs + FPs) * (TPs + FNs) * (TNs + FPs) * (TNs + FNs))
-    mcc_values = np.nan_to_num(mcc_values)
-
-    return mcc_values
+    return best_f1, best_threshold
 
 class SpecificityMatrix:
     '''
@@ -76,6 +69,7 @@ class SpecificityMatrix:
         # Generate the unweighted specificity matrix, calculate unweighted scores, and generate statistics
         self.make_specificity_matrix()
         self.score_source_peptides(use_weighted = False)
+        self.plus_threshold, self.minus_threshold = specificity_params["plus_threshold"], specificity_params["minus_threshold"]
         self.set_specificity_statistics(use_weighted = False)
 
         # If predefined weights exist, apply them, otherwise leave self.weighted_matrix_df undefined
@@ -267,42 +261,27 @@ class SpecificityMatrix:
             valid_score_values = self.passing_unweighted_scores[valid_indices]
         valid_log2fc_values = self.passing_log2fc_values[valid_indices]
 
-        # Get the pairs of score thresholds for calling specific peptides
-        score_range = np.linspace(valid_score_values.min(), valid_score_values.max(), 100)
-        threshold_pairs = np.transpose([np.tile(score_range, len(score_range)),
-                                        np.repeat(score_range, len(score_range))])
-        threshold_pairs = threshold_pairs[np.logical_and(threshold_pairs[:,0] > threshold_pairs[:,1],
-                                                         threshold_pairs[:,0] > 0, threshold_pairs[:,1] <= 0)]
+        # Find upper and lower f1-scores
+        log2fc_above_upper = np.greater_equal(valid_log2fc_values, self.plus_threshold)
+        best_f1_upper, best_threshold_upper = optimize_f1(log2fc_above_upper, valid_score_values)
 
-        # Calculate Matthews correlation coefficients for each threshold pair
+        log2fc_below_lower = np.less_equal(valid_log2fc_values, self.minus_threshold)
+        best_f1_lower, best_threshold_lower = optimize_f1(log2fc_below_lower, valid_score_values * -1)
+        best_threshold_lower = best_threshold_lower * -1 # corrected the inverted sign
 
-        above_upper_threshold = np.greater_equal(valid_score_values, threshold_pairs[:,0].reshape(-1,1))
-        upper_specific = np.greater_equal(valid_log2fc_values, 1)
-        upper_mcc_values = mcc_2d(ground_truths = upper_specific, predicted_2d = above_upper_threshold)
-
-        below_lower_threshold = np.less_equal(valid_score_values, threshold_pairs[:, 1].reshape(-1, 1))
-        lower_specific = np.less_equal(valid_log2fc_values, -1)
-        lower_mcc_values = mcc_2d(ground_truths = lower_specific, predicted_2d = below_lower_threshold)
-
-        multiplier = upper_specific.sum() / lower_specific.sum()
-        mean_mcc_values = (upper_mcc_values*multiplier + lower_mcc_values) / (1 + multiplier)
-
-        best_mcc_index = np.nanargmax(mean_mcc_values)
-        best_upper_mcc = upper_mcc_values[best_mcc_index]
-        best_lower_mcc = lower_mcc_values[best_mcc_index]
-        best_mean_mcc = mean_mcc_values[best_mcc_index]
-        best_upper_threshold, best_lower_threshold = threshold_pairs[best_mcc_index]
+        upper_lower_ratio = log2fc_above_upper.sum() / log2fc_below_lower.sum()
+        weighted_mean_f1 = (best_f1_upper + upper_lower_ratio * best_f1_lower) / (1 + upper_lower_ratio)
 
         if use_weighted:
-            self.weighted_mean_mcc = best_mean_mcc
-            self.weighted_upper_mcc, self.weighted_lower_mcc = best_upper_mcc, best_lower_mcc
-            self.weighted_upper_threshold = best_upper_threshold
-            self.weighted_lower_threshold = best_lower_threshold
+            self.weighted_mean_f1 = weighted_mean_f1
+            self.weighted_upper_f1, self.weighted_lower_f1 = best_f1_upper, best_f1_lower
+            self.weighted_upper_threshold = best_threshold_upper
+            self.weighted_lower_threshold = best_threshold_lower
         else:
-            self.unweighted_mean_mcc = best_mean_mcc
-            self.unweighted_upper_mcc, self.unweighted_lower_mcc = best_upper_mcc, best_lower_mcc
-            self.unweighted_upper_threshold = best_upper_threshold
-            self.unweighted_lower_threshold = best_lower_threshold
+            self.unweighted_mean_f1 = weighted_mean_f1
+            self.unweighted_upper_f1, self.unweighted_lower_f1 = best_f1_upper, best_f1_lower
+            self.unweighted_upper_threshold = best_threshold_upper
+            self.unweighted_lower_threshold = best_threshold_lower
 
     def apply_weights(self, weights_array):
         # User-initiated function for applying matrix weights
@@ -337,16 +316,16 @@ class SpecificityMatrix:
                         f"---\n",
                         f"Matthews correlation coefficients for upper and lower specificity score thresholds\n\n",
                         f"Unweighted matrix: \n",
-                        f"\tMean MCC: {self.unweighted_mean_mcc}\n",
-                        f"\tMCC (upper): {self.unweighted_upper_mcc} for scores ≥ {self.unweighted_upper_threshold}\n",
-                        f"\tMCC (lower): {self.unweighted_lower_mcc} for scores ≤ {self.unweighted_lower_threshold}"]
+                        f"\tMerged f1-score: {self.unweighted_mean_f1}\n",
+                        f"\tUpper f1-score: {self.unweighted_upper_f1} for scores ≥ {self.unweighted_upper_threshold}\n",
+                        f"\tLower f1-score: {self.unweighted_lower_f1} for scores ≤ {self.unweighted_lower_threshold}"]
         try:
             add_lines = ["\n\n",
                          f"Weighted matrix: \n",
                          f"\tSpecificity matrix weights: {self.position_weights}\n",
-                         f"\tMean MCC: {self.weighted_mean_mcc}\n",
-                         f"\tMCC (upper): {self.weighted_upper_mcc} for scores ≥ {self.weighted_upper_threshold}\n",
-                         f"\tMCC (lower): {self.weighted_lower_mcc} for scores ≤ {self.weighted_lower_threshold}"]
+                         f"\tMerged f1-score: {self.weighted_mean_f1}\n",
+                         f"\tUpper f1-score: {self.weighted_upper_f1} for scores ≥ {self.weighted_upper_threshold}\n",
+                         f"\tLower f1-score: {self.weighted_lower_f1} for scores ≤ {self.weighted_lower_threshold}"]
             output_lines.extend(add_lines)
         except NameError:
             pass

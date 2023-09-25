@@ -22,28 +22,28 @@ def process_weights_chunk(chunk, specificity_matrix):
     Lower helper function for parallelization of position weight optimization for the specificity matrix
 
     Args:
-        chunk (np.ndarray):                     the chunk of permuted weights currently being processed
+        chunk (np.ndarray):                     the chunk of permuted/randomized weights currently being processed
         specificity_matrix (SpecificityMatrix): the specificity matrix object
 
     Returns:
-        chunk_results (tuple):                  (optimized_weights, optimized_mean_mcc)
+        chunk_results (tuple):                  (optimized_weights, optimized_mean_f1)
     '''
 
     sequence_length = len(chunk[0])
 
-    optimized_mean_mcc = 0
+    optimized_mean_f1 = 0
     optimized_weights = np.ones(sequence_length)
 
-    for permuted_weights in chunk:
-        specificity_matrix.apply_weights(permuted_weights)
+    for weights in chunk:
+        specificity_matrix.apply_weights(weights)
         specificity_matrix.score_source_peptides(use_weighted = True)
         specificity_matrix.set_specificity_statistics(use_weighted = True)
-        current_mean_mcc = specificity_matrix.weighted_mean_mcc
-        if current_mean_mcc > optimized_mean_mcc:
-            optimized_weights = permuted_weights
-            optimized_mean_mcc = current_mean_mcc
+        current_mean_f1 = specificity_matrix.weighted_mean_f1
+        if current_mean_f1 > optimized_mean_f1:
+            optimized_weights = weights
+            optimized_mean_f1 = current_mean_f1
 
-    return (optimized_weights, optimized_mean_mcc)
+    return (optimized_weights, optimized_mean_f1)
 
 def process_weights(weights_array_chunks, specificity_matrix):
     '''
@@ -54,28 +54,28 @@ def process_weights(weights_array_chunks, specificity_matrix):
         specificity_matrix (SpecificityMatrix): the specificity matrix object
 
     Returns:
-        results (tuple):                        (best_weights, best_r2, best_r2_extrema)
+        results (tuple):                        (best_weights, best_mean_f1)
     '''
 
     pool = multiprocessing.Pool()
     process_partial = partial(process_weights_chunk, specificity_matrix = specificity_matrix)
 
     best_weights = None
-    best_mean_mcc = 0
+    best_mean_f1 = 0
 
     with trange(len(weights_array_chunks), desc="Processing specificity matrix weights") as pbar:
         for chunk_results in pool.imap_unordered(process_partial, weights_array_chunks):
-            if chunk_results[1] > best_mean_mcc:
-                best_weights, best_mean_mcc = chunk_results
+            if chunk_results[1] > best_mean_f1:
+                best_weights, best_mean_f1 = chunk_results
                 formatted_weights = ", ".join(best_weights.round(2).astype(str))
-                print(f"\nNew record: mean_mcc = {best_mean_mcc} for weights: [{formatted_weights}]")
+                print(f"\nNew record: weighted mean f1-score = {best_mean_f1} for weights: [{formatted_weights}]")
 
             pbar.update()
 
     pool.close()
     pool.join()
 
-    return (best_weights, best_mean_mcc)
+    return (best_weights, best_mean_f1)
 
 def find_optimal_weights(specificity_matrix, motif_length, chunk_size = 1000, ignore_positions = None):
     '''
@@ -106,7 +106,7 @@ def find_optimal_weights(specificity_matrix, motif_length, chunk_size = 1000, ig
 
     # Run the parallelized optimization process
     results = process_weights(weights_array_chunks, specificity_matrix)
-    best_weights, best_mean_mcc = results
+    best_weights, best_mean_f1 = results
 
     # Apply the final best weights onto the specificity matrix and score the source data
     specificity_matrix.apply_weights(best_weights)
