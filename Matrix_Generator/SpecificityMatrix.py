@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import os
+from scipy.stats import ttest_ind
 from sklearn.metrics import precision_recall_curve
 from general_utils.user_helper_functions import get_comparator_baits
 from general_utils.matrix_utils import collapse_phospho
@@ -15,7 +16,11 @@ except:
 def optimize_f1(actual_truths, score_values):
     # Helper function that optimizes f1-score using a precision-recall curve
 
-    precision, recall, thresholds = precision_recall_curve(actual_truths, score_values)
+    valid_mask = np.logical_and(np.isfinite(actual_truths), np.isfinite(score_values))
+    valid_actual_truths = actual_truths[valid_mask]
+    valid_score_values = score_values[valid_mask]
+
+    precision, recall, thresholds = precision_recall_curve(valid_actual_truths, valid_score_values)
     precision_recall_products = precision * recall
     precision_recall_sums = precision + recall
     precision_recall_sums[precision_recall_sums == 0] = np.nan
@@ -214,17 +219,28 @@ class SpecificityMatrix:
 
         for col_name, col_slice in zip(cols, np.transpose(self.passing_seqs_2d)):
             col_unique_residues = np.unique(col_slice)
+
             for aa in col_unique_residues:
                 qualifying_points = adjusted_points_values[col_slice == aa]
+                qualifying_points_sum = np.sum(qualifying_points[np.isfinite(qualifying_points)])
+
                 if not np.all(~np.isfinite(qualifying_points)):
-                    qualifying_points_sum = np.nansum(qualifying_points)
-                    matrix_df.at[aa, col_name] = qualifying_points_sum
+                    qualifying_log2fc = self.passing_log2fc_values[col_slice == aa]
+                    qualifying_log2fc = qualifying_log2fc[np.isfinite(qualifying_log2fc)]
+                    other_log2fc = self.passing_log2fc_values[col_slice != aa]
+                    other_log2fc = other_log2fc[np.isfinite(other_log2fc)]
+                    result = ttest_ind(qualifying_log2fc, other_log2fc, equal_var=False, nan_policy="omit")
+                    p_value = result.pvalue
+
+                    if p_value <= 0.5:
+                        matrix_df.at[aa, col_name] = qualifying_points_sum
 
         # Add missing amino acid rows if necessary and reorder matrix_df by aa_list
         matrix_df = self.reorder_matrix(matrix_df)
 
         # Standardize matrix by max column values
         max_values = matrix_df.max(axis=0)
+        max_values[max_values == 0] = 1 # avoid divide-by-zero
         matrix_df = matrix_df / max_values
 
         self.matrix_df = matrix_df
