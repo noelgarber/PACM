@@ -102,7 +102,7 @@ class SpecificityMatrix:
         self.include_phospho = specificity_params.get("include_phospho")
 
         # Generate the unweighted specificity matrix, calculate unweighted scores, and generate statistics
-        self.make_specificity_matrix()
+        self.make_specificity_matrix(standardize = specificity_params["standardize_matrix"])
         self.score_source_peptides(use_weighted = False)
         self.plus_threshold, self.minus_threshold = specificity_params["plus_threshold"], specificity_params["minus_threshold"]
         self.set_specificity_statistics(use_weighted = False)
@@ -195,9 +195,15 @@ class SpecificityMatrix:
 
         return matrix_df
 
-    def make_specificity_matrix(self):
+    def make_specificity_matrix(self, standardize = False):
         '''
         Function for generating a position-weighted matrix by assigning points based on seqs and their log2fc values
+
+        Args:
+            standardize (bool): whether to standardize the matrix to the max values in each column
+
+        Returns:
+            None
         '''
 
         # Extract the significant sequences and log2fc values as numpy arrays
@@ -278,9 +284,13 @@ class SpecificityMatrix:
         matrix_df = self.reorder_matrix(matrix_df)
 
         # Standardize matrix by max column values
-        max_values = np.max(np.abs(matrix_df.values), axis=0)
-        max_values[max_values == 0] = 1 # avoid divide-by-zero
-        matrix_df = matrix_df / max_values
+        if standardize:
+            max_values = np.max(np.abs(matrix_df.values), axis=0)
+            max_values[max_values == 0] = 1 # avoid divide-by-zero
+            matrix_df = matrix_df / max_values
+            self.standardized = True
+        else:
+            self.standardized = False
 
         self.matrix_df = matrix_df
 
