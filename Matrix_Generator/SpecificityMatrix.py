@@ -5,7 +5,6 @@ import pandas as pd
 import os
 from scipy.stats import ttest_ind
 from sklearn.metrics import precision_recall_curve, r2_score
-from sklearn.preprocessing import PolynomialFeatures
 from sklearn.linear_model import LinearRegression
 from general_utils.user_helper_functions import get_comparator_baits
 from general_utils.matrix_utils import collapse_phospho
