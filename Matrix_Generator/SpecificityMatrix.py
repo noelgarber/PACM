@@ -4,7 +4,9 @@ import numpy as np
 import pandas as pd
 import os
 from scipy.stats import ttest_ind
-from sklearn.metrics import precision_recall_curve
+from sklearn.metrics import precision_recall_curve, r2_score
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.linear_model import LinearRegression
 from general_utils.user_helper_functions import get_comparator_baits
 from general_utils.matrix_utils import collapse_phospho
 from Matrix_Generator.sigmoid_regression import fit_sigmoid
@@ -30,6 +32,35 @@ def optimize_f1(actual_truths, score_values):
     best_threshold = thresholds[best_idx]
 
     return best_f1, best_threshold
+
+def linear_regression(scores, log2fc_values):
+    '''
+    Helper function that fits a linear regression model to estimate R2
+
+    Args:
+        scores (np.ndarray):        specificity scores, which will be used as x-values
+        log2fc_values (np.ndarray): log2fc specificity data, which will be used as y-values that we want to predict
+
+    Returns:
+        r2_value (float):                               the goodness of fit, represented as R2
+        model (sklearn.linear_model.LinearRegression):  the fitted function
+    '''
+
+    valid_mask = np.logical_and(np.isfinite(scores), np.isfinite(log2fc_values))
+    scores = scores[valid_mask]
+    log2fc_values = log2fc_values[valid_mask]
+
+    X = scores.reshape(-1,1)
+    y = log2fc_values
+    model = LinearRegression()
+    model.fit(X, y)
+
+    y_actual = log2fc_values
+    y_pred = model.predict(X)
+
+    r2_value = r2_score(y_actual, y_pred)
+
+    return r2_value, model
 
 class SpecificityMatrix:
     '''
@@ -289,18 +320,25 @@ class SpecificityMatrix:
         best_threshold_lower = best_threshold_lower * -1 # corrected the inverted sign
 
         upper_lower_ratio = log2fc_above_upper.sum() / log2fc_below_lower.sum()
-        weighted_mean_f1 = (best_f1_upper + upper_lower_ratio * best_f1_lower) / (1 + upper_lower_ratio)
+        weighted_mean_f1 = (upper_lower_ratio * best_f1_lower + best_f1_upper) / (1 + upper_lower_ratio)
+
+        # Also find R2 of a linear function relating log2fc to specificity score
+        r2_value, linear_model = linear_regression(valid_score_values, valid_log2fc_values)
 
         if use_weighted:
             self.weighted_mean_f1 = weighted_mean_f1
             self.weighted_upper_f1, self.weighted_lower_f1 = best_f1_upper, best_f1_lower
             self.weighted_upper_threshold = best_threshold_upper
             self.weighted_lower_threshold = best_threshold_lower
+            self.weighted_linear_r2 = r2_value
+            self.weighted_linear_model = linear_model
         else:
             self.unweighted_mean_f1 = weighted_mean_f1
             self.unweighted_upper_f1, self.unweighted_lower_f1 = best_f1_upper, best_f1_lower
             self.unweighted_upper_threshold = best_threshold_upper
             self.unweighted_lower_threshold = best_threshold_lower
+            self.unweighted_linear_r2 = r2_value
+            self.unweighted_linear_model = linear_model
 
     def apply_weights(self, weights_array):
         # User-initiated function for applying matrix weights
