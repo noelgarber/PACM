@@ -389,7 +389,7 @@ class SpecificityMatrix:
             use_weighted (bool):        whether to use the weighted specificity matrix when scoring
 
         Returns:
-
+            score_values (np.ndarray):  score values for input motifs
         '''
 
         if motif_seqs_2d.shape[1] != self.motif_length:
