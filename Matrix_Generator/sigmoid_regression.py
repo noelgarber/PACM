@@ -49,7 +49,7 @@ def fit_sigmoid(x_values, y_values, save_as = None, x_label = None, y_label = No
         x_sigmoid = np.linspace(x_values.min() - extrapolation, x_values.max() + extrapolation, 1000)
         y_sigmoid = np.array([sigmoid(x, *params) for x in x_sigmoid])
 
-        plt.scatter(x_values, y_values, label="Data", color="blue", marker="o")
+        plt.scatter(x_values, y_values, label="Data", color="blue", marker="o", s=7)
         plt.plot(x_sigmoid, y_sigmoid, label="Logistic Regression", color="red")
 
         # Add the formula and R-squared value as text on the graph
