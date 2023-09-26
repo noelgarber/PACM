@@ -205,16 +205,17 @@ class SpecificityMatrix:
         self.passing_seqs = self.source_sequences[self.passing_indices]
         self.passing_log2fc_values = self.least_different_values[self.passing_indices]
 
-        # Get points scaling values using equation: points = 1 / (1+e**(-k(x-x0)))
+        # Get points scaling values from adjusted max signals; higher signals = more confident log2fc values
         max_signals = self.max_signal_vals.copy()
         max_signals[max_signals < 0] = 0
         passing_max_signals = max_signals[self.passing_indices]
-        passing_max_signals = passing_max_signals - passing_max_signals.min()
-        passing_max_signals = passing_max_signals / passing_max_signals.max()
+        passing_scaling_values = passing_max_signals - passing_max_signals.min()
+        passing_scaling_values = passing_scaling_values / passing_scaling_values.max()
 
-        x0 = np.median(passing_max_signals) # sigmoid inflection is at median magnitude
+        # Adjust scaling values according to a sigmoid function with inflection at the 25th percentile
+        x0 = np.percentile(passing_scaling_values, 25)
         k = 5
-        passing_scaling_values = 1 / (1 + np.exp(-k * (passing_max_signals - x0)))
+        passing_scaling_values = 1 / (1 + np.exp(-k * (passing_scaling_values - x0)))
 
         # Filter log2fc values to not include small changes
         filtered_log2fc_values = self.passing_log2fc_values.copy()
@@ -222,13 +223,6 @@ class SpecificityMatrix:
 
         # Calculate final points to assign based on scaling values and proportions
         passing_points_values = filtered_log2fc_values * passing_scaling_values
-
-        # Adjust for more hits being specific to one bait vs. the other
-        minus_points_sum = np.mean(passing_points_values[passing_points_values < 0])
-        plus_points_sum = np.mean(passing_points_values[passing_points_values > 0])
-        bias_ratio = np.abs(plus_points_sum / minus_points_sum)
-        adjusted_points_values = passing_points_values.copy()
-        adjusted_points_values[adjusted_points_values < 0] *= bias_ratio
 
         # Check that all the sequences are the same length
         positive_seq_lengths = np.char.str_len(self.passing_seqs.astype(str))
@@ -251,7 +245,7 @@ class SpecificityMatrix:
             col_unique_residues = np.unique(col_slice)
 
             for aa in col_unique_residues:
-                qualifying_points = adjusted_points_values[col_slice == aa]
+                qualifying_points = passing_points_values[col_slice == aa]
                 qualifying_points_sum = np.sum(qualifying_points[np.isfinite(qualifying_points)])
 
                 if not np.all(~np.isfinite(qualifying_points)):
