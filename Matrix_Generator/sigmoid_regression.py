@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import os
+import warnings
 from scipy.optimize import curve_fit
 from sklearn.metrics import r2_score
 
@@ -29,31 +30,40 @@ def fit_sigmoid(x_values, y_values, save_as = None, x_label = None, y_label = No
     x_values = x_values[finite_mask]
     y_values = y_values[finite_mask]
     p0 = [y_values.max(), np.median(x_values), 1, y_values.min()]
-    params, covariance = curve_fit(sigmoid, x_values, y_values, p0, method="dogbox")
-
-    # Get the R2 value
-    y_pred = np.array([sigmoid(x, *params) for x in x_values])
-    r_squared = r2_score(y_values, y_pred)
-
-    # Generate points for defined sigmoid function
-    x_range = x_values.max() - x_values.min()
-    extrapolation = 0.2 * x_range
-    x_sigmoid = np.linspace(x_values.min() - extrapolation, x_values.max() + extrapolation, 1000)
-    y_sigmoid = np.array([sigmoid(x, *params) for x in x_sigmoid])
+    try:
+        params, covariance = curve_fit(sigmoid, x_values, y_values, p0, method="dogbox")
+        success = True
+    except Exception as e:
+        warnings.warn(f"Caught exception in fit_sigmoid(): {e}")
+        success = False
 
     # Create a scatter plot of the data and the fitted sigmoid function
-    plt.scatter(x_values, y_values, label="Data", color="blue", marker="o")
-    plt.plot(x_sigmoid, y_sigmoid, label="Logistic Regression", color="red")
+    if success:
+        # Get the R2 value
+        y_pred = np.array([sigmoid(x, *params) for x in x_values])
+        r_squared = r2_score(y_values, y_pred)
 
-    # Add the formula and R-squared value as text on the graph
-    L, k, x0, b = params
-    k_str = f"{-k:.2f}"
-    x0_str = "+" + f"{x0:.2f}" if x0 >= 0 else f"{x0:.2f}"
-    b_str = "+" + f"{b:.2f}" if b >= 0 else f"{b:.2f}"
-    formula_latex = r"y = \frac{" + f"{L:.2f}" + r"}{1+e^{" + k_str + "(x" + x0_str + ")}}" + b_str
-    r2_latex = f"R^2={r_squared:.2f}"
-    full_latex = f"${formula_latex}$\n${r2_latex}$"
-    plt.text(2, 0.7, full_latex, fontsize=12)
+        # Generate points for defined sigmoid function
+        x_range = x_values.max() - x_values.min()
+        extrapolation = 0.2 * x_range
+        x_sigmoid = np.linspace(x_values.min() - extrapolation, x_values.max() + extrapolation, 1000)
+        y_sigmoid = np.array([sigmoid(x, *params) for x in x_sigmoid])
+
+        plt.scatter(x_values, y_values, label="Data", color="blue", marker="o")
+        plt.plot(x_sigmoid, y_sigmoid, label="Logistic Regression", color="red")
+
+        # Add the formula and R-squared value as text on the graph
+        L, k, x0, b = params
+        k_str = f"{-k:.2f}"
+        x0_str = "+" + f"{x0:.2f}" if x0 >= 0 else f"{x0:.2f}"
+        b_str = "+" + f"{b:.2f}" if b >= 0 else f"{b:.2f}"
+        formula_latex = r"y = \frac{" + f"{L:.2f}" + r"}{1+e^{" + k_str + "(x" + x0_str + ")}}" + b_str
+        r2_latex = f"R^2={r_squared:.2f}"
+        full_latex = f"${formula_latex}$\n${r2_latex}$"
+        plt.text(2, 0.7, full_latex, fontsize=12)
+
+    else:
+        plt.scatter(x_values, y_values, label="Data", color="blue", marker="o")
 
     x_label = "X-values" if x_label is None else x_label
     y_label = "Y-values" if y_label is None else y_label
