@@ -57,6 +57,13 @@ def process_weights(weights_array_chunks, specificity_matrix):
         results (tuple):                        (best_weights, best_mean_f1)
     '''
 
+    # Calculate the initial value
+    specificity_matrix.score_source_peptides(use_weighted=False)
+    specificity_matrix.set_specificity_statistics(use_weighted=False)
+    initial_f1 = specificity_matrix.unweighted_mean_f1
+    print(f"All-ones weights give an initial f1-score: {initial_f1}")
+
+    # Set up the parallel processing operation
     pool = multiprocessing.Pool()
     process_partial = partial(process_weights_chunk, specificity_matrix = specificity_matrix)
 
