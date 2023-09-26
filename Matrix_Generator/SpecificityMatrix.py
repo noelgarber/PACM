@@ -10,9 +10,9 @@ from general_utils.user_helper_functions import get_comparator_baits
 from general_utils.matrix_utils import collapse_phospho
 from Matrix_Generator.sigmoid_regression import fit_sigmoid
 try:
-    from Matrix_Generator.config_local import amino_acids, amino_acids_phos, comparator_info, specificity_params
+    from Matrix_Generator.config_local import *
 except:
-    from Matrix_Generator.config import amino_acids, amino_acids_phos, comparator_info, specificity_params
+    from Matrix_Generator.config import *
 
 def optimize_f1(actual_truths, score_values):
     # Helper function that optimizes f1-score using a precision-recall curve
@@ -255,21 +255,36 @@ class SpecificityMatrix:
                 qualifying_points_sum = np.sum(qualifying_points[np.isfinite(qualifying_points)])
 
                 if not np.all(~np.isfinite(qualifying_points)):
-                    qualifying_log2fc = self.passing_log2fc_values[col_slice == aa]
-                    qualifying_log2fc = qualifying_log2fc[np.isfinite(qualifying_log2fc)]
-                    other_log2fc = self.passing_log2fc_values[col_slice != aa]
-                    other_log2fc = other_log2fc[np.isfinite(other_log2fc)]
-                    result = ttest_ind(qualifying_log2fc, other_log2fc, equal_var=False, nan_policy="omit")
-                    p_value = result.pvalue
+                    qualifying = self.passing_log2fc_values[col_slice == aa]
+                    qualifying = qualifying[np.isfinite(qualifying)]
+                    other = self.passing_log2fc_values[col_slice != aa]
+                    other = other[np.isfinite(other)]
+                    result = ttest_ind(qualifying, other, equal_var=False)
+                    pvalue = result.pvalue
 
-                    if p_value <= 0.5:
+                    if pvalue <= 0.5:
                         matrix_df.at[aa, col_name] = qualifying_points_sum
+                        continue
+
+                    equivalent_residues = aa_equivalence_dict[aa]
+                    group_qualifying = self.passing_log2fc_values[np.isin(col_slice, equivalent_residues)]
+                    group_qualifying = group_qualifying[np.isfinite(group_qualifying)]
+                    group_other = self.passing_log2fc_values[~np.isin(col_slice, equivalent_residues)]
+                    group_other = group_other[np.isfinite(group_other)]
+                    group_result = ttest_ind(group_qualifying, group_other, equal_var=False)
+                    group_pvalue = group_result.pvalue
+
+                    if group_pvalue <= 0.5:
+                        both_lesser = group_qualifying.mean() < group_other.mean() and qualifying.mean() < other.mean()
+                        both_greater = group_qualifying.mean() > group_other.mean() and qualifying.mean() > other.mean()
+                        if both_lesser or both_greater:
+                            matrix_df.at[aa, col_name] = qualifying_points_sum
 
         # Add missing amino acid rows if necessary and reorder matrix_df by aa_list
         matrix_df = self.reorder_matrix(matrix_df)
 
         # Standardize matrix by max column values
-        max_values = matrix_df.max(axis=0)
+        max_values = np.max(np.abs(matrix_df.values), axis=0)
         max_values[max_values == 0] = 1 # avoid divide-by-zero
         matrix_df = matrix_df / max_values
 
