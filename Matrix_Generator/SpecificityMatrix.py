@@ -183,7 +183,7 @@ class SpecificityMatrix:
         passing_max_signals = passing_max_signals / passing_max_signals.max()
 
         x0 = np.median(passing_max_signals) # sigmoid inflection is at median magnitude
-        k = 10
+        k = 5
         passing_scaling_values = 1 / (1 + np.exp(-k * (passing_max_signals - x0)))
 
         # Filter log2fc values to not include small changes
