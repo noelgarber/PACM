@@ -374,7 +374,7 @@ class SpecificityMatrix:
             weighted_matrix_path = os.path.join(output_folder, "weighted_specificity_matrix.csv")
             self.weighted_matrix_df.to_csv(weighted_matrix_path)
             print(f"Saved weighted specificity matrix to {weighted_matrix_path}")
-        except NameError:
+        except AttributeError:
             pass
 
         statistics_path = os.path.join(output_folder, "specificity_statistics.txt")
@@ -395,7 +395,7 @@ class SpecificityMatrix:
                          f"\tUpper f1-score: {self.weighted_upper_f1} for scores ≥ {self.weighted_upper_threshold}\n",
                          f"\tLower f1-score: {self.weighted_lower_f1} for scores ≤ {self.weighted_lower_threshold}"]
             output_lines.extend(add_lines)
-        except NameError:
+        except AttributeError:
             pass
 
         with open(statistics_path, "w") as file:

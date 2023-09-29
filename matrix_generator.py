@@ -96,8 +96,9 @@ def main(image_params = image_params, general_params = general_params, data_para
 
     # Generate specificity matrix and associated results as a SpecificityMatrix object
     if generate_specificity_matrix:
-        specificity_matrix = make_specificity_matrix(scored_data_df, comparator_info, specificity_params, save = True)
-        return scored_data_df, specificity_matrix
+        specificity_matrix_results = make_specificity_matrix(scored_data_df, comparator_info, specificity_params,
+                                                             save = True)
+        return scored_data_df, specificity_matrix_results
     else:
         return scored_data_df
 
