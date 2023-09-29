@@ -85,16 +85,9 @@ class SpecificityMatrix:
             self.comparator_set_1, self.comparator_set_2 = get_comparator_baits()
         self.find_least_different()
 
-        # Get the multiplier to adjust for asymmetric distribution of bait specificities in the data
-        self.thresholds = specificity_params["thresholds"]
-        self.matching_points = specificity_params["matching_points"]
-        self.matching_points = specificity_params["matching_points"]
-        self.extreme_thresholds = (self.thresholds[0], self.thresholds[3])
-        passes_col, pass_str = comparator_info.get("bait_pass_col"), comparator_info.get("pass_str")
-        self.set_bias_ratio(self.extreme_thresholds, passes_col, pass_str)
-
         # Define required arguments for making the specificity matrix
         sequence_col = comparator_info.get("seq_col")
+        passes_col, pass_str = comparator_info.get("bait_pass_col"), comparator_info.get("pass_str")
         self.source_sequences = source_df[sequence_col].to_numpy()
         self.significance_array = self.scored_source_df[passes_col].to_numpy() == pass_str
         max_bait_mean_col = specificity_params["max_bait_mean_col"]
