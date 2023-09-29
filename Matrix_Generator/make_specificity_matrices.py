@@ -29,7 +29,8 @@ def process_weights_chunk(chunk, specificity_matrix, fit_mode = "f1", side = Non
         side (str|None):                        can be "upper", "lower", or None (default; takes mean of the two)
 
     Returns:
-        chunk_results (tuple):                  (maximizable_value, optimized_f1, optimized_r2, optimized_weights)
+        chunk_results (tuple):                  (maximizable_value, accuracy, optimized_mcc, optimized_f1,
+                                                optimized_r2, optimized_weights)
     '''
 
     sequence_length = len(chunk[0])
@@ -63,6 +64,7 @@ def process_weights_chunk(chunk, specificity_matrix, fit_mode = "f1", side = Non
         optimized_r2 = specificity_matrix.weighted_linear_r2
         optimized_f1 = np.nan
         maximizable_value = optimized_mcc
+        accuracy = specificity_matrix.weighted_accuracy
 
     elif fit_mode == "f1":
         for weights in chunk:
@@ -87,6 +89,7 @@ def process_weights_chunk(chunk, specificity_matrix, fit_mode = "f1", side = Non
         optimized_r2 = specificity_matrix.weighted_linear_r2
         optimized_mcc = np.nan
         maximizable_value = optimized_f1
+        accuracy = specificity_matrix.weighted_accuracy
 
     elif fit_mode == "R2":
         for weights in chunk:
@@ -105,11 +108,12 @@ def process_weights_chunk(chunk, specificity_matrix, fit_mode = "f1", side = Non
         optimized_f1 = specificity_matrix.weighted_mean_f1
         optimized_mcc = np.nan
         maximizable_value = optimized_r2
+        accuracy = specificity_matrix.weighted_accuracy
 
     else:
         raise ValueError(f"process_weights_chunk got fit_mode={fit_mode}, but must be `mcc`, `f1`, or `R2`")
 
-    return (maximizable_value, optimized_mcc, optimized_f1, optimized_r2, optimized_weights)
+    return (maximizable_value, accuracy, optimized_mcc, optimized_f1, optimized_r2, optimized_weights)
 
 def process_weights(weights_array_chunks, specificity_matrix, fit_mode = "f1", side = None):
     '''
@@ -131,12 +135,14 @@ def process_weights(weights_array_chunks, specificity_matrix, fit_mode = "f1", s
         specificity_matrix.set_specificity_statistics(use_weighted=False, assign_f1=True, assign_mcc=False)
         initial_f1 = specificity_matrix.unweighted_mean_f1
         initial_r2 = specificity_matrix.unweighted_linear_r2
-        print(f"Initial unweighted f1-score={initial_f1} and linear R2={initial_r2}")
+        initial_accuracy = specificity_matrix.unweighted_accuracy
+        print(f"Initial unweighted accuracy={initial_accuracy}, f1-score={initial_f1}, and linear R2={initial_r2}")
     else:
         specificity_matrix.set_specificity_statistics(use_weighted=False, assign_f1=False, assign_mcc=True)
         initial_mcc = specificity_matrix.unweighted_mean_mcc
         initial_r2 = specificity_matrix.unweighted_linear_r2
-        print(f"Initial unweighted MCC={initial_mcc} and linear R2={initial_r2}")
+        initial_accuracy = specificity_matrix.unweighted_accuracy
+        print(f"Initial unweighted accuracy={initial_accuracy}, MCC={initial_mcc}, and linear R2={initial_r2}")
 
     # Set up the parallel processing operation
     pool = multiprocessing.Pool()
@@ -151,9 +157,9 @@ def process_weights(weights_array_chunks, specificity_matrix, fit_mode = "f1", s
     with trange(len(weights_array_chunks), desc="Processing specificity matrix weights") as pbar:
         for chunk_results in pool.imap_unordered(process_partial, weights_array_chunks):
             if chunk_results[0] > best_maximizable_value:
-                best_maximizable_value, best_mcc, best_f1, best_r2, best_weights = chunk_results
+                best_maximizable_value, best_accuracy, best_mcc, best_f1, best_r2, best_weights = chunk_results
                 formatted_weights = ", ".join(best_weights.round(2).astype(str))
-                print(f"\nNew record: {fit_mode}={best_maximizable_value} for weights: [{formatted_weights}]")
+                print(f"\nNew record: {fit_mode}={best_maximizable_value} (accuracy={best_accuracy}) for weights: [{formatted_weights}]")
 
             pbar.update()
 
