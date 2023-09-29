@@ -220,9 +220,16 @@ def main(source_df, comparator_info = comparator_info, specificity_params = spec
             lower_specificity_matrix.plot_regression(weighted_lower_folder, use_weighted=True)
 
         # Save the weighted SpecificityMatrix objects for reloading when scoring novel motifs
-        with open(os.path.join(output_folder, "weighted_upper_specificity_matrix.pkl"), "wb") as f1:
+        upper_path = os.path.join(output_folder, "weighted_upper_specificity_matrix.pkl")
+        if not os.path.exists(upper_path):
+            os.makedirs(upper_path)
+        with open(upper_path, "wb") as f1:
             pickle.dump(upper_specificity_matrix, f1)
-        with open(os.path.join(output_folder, "weighted_lower_specificity_matrix.pkl"), "wb") as f2:
+
+        lower_path = os.path.join(output_folder, "weighted_lower_specificity_matrix.pkl")
+        if not os.path.exists(lower_path):
+            os.makedirs(lower_path)
+        with open(lower_path, "wb") as f2:
             pickle.dump(lower_specificity_matrix, f2)
 
         # Return unweighted and weighted matrices
