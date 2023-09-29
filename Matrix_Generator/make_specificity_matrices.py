@@ -18,15 +18,15 @@ except:
                      Define functions for parallelized optimization of specificity matrix weights
    ------------------------------------------------------------------------------------------------------------------'''
 
-def process_weights_chunk(chunk, specificity_matrix, fit_mode = "both", f1_side = None):
+def process_weights_chunk(chunk, specificity_matrix, fit_mode = "f1", side = None):
     '''
     Lower helper function for parallelization of position weight optimization for the specificity matrix
 
     Args:
         chunk (np.ndarray):                     the chunk of permuted/randomized weights currently being processed
         specificity_matrix (SpecificityMatrix): the specificity matrix object
-        fit_mode (str):                         whether to use linear R2, f1-score, or both (as a mean of R2 * f1)
-        f1_side (str|None):                     can be "upper", "lower", or None (default; takes mean of the two)
+        fit_mode (str):                         whether to use f1-score ('f1'), linear R2 ('R2'), or MCC ('mcc'/"MCC")
+        side (str|None):                        can be "upper", "lower", or None (default; takes mean of the two)
 
     Returns:
         chunk_results (tuple):                  (maximizable_value, optimized_f1, optimized_r2, optimized_weights)
@@ -34,52 +34,92 @@ def process_weights_chunk(chunk, specificity_matrix, fit_mode = "both", f1_side 
 
     sequence_length = len(chunk[0])
 
-    maximizable_value = 0
+    maximizable_value = None
     optimized_f1 = 0
     optimized_r2 = 0
+    optimized_mcc = 0
     optimized_weights = np.ones(sequence_length)
 
-    for weights in chunk:
-        specificity_matrix.apply_weights(weights)
-        specificity_matrix.score_source_peptides(use_weighted = True)
-        specificity_matrix.set_specificity_statistics(use_weighted = True)
+    if fit_mode == "MCC" or fit_mode == "mcc":
+        for weights in chunk:
+            specificity_matrix.apply_weights(weights)
+            specificity_matrix.score_source_peptides(use_weighted=True)
+            specificity_matrix.set_specificity_statistics(use_weighted=True, assign_f1=False, assign_mcc=True)
 
-        # Get R2 and f1-score values
-        current_r2 = specificity_matrix.weighted_linear_r2
-        if f1_side == "upper":
-            current_f1 = specificity_matrix.weighted_upper_f1
-        elif f1_side == "lower":
-            current_f1 = specificity_matrix.weighted_lower_f1
-        else:
-            current_f1 = specificity_matrix.weighted_mean_f1
+            if side == "upper":
+                current_mcc = specificity_matrix.weighted_upper_mcc
+            elif side == "lower":
+                current_mcc = specificity_matrix.weighted_lower_mcc
+            else:
+                current_mcc = specificity_matrix.weighted_mean_mcc
 
-        # Find value to maximize
-        if fit_mode == "both":
-            current_maximizable_value = (current_r2 + current_f1) / 2
-        elif fit_mode == "R2" or fit_mode == "r2":
-            current_maximizable_value = current_r2
-        elif fit_mode == "f1":
-            current_maximizable_value = current_f1
-        else:
-            raise ValueError(f"process_weights_chunk got fit_mode={fit_mode}, but must be `both`, `R2`, or `f1`")
+            if current_mcc > optimized_mcc:
+                optimized_mcc = current_mcc
+                optimized_weights = weights
 
-        if current_maximizable_value > maximizable_value:
-            maximizable_value = current_maximizable_value
-            optimized_f1 = current_f1
-            optimized_r2 = current_r2
-            optimized_weights = weights
+        specificity_matrix.apply_weights(optimized_weights)
+        specificity_matrix.score_source_peptides(use_weighted=True)
+        specificity_matrix.set_specificity_statistics(use_weighted=True, assign_f1=False, assign_mcc=True)
+        optimized_r2 = specificity_matrix.weighted_linear_r2
+        optimized_f1 = np.nan
+        maximizable_value = optimized_mcc
 
-    return (maximizable_value, optimized_f1, optimized_r2, optimized_weights)
+    elif fit_mode == "f1":
+        for weights in chunk:
+            specificity_matrix.apply_weights(weights)
+            specificity_matrix.score_source_peptides(use_weighted=True)
+            specificity_matrix.set_specificity_statistics(use_weighted=True, assign_f1=True, assign_mcc=False)
 
-def process_weights(weights_array_chunks, specificity_matrix, fit_mode = "both", f1_side = None):
+            if side == "upper":
+                current_f1 = specificity_matrix.weighted_upper_f1
+            elif side == "lower":
+                current_f1 = specificity_matrix.weighted_lower_f1
+            else:
+                current_f1 = specificity_matrix.weighted_mean_f1
+
+            if current_f1 > optimized_f1:
+                optimized_f1 = current_f1
+                optimized_weights = weights
+
+        specificity_matrix.apply_weights(optimized_weights)
+        specificity_matrix.score_source_peptides(use_weighted=True)
+        specificity_matrix.set_specificity_statistics(use_weighted=True, assign_f1=True, assign_mcc=False)
+        optimized_r2 = specificity_matrix.weighted_linear_r2
+        optimized_mcc = np.nan
+        maximizable_value = optimized_f1
+
+    elif fit_mode == "R2":
+        for weights in chunk:
+            specificity_matrix.apply_weights(weights)
+            specificity_matrix.score_source_peptides(use_weighted=True)
+            specificity_matrix.set_specificity_statistics(use_weighted=True, assign_f1=False, assign_mcc=False)
+
+            current_r2 = specificity_matrix.weighted_linear_r2
+            if current_r2 > optimized_r2:
+                optimized_r2 = current_r2
+                optimized_weights = weights
+
+        specificity_matrix.apply_weights(optimized_weights)
+        specificity_matrix.score_source_peptides(use_weighted=True)
+        specificity_matrix.set_specificity_statistics(use_weighted=True, assign_f1=True, assign_mcc=False)
+        optimized_f1 = specificity_matrix.weighted_mean_f1
+        optimized_mcc = np.nan
+        maximizable_value = optimized_r2
+
+    else:
+        raise ValueError(f"process_weights_chunk got fit_mode={fit_mode}, but must be `mcc`, `f1`, or `R2`")
+
+    return (maximizable_value, optimized_mcc, optimized_f1, optimized_r2, optimized_weights)
+
+def process_weights(weights_array_chunks, specificity_matrix, fit_mode = "f1", side = None):
     '''
     Upper helper function for parallelization of position weight optimization; processes weights by chunking
 
     Args:
         weights_array_chunks (list):            list of chunks as numpy arrays for feeding to process_weights_chunk
         specificity_matrix (SpecificityMatrix): the specificity matrix object
-        fit_mode (str):                         whether to use linear R2, f1-score, or both (as a mean of R2 * f1)
-        f1_side (str|None):                     can be "upper", "lower", or None (default; takes mean of the two)
+        fit_mode (str):                         name of value to maximize
+        side (str|None):                        can be "upper", "lower", or None (default; takes mean of the two)
 
     Returns:
         results (tuple):                        (best_weights, best_mean_f1)
@@ -87,15 +127,21 @@ def process_weights(weights_array_chunks, specificity_matrix, fit_mode = "both",
 
     # Calculate the initial value
     specificity_matrix.score_source_peptides(use_weighted=False)
-    specificity_matrix.set_specificity_statistics(use_weighted=False)
-    initial_f1 = specificity_matrix.unweighted_mean_f1
-    initial_r2 = specificity_matrix.unweighted_linear_r2
-    print(f"Initial unweighted f1-score={initial_f1} and linear R2={initial_r2}")
+    if fit_mode == "f1" or fit_mode == "R2":
+        specificity_matrix.set_specificity_statistics(use_weighted=False, assign_f1=True, assign_mcc=False)
+        initial_f1 = specificity_matrix.unweighted_mean_f1
+        initial_r2 = specificity_matrix.unweighted_linear_r2
+        print(f"Initial unweighted f1-score={initial_f1} and linear R2={initial_r2}")
+    else:
+        specificity_matrix.set_specificity_statistics(use_weighted=False, assign_f1=False, assign_mcc=True)
+        initial_mcc = specificity_matrix.unweighted_mean_mcc
+        initial_r2 = specificity_matrix.unweighted_linear_r2
+        print(f"Initial unweighted MCC={initial_mcc} and linear R2={initial_r2}")
 
     # Set up the parallel processing operation
     pool = multiprocessing.Pool()
     process_partial = partial(process_weights_chunk, specificity_matrix = specificity_matrix,
-                              fit_mode = fit_mode, f1_side = f1_side)
+                              fit_mode = fit_mode, side = side)
 
     best_maximizable_value = 0
     best_f1 = 0
@@ -105,19 +151,19 @@ def process_weights(weights_array_chunks, specificity_matrix, fit_mode = "both",
     with trange(len(weights_array_chunks), desc="Processing specificity matrix weights") as pbar:
         for chunk_results in pool.imap_unordered(process_partial, weights_array_chunks):
             if chunk_results[0] > best_maximizable_value:
-                best_maximizable_value, best_f1, best_r2, best_weights = chunk_results
+                best_maximizable_value, best_mcc, best_f1, best_r2, best_weights = chunk_results
                 formatted_weights = ", ".join(best_weights.round(2).astype(str))
-                print(f"\nNew record: f1={best_f1} and linear R2={best_r2}) for weights: [{formatted_weights}]")
+                print(f"\nNew record: {fit_mode}={best_maximizable_value} for weights: [{formatted_weights}]")
 
             pbar.update()
 
     pool.close()
     pool.join()
 
-    return (best_weights, best_f1, best_r2)
+    return (best_weights, best_mcc, best_f1, best_r2)
 
-def find_optimal_weights(specificity_matrix, motif_length, chunk_size = 1000, ignore_positions = None,
-                         fit_mode = "both", f1_side = None):
+def find_optimal_weights(specificity_matrix, motif_length, chunk_size = 5000, ignore_positions = None,
+                         fit_mode = "f1", f1_side = None):
     '''
     Parent function for finding optimal position weights to generate an optimally weighted specificity matrix
 
@@ -126,7 +172,7 @@ def find_optimal_weights(specificity_matrix, motif_length, chunk_size = 1000, ig
         motif_length (int):                     length of the motif being studied
         chunk_size (int):                       the number of position weights to process at a time
         ignore_positions (iterable):            positions to force to 0 for weights arrays
-        fit_mode (str):                         whether to use linear R2, f1-score, or both (as a mean of R2 * f1)
+        fit_mode (str):                         which value to maximize
         f1_side (str|None):                     can be "upper", "lower", or None (default; takes mean of the two)
 
     Returns:
@@ -134,7 +180,7 @@ def find_optimal_weights(specificity_matrix, motif_length, chunk_size = 1000, ig
     '''
 
     # Get the permuted weights and break into chunks for parallelization
-    sample_size = 1000000
+    sample_size = 100000
     value_range = (0.0, 4.0)
     trial_weights = np.random.uniform(value_range[0], value_range[1], size=(sample_size, motif_length))
     if ignore_positions is not None:
@@ -148,12 +194,15 @@ def find_optimal_weights(specificity_matrix, motif_length, chunk_size = 1000, ig
 
     # Run the parallelized optimization process
     results = process_weights(weights_array_chunks, specificity_matrix, fit_mode, f1_side)
-    best_weights, best_mean_f1, best_linear_r2 = results
+    best_weights, best_mcc, best_mean_f1, best_linear_r2 = results
 
     # Apply the final best weights onto the specificity matrix and score the source data
     specificity_matrix.apply_weights(best_weights)
     specificity_matrix.score_source_peptides(use_weighted = True)
-    specificity_matrix.set_specificity_statistics(use_weighted=True)
+    if fit_mode == "f1" or fit_mode == "R2":
+        specificity_matrix.set_specificity_statistics(use_weighted=True, assign_f1=True)
+    else:
+        specificity_matrix.set_specificity_statistics(use_weighted=True, assign_f1=False, assign_mcc=True)
 
     return specificity_matrix
 
@@ -212,23 +261,25 @@ def main(source_df, comparator_info = comparator_info, specificity_params = spec
         # Save the weighted results
         if save:
             weighted_upper_folder = os.path.join(output_folder, "weighted_upper")
+            if not os.path.exists(weighted_upper_folder):
+                os.makedirs(weighted_upper_folder)
             upper_specificity_matrix.save(weighted_upper_folder)
             upper_specificity_matrix.plot_regression(weighted_upper_folder, use_weighted=True)
 
             weighted_lower_folder = os.path.join(output_folder, "weighted_lower")
+            if not os.path.exists(weighted_lower_folder):
+                os.makedirs(weighted_lower_folder)
             lower_specificity_matrix.save(weighted_lower_folder)
             lower_specificity_matrix.plot_regression(weighted_lower_folder, use_weighted=True)
 
         # Save the weighted SpecificityMatrix objects for reloading when scoring novel motifs
+        if not os.path.exists(output_folder):
+            os.makedirs(output_folder)
         upper_path = os.path.join(output_folder, "weighted_upper_specificity_matrix.pkl")
-        if not os.path.exists(upper_path):
-            os.makedirs(upper_path)
         with open(upper_path, "wb") as f1:
             pickle.dump(upper_specificity_matrix, f1)
 
         lower_path = os.path.join(output_folder, "weighted_lower_specificity_matrix.pkl")
-        if not os.path.exists(lower_path):
-            os.makedirs(lower_path)
         with open(lower_path, "wb") as f2:
             pickle.dump(lower_specificity_matrix, f2)
 

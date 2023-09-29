@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import os
 from scipy.stats import ttest_ind
-from sklearn.metrics import precision_recall_curve, r2_score
+from sklearn.metrics import precision_recall_curve, r2_score, matthews_corrcoef
 from sklearn.linear_model import LinearRegression
 from general_utils.user_helper_functions import get_comparator_baits
 from general_utils.matrix_utils import collapse_phospho
@@ -13,6 +13,27 @@ try:
     from Matrix_Generator.config_local import *
 except:
     from Matrix_Generator.config import *
+
+def optimize_mcc(actual_truths, score_values):
+    # Helper function that finds the best MCC at the optimal threshold for numerical scores in a binary classification
+
+    valid_mask = np.logical_and(np.isfinite(actual_truths), np.isfinite(score_values))
+    valid_actual_truths = actual_truths[valid_mask]
+    valid_score_values = score_values[valid_mask]
+
+    sorted_indices = np.argsort(valid_score_values)[::-1]
+    sorted_scores = valid_score_values[sorted_indices]
+    sorted_classifications = valid_actual_truths[sorted_indices]
+
+    thresholds = (sorted_scores[:-1] + sorted_scores[1:]) / 2
+    predicted_labels = (sorted_scores >= thresholds[:, np.newaxis]).astype(int)
+    mcc_values = np.array([matthews_corrcoef(sorted_classifications, labels) for labels in predicted_labels])
+
+    best_index = np.argmax(mcc_values)
+    best_threshold = thresholds[best_index]
+    best_mcc = mcc_values[best_index]
+
+    return best_mcc, best_threshold
 
 def optimize_f1(actual_truths, score_values):
     # Helper function that optimizes f1-score using a precision-recall curve
@@ -204,10 +225,12 @@ class SpecificityMatrix:
         self.passing_seqs = self.source_sequences[self.passing_indices]
         self.passing_log2fc_values = self.least_different_values[self.passing_indices]
 
-        # Get points scaling values from adjusted max signals; higher signals = more confident log2fc values
+        # Get max signals for use in points scaling; higher signals = more confident log2fc values
         max_signals = self.max_signal_vals.copy()
-        max_signals[max_signals < 0] = 0
+        max_signals[max_signals < 0] = 0 # negative signal occurs when background is higher; interpret as zero signal
         passing_max_signals = max_signals[self.passing_indices]
+
+        # Generate scaling values from signals, constrained to a range of 0 to 1
         passing_scaling_values = passing_max_signals - passing_max_signals.min()
         passing_scaling_values = passing_scaling_values / passing_scaling_values.max()
 
@@ -215,6 +238,12 @@ class SpecificityMatrix:
         x0 = np.percentile(passing_scaling_values, 25)
         k = 5
         passing_scaling_values = 1 / (1 + np.exp(-k * (passing_scaling_values - x0)))
+
+        # Ensure that y=0 at x=0 and that y=1 at x=1
+        y_intercept = 1 / (1 + np.exp(k * x0))
+        passing_scaling_values = passing_scaling_values - y_intercept
+        y_x1 = (1 / (1 + np.exp(-k * (1 - x0)))) - y_intercept
+        passing_scaling_values = passing_scaling_values / y_x1
 
         # Filter log2fc values to not include small changes
         filtered_log2fc_values = self.passing_log2fc_values.copy()
@@ -311,8 +340,22 @@ class SpecificityMatrix:
             all_score_values[self.passing_indices] = self.passing_unweighted_scores
             self.scored_source_df["Unweighted_Specificity_Score"] = all_score_values
 
-    def set_specificity_statistics(self, use_weighted = True):
-        # Function to evaluate specificity score correlation with actual log2fc values that are observed
+    def set_specificity_statistics(self, use_weighted = True, assign_f1 = True, assign_mcc = False):
+        '''
+        Function to evaluate specificity score correlation with actual log2fc values that are observed
+
+        Args:
+            use_weighted (bool): whether to assess weighted or unweighted scores
+            assign_f1 (bool):    whether to set f1-score statistics; cannot be True if assign_mcc is True
+            assign_mcc (bool):   whether to set MCC statistics; cannot be True if assign_f1 is True
+
+        Returns:
+            None
+        '''
+
+        # Only one of assign_f1 or assign_mcc can be set to True
+        if assign_f1 and assign_mcc:
+            raise Exception("set_specificity_statistics error: only one of assign_f1 or assign_mcc can be set to True")
 
         # Get the valid score values and log2fc values
         valid_indices = np.where(np.isfinite(self.passing_log2fc_values))
@@ -322,34 +365,49 @@ class SpecificityMatrix:
             valid_score_values = self.passing_unweighted_scores[valid_indices]
         valid_log2fc_values = self.passing_log2fc_values[valid_indices]
 
-        # Find upper and lower f1-scores
+        # Apply thresholding to get binary classifications
         log2fc_above_upper = np.greater_equal(valid_log2fc_values, self.plus_threshold)
-        best_f1_upper, best_threshold_upper = optimize_f1(log2fc_above_upper, valid_score_values)
-
         log2fc_below_lower = np.less_equal(valid_log2fc_values, self.minus_threshold)
-        best_f1_lower, best_threshold_lower = optimize_f1(log2fc_below_lower, valid_score_values * -1)
-        best_threshold_lower = best_threshold_lower * -1 # corrected the inverted sign
-
         upper_lower_ratio = log2fc_above_upper.sum() / log2fc_below_lower.sum()
-        weighted_mean_f1 = (upper_lower_ratio * best_f1_lower + best_f1_upper) / (1 + upper_lower_ratio)
+
+        # Find upper and lower MCC values
+        if assign_mcc:
+            best_mcc_upper, best_thres_upper = optimize_mcc(log2fc_above_upper, valid_score_values)
+            best_mcc_lower, best_thres_lower = optimize_mcc(log2fc_below_lower, valid_score_values * -1)
+            best_thres_lower = best_thres_lower * -1 # corrected the inverted sign
+            weighted_mean_mcc = (best_mcc_lower + best_mcc_upper * upper_lower_ratio) / (1 + upper_lower_ratio)
+
+            if use_weighted:
+                self.weighted_mean_mcc = weighted_mean_mcc
+                self.weighted_upper_mcc, self.weighted_lower_mcc = best_mcc_upper, best_mcc_lower
+                self.weighted_upper_threshold, self.weighted_lower_threshold = best_thres_upper, best_thres_lower
+            else:
+                self.unweighted_mean_mcc = weighted_mean_mcc
+                self.unweighted_upper_mcc, self.unweighted_lower_mcc = best_mcc_upper, best_mcc_lower
+                self.unweighted_upper_threshold, self.unweighted_lower_threshold = best_thres_upper, best_thres_lower
+
+        # Find upper and lower f1-scores
+        if assign_f1:
+            best_f1_upper, best_thres_upper = optimize_f1(log2fc_above_upper, valid_score_values)
+            best_f1_lower, best_thres_lower = optimize_f1(log2fc_below_lower, valid_score_values * -1)
+            best_thres_lower = best_thres_lower * -1 # corrected the inverted sign
+            weighted_mean_f1 = (best_f1_lower + best_f1_upper * upper_lower_ratio) / (1 + upper_lower_ratio)
+
+            if use_weighted:
+                self.weighted_mean_f1 = weighted_mean_f1
+                self.weighted_upper_f1, self.weighted_lower_f1 = best_f1_upper, best_f1_lower
+                self.weighted_upper_threshold, self.weighted_lower_threshold = best_thres_upper, best_thres_lower
+            else:
+                self.unweighted_mean_f1 = weighted_mean_f1
+                self.unweighted_upper_f1, self.unweighted_lower_f1 = best_f1_upper, best_f1_lower
+                self.unweighted_upper_threshold, self.unweighted_lower_threshold = best_thres_upper, best_thres_lower
 
         # Also find R2 of a linear function relating log2fc to specificity score
         r2_value, linear_model = linear_regression(valid_score_values, valid_log2fc_values)
-
         if use_weighted:
-            self.weighted_mean_f1 = weighted_mean_f1
-            self.weighted_upper_f1, self.weighted_lower_f1 = best_f1_upper, best_f1_lower
-            self.weighted_upper_threshold = best_threshold_upper
-            self.weighted_lower_threshold = best_threshold_lower
-            self.weighted_linear_r2 = r2_value
-            self.weighted_linear_model = linear_model
+            self.weighted_linear_r2, self.weighted_linear_model = r2_value, linear_model
         else:
-            self.unweighted_mean_f1 = weighted_mean_f1
-            self.unweighted_upper_f1, self.unweighted_lower_f1 = best_f1_upper, best_f1_lower
-            self.unweighted_upper_threshold = best_threshold_upper
-            self.unweighted_lower_threshold = best_threshold_lower
-            self.unweighted_linear_r2 = r2_value
-            self.unweighted_linear_model = linear_model
+            self.unweighted_linear_r2, self.unweighted_linear_model = r2_value, linear_model
 
     def apply_weights(self, weights_array):
         # User-initiated function for applying matrix weights
