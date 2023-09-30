@@ -96,11 +96,11 @@ def main(image_params = image_params, general_params = general_params, data_para
 
     # Generate specificity matrix and associated results as a SpecificityMatrix object
     if generate_specificity_matrix:
-        specificity_matrix_results = make_specificity_matrix(scored_data_df, comparator_info, specificity_params,
-                                                             save = True)
-        return scored_data_df, specificity_matrix_results
+        specificity_results = make_specificity_matrix(scored_data_df, comparator_info, specificity_params, save = True)
+        scored_data_df, specificity_matrix, upper_specificity_matrix, lower_specificity_matrix = specificity_results
+        return (scored_data_df, specificity_matrix, upper_specificity_matrix, lower_specificity_matrix)
     else:
-        return scored_data_df
+        return (scored_data_df)
 
 
 # If the script is executed directly, invoke the main workflow

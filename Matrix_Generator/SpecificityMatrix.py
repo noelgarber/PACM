@@ -14,6 +14,46 @@ try:
 except:
     from Matrix_Generator.config import *
 
+def optimize_accuracy(actual_labels, score_values):
+    # Helper function that finds the best accuracy at the optimal score threshold
+
+    valid_mask = np.logical_and(np.isfinite(actual_labels), np.isfinite(score_values))
+    valid_actual_labels = actual_labels[valid_mask]
+    valid_score_values = score_values[valid_mask]
+
+    # Define possible thresholds
+    sorted_indices = np.argsort(valid_score_values)[::-1]
+    sorted_scores = valid_score_values[sorted_indices]
+    thresholds = (sorted_scores[:-1] + sorted_scores[1:]) / 2
+    thresholds = thresholds[thresholds > 0]
+
+    # Find optimal upper threshold that predicts positive log2fc
+    scores_above_thresholds = np.greater_equal(thresholds[:,np.newaxis], valid_score_values[np.newaxis,:])
+    actual_above_labels = np.equal(valid_actual_labels, 1)
+    above_matches = np.equal(scores_above_thresholds, actual_above_labels)
+    above_accuracies = above_matches.mean(axis=1)
+    best_above_idx = np.nanargmax(above_accuracies)
+    best_above_accuracy = above_accuracies[best_above_idx]
+    best_above_threshold = thresholds[best_above_idx]
+
+    # Find optimal lower threshold that predicts negative log2fc
+    scores_below_thresholds = np.less_equal(thresholds[:,np.newaxis], valid_score_values[np.newaxis,:])
+    actual_below_labels = np.equal(valid_actual_labels, 2)
+    below_matches = np.equal(scores_below_thresholds, actual_below_labels)
+    below_accuracies = below_matches.mean(axis=1)
+    best_below_idx = np.nanargmax(below_accuracies)
+    best_below_accuracy = below_accuracies[best_below_idx]
+    best_below_threshold = thresholds[best_below_idx]
+
+    # Make multiclass predictions in one array
+    valid_predicted_labels = np.zeros(shape=valid_actual_labels.shape)
+    valid_predicted_labels[valid_score_values >= best_above_threshold] = 1
+    valid_predicted_labels[valid_score_values <= best_below_threshold] = 2
+    valid_total_matches = np.equal(valid_predicted_labels, valid_actual_labels)
+    best_total_accuracy = valid_total_matches.mean()
+
+    return (best_total_accuracy, best_above_threshold, best_below_threshold)
+
 def optimize_mcc(actual_truths, score_values):
     # Helper function that finds the best MCC at the optimal threshold for numerical scores in a binary classification
 
@@ -284,7 +324,7 @@ class SpecificityMatrix:
                     result = ttest_ind(qualifying, other, equal_var=False)
                     pvalue = result.pvalue
 
-                    if pvalue <= 0.5:
+                    if pvalue <= 0.25:
                         matrix_df.at[aa, col_name] = qualifying_points_sum
                         continue
 
@@ -296,7 +336,7 @@ class SpecificityMatrix:
                     group_result = ttest_ind(group_qualifying, group_other, equal_var=False)
                     group_pvalue = group_result.pvalue
 
-                    if group_pvalue <= 0.5:
+                    if group_pvalue <= 0.25:
                         both_lesser = group_qualifying.mean() < group_other.mean() and qualifying.mean() < other.mean()
                         both_greater = group_qualifying.mean() > group_other.mean() and qualifying.mean() > other.mean()
                         if both_lesser or both_greater:
@@ -340,22 +380,19 @@ class SpecificityMatrix:
             all_score_values[self.passing_indices] = self.passing_unweighted_scores
             self.scored_source_df["Unweighted_Specificity_Score"] = all_score_values
 
-    def set_specificity_statistics(self, use_weighted = True, assign_f1 = True, assign_mcc = False):
+    def set_specificity_statistics(self, use_weighted = True, statistic_type = "mcc"):
         '''
         Function to evaluate specificity score correlation with actual log2fc values that are observed
 
         Args:
-            use_weighted (bool): whether to assess weighted or unweighted scores
-            assign_f1 (bool):    whether to set f1-score statistics; cannot be True if assign_mcc is True
-            assign_mcc (bool):   whether to set MCC statistics; cannot be True if assign_f1 is True
+            use_weighted (bool):  whether to assess weighted or unweighted scores
+            statistic_type (str): can either be "mcc", "f1", or "accuracy"
 
         Returns:
             None
         '''
 
-        # Only one of assign_f1 or assign_mcc can be set to True
-        if assign_f1 and assign_mcc:
-            raise Exception("set_specificity_statistics error: only one of assign_f1 or assign_mcc can be set to True")
+        self.statistic_type = statistic_type
 
         # Get the valid score values and log2fc values
         valid_indices = np.where(np.isfinite(self.passing_log2fc_values))
@@ -370,8 +407,23 @@ class SpecificityMatrix:
         log2fc_below_lower = np.less_equal(valid_log2fc_values, self.minus_threshold)
         upper_lower_ratio = log2fc_above_upper.sum() / log2fc_below_lower.sum()
 
-        # Find upper and lower MCC values
-        if assign_mcc:
+        # Generate the user-specified statistic
+        if statistic_type == "accuracy":
+            # Find optimal thresholds for accuracy
+            multiclass_labels = np.zeros(shape=log2fc_above_upper.shape)
+            multiclass_labels[log2fc_above_upper] = 1
+            multiclass_labels[log2fc_below_lower] = 2
+            best_accuracy, best_thres_upper, best_thres_lower = optimize_accuracy(multiclass_labels, valid_score_values)
+
+            if use_weighted:
+                self.weighted_upper_threshold, self.weighted_lower_threshold = best_thres_upper, best_thres_lower
+                self.weighted_accuracy = best_accuracy
+            else:
+                self.unweighted_upper_threshold, self.unweighted_lower_threshold = best_thres_upper, best_thres_lower
+                self.unweighted_accuracy = best_accuracy
+
+        elif statistic_type == "mcc":
+            # Find upper and lower MCC values
             best_mcc_upper, best_thres_upper = optimize_mcc(log2fc_above_upper, valid_score_values)
             best_mcc_lower, best_thres_lower = optimize_mcc(log2fc_below_lower, valid_score_values * -1)
             best_thres_lower = best_thres_lower * -1 # corrected the inverted sign
@@ -402,8 +454,8 @@ class SpecificityMatrix:
                 self.unweighted_upper_threshold, self.unweighted_lower_threshold = best_thres_upper, best_thres_lower
                 self.unweighted_accuracy = accuracy
 
-        # Find upper and lower f1-scores
-        elif assign_f1:
+        elif statistic_type == "f1":
+            # Find upper and lower f1-scores
             best_f1_upper, best_thres_upper = optimize_f1(log2fc_above_upper, valid_score_values)
             best_f1_lower, best_thres_lower = optimize_f1(log2fc_below_lower, valid_score_values * -1)
             best_thres_lower = best_thres_lower * -1 # corrected the inverted sign
@@ -449,12 +501,13 @@ class SpecificityMatrix:
                                                columns=self.matrix_df.columns)
         self.position_weights = weights_array
 
-    def save(self, output_folder, verbose = True):
+    def save(self, output_folder, save_df = True, verbose = True):
         # User-initiated function for saving the matrices, scored input data, and statistics to a defined output folder
 
-        specificity_scored_path = os.path.join(output_folder, "specificity_scored_data.csv")
-        self.scored_source_df.to_csv(specificity_scored_path)
-        print(f"Saved specificity-scored source data to {specificity_scored_path}") if verbose else None
+        if save_df:
+            specificity_scored_path = os.path.join(output_folder, "specificity_scored_data.csv")
+            self.scored_source_df.to_csv(specificity_scored_path)
+            print(f"Saved specificity-scored source data to {specificity_scored_path}") if verbose else None
 
         unweighted_matrix_path = os.path.join(output_folder, "unweighted_specificity_matrix.csv")
         self.matrix_df.to_csv(unweighted_matrix_path)
@@ -472,19 +525,52 @@ class SpecificityMatrix:
                         "---\n",
                         f"Motif length: {self.motif_length}\n\n",
                         f"---\n",
-                        f"Matthews correlation coefficients for upper and lower specificity score thresholds\n\n",
-                        f"Unweighted matrix: \n",
+                        f"Matthews correlation coefficients for upper and lower specificity score thresholds\n\n"]
+
+        if self.statistic_type == "accuracy":
+            accuracy_lines = [f"Unweighted matrix: \n",
+                              f"\tTotal accuracy: {self.unweighted_accuracy}\n",
+                              f"\tUpper threshold: scores ≥ {self.unweighted_upper_threshold}\n",
+                              f"\tLower threshold: scores ≤ {self.unweighted_lower_threshold}"]
+            output_lines.extend(accuracy_lines)
+        elif self.statistic_type == "mcc" or self.statistic_type == "MCC":
+            mcc_lines = [f"Unweighted matrix: \n",
+                         f"\tMerged MCC: {self.unweighted_mean_mcc}\n",
+                         f"\tUpper MCC: {self.unweighted_upper_mcc} for scores ≥ {self.unweighted_upper_threshold}\n",
+                         f"\tLower MCC: {self.unweighted_lower_mcc} for scores ≤ {self.unweighted_lower_threshold}"]
+            output_lines.extend(mcc_lines)
+        elif self.statistic_type == "f1":
+            f1_lines = [f"Unweighted matrix: \n",
                         f"\tMerged f1-score: {self.unweighted_mean_f1}\n",
                         f"\tUpper f1-score: {self.unweighted_upper_f1} for scores ≥ {self.unweighted_upper_threshold}\n",
                         f"\tLower f1-score: {self.unweighted_lower_f1} for scores ≤ {self.unweighted_lower_threshold}"]
+            output_lines.extend(f1_lines)
+
         try:
-            add_lines = ["\n\n",
-                         f"Weighted matrix: \n",
-                         f"\tSpecificity matrix weights: {self.position_weights}\n",
-                         f"\tMerged f1-score: {self.weighted_mean_f1}\n",
-                         f"\tUpper f1-score: {self.weighted_upper_f1} for scores ≥ {self.weighted_upper_threshold}\n",
-                         f"\tLower f1-score: {self.weighted_lower_f1} for scores ≤ {self.weighted_lower_threshold}"]
-            output_lines.extend(add_lines)
+            if self.statistic_type == "accuracy":
+                accuracy_lines = ["\n\n",
+                                  f"Weighted matrix: \n",
+                                  f"\tSpecificity matrix weights: {self.position_weights}\n",
+                                  f"\tTotal accuracy: {self.weighted_accuracy}\n",
+                                  f"\tUpper threshold: scores ≥ {self.weighted_upper_threshold}\n",
+                                  f"\tLower threshold: scores ≤ {self.weighted_lower_threshold}"]
+                output_lines.extend(accuracy_lines)
+            elif self.statistic_type == "mcc" or self.statistic_type == "MCC":
+                mcc_lines = ["\n\n",
+                             f"Weighted matrix: \n",
+                             f"\tSpecificity matrix weights: {self.position_weights}\n",
+                             f"\tMerged MCC: {self.weighted_mean_mcc}\n",
+                             f"\tUpper MCC: {self.weighted_upper_mcc} for scores ≥ {self.weighted_upper_threshold}\n",
+                             f"\tLower MCC: {self.weighted_lower_mcc} for scores ≤ {self.weighted_lower_threshold}"]
+                output_lines.extend(mcc_lines)
+            elif self.statistic_type == "f1":
+                f1_lines = ["\n\n",
+                            f"Weighted matrix: \n",
+                            f"\tSpecificity matrix weights: {self.position_weights}\n",
+                            f"\tMerged f1-score: {self.weighted_mean_f1}\n",
+                            f"\tUpper f1-score: {self.weighted_upper_f1} for scores ≥ {self.weighted_upper_threshold}\n",
+                            f"\tLower f1-score: {self.weighted_lower_f1} for scores ≤ {self.weighted_lower_threshold}"]
+                output_lines.extend(f1_lines)
         except AttributeError:
             pass
 
