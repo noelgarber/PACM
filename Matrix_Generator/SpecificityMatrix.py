@@ -156,7 +156,10 @@ class SpecificityMatrix:
         self.include_phospho = specificity_params.get("include_phospho")
 
         # Generate the unweighted specificity matrix, calculate unweighted scores, and generate statistics
-        self.make_specificity_matrix(standardize = specificity_params["standardize_matrix"])
+        control_peptide_index = specificity_params["control_peptide_index"]
+        control_peptide_threshold = specificity_params["control_peptide_threshold"]
+        standardize = specificity_params["standardize_matrix"]
+        self.make_specificity_matrix(control_peptide_index, control_peptide_threshold, max_bait_mean_col, standardize)
         self.score_source_peptides(use_weighted = False)
         self.plus_threshold, self.minus_threshold = specificity_params["plus_threshold"], specificity_params["minus_threshold"]
         self.set_specificity_statistics(use_weighted = False)
@@ -249,21 +252,17 @@ class SpecificityMatrix:
 
         return matrix_df
 
-    def make_specificity_matrix(self, standardize = False):
+    def get_scaling_values(self, inflection_percentile, sigmoid_steepness):
         '''
-        Function for generating a position-weighted matrix by assigning points based on seqs and their log2fc values
+        Helper function for make_specificity_matrix, used in points calculation
 
         Args:
-            standardize (bool): whether to standardize the matrix to the max values in each column
+            inflection_percentile (int|float):   percentile of relative signal values to use as the sigmoid inflection
+            sigmoid_steepness (int|float):       k-value of the sigmoid function
 
         Returns:
-            None
+            passing_scaling_values (np.ndarray): array of scaling values from 0-1 as floats
         '''
-
-        # Extract the significant sequences and log2fc values as numpy arrays
-        self.passing_indices = np.where(self.significance_array)[0]
-        self.passing_seqs = self.source_sequences[self.passing_indices]
-        self.passing_log2fc_values = self.least_different_values[self.passing_indices]
 
         # Get max signals for use in points scaling; higher signals = more confident log2fc values
         max_signals = self.max_signal_vals.copy()
@@ -275,8 +274,8 @@ class SpecificityMatrix:
         passing_scaling_values = passing_scaling_values / passing_scaling_values.max()
 
         # Adjust scaling values according to a sigmoid function with inflection at the 25th percentile
-        x0 = np.percentile(passing_scaling_values, 25)
-        k = 5
+        x0 = np.percentile(passing_scaling_values, inflection_percentile)
+        k = sigmoid_steepness
         passing_scaling_values = 1 / (1 + np.exp(-k * (passing_scaling_values - x0)))
 
         # Ensure that y=0 at x=0 and that y=1 at x=1
@@ -285,12 +284,35 @@ class SpecificityMatrix:
         y_x1 = (1 / (1 + np.exp(-k * (1 - x0)))) - y_intercept
         passing_scaling_values = passing_scaling_values / y_x1
 
-        # Filter log2fc values to not include small changes
-        filtered_log2fc_values = self.passing_log2fc_values.copy()
-        filtered_log2fc_values[np.abs(filtered_log2fc_values) < 0.5] = 0
+        return passing_scaling_values
+
+    def make_specificity_matrix(self, control_peptide_idx, control_peptide_threshold, signal_col, standardize = False):
+        '''
+        Function for generating a position-weighted matrix by assigning points based on seqs and their log2fc values
+
+        Args:
+            control_peptide_idx (int):              positive control peptide row index as an integer
+            control_peptide_threshold (int|float):  percent threshold of positive control that a peptide must pass to
+                                                    be able to contribute to specificity matrix-building
+            standardize (bool):                     whether to standardize the matrix to the max values in each column
+
+        Returns:
+            None
+        '''
+
+        # To contribute to matrix-building, a peptide must be above a defined percentage of the positive control
+        control_peptide_signal = self.scored_source_df[signal_col].values[control_peptide_idx]
+        contribution_threshold = control_peptide_threshold * control_peptide_signal
+
+        # Extract the significant sequences and log2fc values as numpy arrays
+        passes_threshold = np.greater_equal(self.scored_source_df[signal_col].to_numpy(), contribution_threshold)
+        self.passing_indices = np.where(np.logical_and(self.significance_array, passes_threshold))[0]
+        self.passing_seqs = self.source_sequences[self.passing_indices]
+        self.passing_log2fc_values = self.least_different_values[self.passing_indices]
 
         # Calculate final points to assign based on scaling values and proportions
-        passing_points_values = filtered_log2fc_values * passing_scaling_values
+        passing_scaling_values = self.get_scaling_values(inflection_percentile = 25, sigmoid_steepness = 5)
+        passing_points_values = self.passing_log2fc_values * passing_scaling_values
 
         # Check that all the sequences are the same length
         positive_seq_lengths = np.char.str_len(self.passing_seqs.astype(str))
@@ -313,19 +335,18 @@ class SpecificityMatrix:
             col_unique_residues = np.unique(col_slice)
 
             for aa in col_unique_residues:
-                qualifying_points = passing_points_values[col_slice == aa]
-                qualifying_points_sum = np.sum(qualifying_points[np.isfinite(qualifying_points)])
+                aa_log2fc_values = self.passing_log2fc_values[col_slice == aa]
+                aa_points = np.mean(aa_log2fc_values[np.isfinite(aa_log2fc_values)])
 
-                if not np.all(~np.isfinite(qualifying_points)):
-                    qualifying = self.passing_log2fc_values[col_slice == aa]
-                    qualifying = qualifying[np.isfinite(qualifying)]
+                if not np.all(~np.isfinite(aa_log2fc_values)):
+                    qualifying = aa_log2fc_values[np.isfinite(aa_log2fc_values)]
                     other = self.passing_log2fc_values[col_slice != aa]
                     other = other[np.isfinite(other)]
                     result = ttest_ind(qualifying, other, equal_var=False)
                     pvalue = result.pvalue
 
-                    if pvalue <= 0.25:
-                        matrix_df.at[aa, col_name] = qualifying_points_sum
+                    if pvalue < 0.2:
+                        matrix_df.at[aa, col_name] = aa_points
                         continue
 
                     equivalent_residues = aa_equivalence_dict[aa]
@@ -336,11 +357,11 @@ class SpecificityMatrix:
                     group_result = ttest_ind(group_qualifying, group_other, equal_var=False)
                     group_pvalue = group_result.pvalue
 
-                    if group_pvalue <= 0.25:
+                    if group_pvalue < 0.2:
                         both_lesser = group_qualifying.mean() < group_other.mean() and qualifying.mean() < other.mean()
                         both_greater = group_qualifying.mean() > group_other.mean() and qualifying.mean() > other.mean()
                         if both_lesser or both_greater:
-                            matrix_df.at[aa, col_name] = qualifying_points_sum
+                            matrix_df.at[aa, col_name] = aa_points
 
         # Add missing amino acid rows if necessary and reorder matrix_df by aa_list
         matrix_df = self.reorder_matrix(matrix_df)
