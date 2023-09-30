@@ -242,7 +242,7 @@ def find_optimal_weights(specificity_matrix, motif_length, chunk_size = 5000, ig
                                       Define main functions and default parameters
    ------------------------------------------------------------------------------------------------------------------'''
 
-def main(source_df, comparator_info = comparator_info, specificity_params = specificity_params, save = True):
+def main(source_df, comparator_info = comparator_info, specificity_params = specificity_params, save=True, plot=False):
     '''
     Main function for generating and assessing optimal specificity position-weighted matrices
 
@@ -251,6 +251,7 @@ def main(source_df, comparator_info = comparator_info, specificity_params = spec
         comparator_info (dict):    dict of info about comparators and data locations as described in config.py
         specificity_params (dict): dict of specificity matrix generation parameters as described in config.py
         save (bool):               whether to automatically save the results
+        plot (bool):               whether to plot a sigmoid regression of log2fc (x) and scores (y)
 
     Returns:
         results (tuple):           results[0] --> output_df
@@ -268,7 +269,7 @@ def main(source_df, comparator_info = comparator_info, specificity_params = spec
     if save:
         save_df = not optimize_weights
         specificity_matrix.save(output_folder, save_df)
-        specificity_matrix.plot_regression(output_folder, use_weighted=False)
+        specificity_matrix.plot_regression(output_folder, use_weighted=False) if plot else None
 
     # Save the unweighted SpecificityMatrix object
     specificity_matrix_path = os.path.join(output_folder, "specificity_matrix.pkl")
@@ -299,13 +300,13 @@ def main(source_df, comparator_info = comparator_info, specificity_params = spec
             if not os.path.exists(weighted_upper_folder):
                 os.makedirs(weighted_upper_folder)
             upper_specificity_matrix.save(weighted_upper_folder, save_df=False)
-            upper_specificity_matrix.plot_regression(weighted_upper_folder, use_weighted=True)
+            upper_specificity_matrix.plot_regression(weighted_upper_folder, use_weighted=True) if plot else None
 
             weighted_lower_folder = os.path.join(output_folder, "weighted_lower")
             if not os.path.exists(weighted_lower_folder):
                 os.makedirs(weighted_lower_folder)
             lower_specificity_matrix.save(weighted_lower_folder, save_df=False)
-            lower_specificity_matrix.plot_regression(weighted_lower_folder, use_weighted=True)
+            lower_specificity_matrix.plot_regression(weighted_lower_folder, use_weighted=True) if plot else None
 
             # Save merged scored dataframe of upper and lower matrices
             output_df = upper_specificity_matrix.scored_source_df.copy()
