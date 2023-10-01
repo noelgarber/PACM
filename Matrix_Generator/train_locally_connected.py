@@ -7,7 +7,27 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import matthews_corrcoef, precision_score, recall_score, accuracy_score
 from general_utils.aa_encoder import encode_seqs_2d
 
-def train_model(sequences_2d, actual_truths, graph_loss = True, save_path = None):
+def collapse_regions(feature_matrix, collapse_indices):
+    # Helper function that selectively sums parts of the feature matrix
+
+    positions = feature_matrix.shape[1]
+
+    for indices in collapse_indices:
+        start_index, end_index = indices
+        collapse_region = feature_matrix[:, start_index:end_index + 1, :]
+        summed_collapsed_region = collapse_region.mean(axis=1, keepdims=True)
+
+        regions_list = []
+        regions_list.append(feature_matrix[:, 0:start_index, :]) if start_index > 0 else None
+        regions_list.append(summed_collapsed_region)
+        regions_list.append(feature_matrix[:, end_index + 1:, :]) if end_index < positions - 1 else None
+
+        feature_matrix = np.concatenate(regions_list, axis=1)
+
+    return feature_matrix
+
+def train_model(sequences_2d, actual_truths, graph_loss = True, save_path = None,
+                collapse_indices = None, remove_indices = None, verbose = True):
     '''
     Function that trains a simple dense neural network based on scoring information and actual truth values
 
@@ -16,6 +36,8 @@ def train_model(sequences_2d, actual_truths, graph_loss = True, save_path = None
         actual_truths (np.ndarray):         array of bools representing experimentally observed classifications
         graph_loss (bool):                  whether to graph the loss function decay
         save_path (str):                    if given, the model will be saved to this folder
+        collapse_indices (None|list):       list of tuples of (start_index, end_index) for regions of the motif to merge
+        remove_indices (None|list):         list of indices to drop (manually marked unimportant)
 
     Returns:
         model (tf.keras.models.Sequential): the trained model
@@ -23,18 +45,37 @@ def train_model(sequences_2d, actual_truths, graph_loss = True, save_path = None
         complete_predictions (np.ndarray):  array of back-calculated prediction probabilities for the input data
     '''
 
-    # Encode the sequences in terms of numerical descriptors, such as charge, hydrophobicity, etc.
-    feature_matrix, characteristic_count = encode_seqs_2d(sequences_2d, scaling=True)
+    # Seqs are encoded in terms of chemical characteristics described numerically, e.g. charge, weight, rings, etc.
+    feature_matrix, characteristic_count = encode_seqs_2d(sequences_2d, scaling=True, output_dims=3)
+    feature_matrix = np.transpose(feature_matrix, axes=(0,2,1)) # final shape = (samples, positions, channels)
+    print(f"feature_matrix shape = {feature_matrix.shape}") if verbose else None
+    print("----------------------------")
 
-    # Reshape the feature matrix to work with LocallyConnected1D
-    sample_count = feature_matrix.shape[0]
-    feature_count = feature_matrix.shape[1]
-    position_count = int(feature_count / characteristic_count)
-    feature_matrix = feature_matrix.reshape(sample_count, characteristic_count, position_count)
+    # If specified, collapse and/or remove defined positions
+    if collapse_indices is not None:
+        if verbose:
+            print(f"Collapsing defined regions: ") if verbose else None
+            for start, end in collapse_indices:
+                print(f"{start}-{end}")
+        feature_matrix = collapse_regions(feature_matrix, collapse_indices)
+        print(f"New feature_matrix shape = {feature_matrix.shape}",
+              f"\n----------------------------") if verbose else None
+
+    if remove_indices is not None:
+        print(f"Removing defined post-collapse indices ({remove_indices})...") if verbose else None
+        feature_matrix = np.delete(feature_matrix, remove_indices, axis=1)
+        print(f"New feature_matrix shape = {feature_matrix.shape}",
+              f"\n----------------------------") if verbose else None
 
     # Split the data and enforce consistent proportions of actual_truths with 'stratify'
-    X_train, X_test, y_train, y_test = train_test_split(feature_matrix, actual_truths, test_size=0.3, random_state=42,
-                                                        stratify=actual_truths)
+    positions = feature_matrix.shape[1]
+    channels = characteristic_count
+    X_train, X_test, y_train, y_test = train_test_split(feature_matrix, actual_truths, test_size=0.3,
+                                                        random_state=42, stratify=actual_truths)
+
+    print("X_train: ")
+    print(X_train)
+    print("----------------------------")
 
     '''
     Model architecture setup; note that: 
@@ -45,33 +86,38 @@ def train_model(sequences_2d, actual_truths, graph_loss = True, save_path = None
         - This tensor is flattened and passed to a Dense layer, which is then passed to another Dense layer
         - The final layer is a Dense layer with 1 unit and a sigmoid activation for binary classification
     '''
-    lc_kernel_size = 2
-    lc_strides = 1
-    dropout_rate = 0.3
 
-    model = tf.keras.models.Sequential([
-        tf.keras.layers.LocallyConnected1D(filters=8, kernel_size=lc_kernel_size, strides=lc_strides,
-                                           input_shape=(characteristic_count, position_count)),
-        tf.keras.layers.Dropout(dropout_rate),
-        tf.keras.layers.LocallyConnected1D(filters=4, kernel_size=lc_kernel_size, strides=lc_strides),
-        tf.keras.layers.Dropout(dropout_rate),
-        tf.keras.layers.Flatten(),
-        tf.keras.layers.PReLU(),
-        tf.keras.layers.Dropout(dropout_rate),
-        tf.keras.layers.Dense(1, activation="sigmoid")
-    ])
+    # Initialize the model
+    model = tf.keras.models.Sequential()
+
+    # The 1st layer is a LocallyConnected1D layer that treats sequence positions as the temporal dimension to slide over
+    frame_width = 2
+    model.add(tf.keras.layers.LocallyConnected1D(filters=16, kernel_size=frame_width, strides=1, activation="tanh",
+                                                 input_shape=(positions, channels)))
+    model.add(tf.keras.layers.Dropout(0.4))
+
+    # The 2nd layer is a fully connected layer receiving flattened input from the previous layer
+    model.add(tf.keras.layers.Flatten())
+    model.add(tf.keras.layers.Dense(12, activation="tanh"))
+    model.add(tf.keras.layers.Dropout(0.4))
+
+    # The 3rd layer is a smaller fully connected layer
+    model.add(tf.keras.layers.Dense(6, activation="tanh"))
+    model.add(tf.keras.layers.Dropout(0.4))
+
+    # Use a final single-unit dense layer to output a binary-interpretable categorization value
+    model.add(tf.keras.layers.Dense(1, activation="sigmoid"))
 
     # Define the optimizer and compile the model
-    optimizer = tf.keras.optimizers.Adam(learning_rate=0.0001)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=0.0002)
     model.compile(optimizer=optimizer, loss="binary_crossentropy", metrics=["accuracy"])
     print("------------------------------------------------------")
-    print("Compiled locally connected neural network architecture: ")
+    print("Compiled LCNN architecture: ")
     model.summary()
 
     # Train the model
-    tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir='logs')
     print(f"Fitting the model to chemical characteristic feature matrix")
-    history = model.fit(X_train, y_train, epochs=1000, validation_data=(X_test,y_test), callbacks=[tensorboard_callback])
+    history = model.fit(X_train, y_train, epochs=300, validation_data=(X_test,y_test))
 
     # Display the loss and accuracy curves
     if graph_loss:
@@ -100,7 +146,7 @@ def train_model(sequences_2d, actual_truths, graph_loss = True, save_path = None
 
     # Save the model
     if save_path is not None:
-        file_path = os.path.join(save_path, "interpret_scores_nn.h5")
+        file_path = os.path.join(save_path, "lcnn.h5")
         model.save(file_path)
 
     # Get binary predictions from the trained model
