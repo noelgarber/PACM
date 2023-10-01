@@ -22,9 +22,9 @@ def optimize_accuracy(actual_labels, score_values):
     valid_score_values = score_values[valid_mask]
 
     # Define possible thresholds
-    sorted_indices = np.argsort(valid_score_values)[::-1]
-    sorted_scores = valid_score_values[sorted_indices]
-    thresholds = (sorted_scores[:-1] + sorted_scores[1:]) / 2
+    sorted_scores = valid_score_values.copy()
+    sorted_scores.sort()
+    thresholds = (sorted_scores[1:-2] + sorted_scores[2:-1]) / 2
     thresholds = thresholds[thresholds > 0]
 
     # Find optimal upper threshold that predicts positive log2fc
@@ -127,7 +127,8 @@ class SpecificityMatrix:
     Specificity matrix class for unweighted and weighted matrices that predict bait selectivity over a peptide motif
     '''
 
-    def __init__(self, source_df, comparator_info = comparator_info, specificity_params = specificity_params):
+    def __init__(self, source_df, standardize, comparator_info = comparator_info,
+                 specificity_params = specificity_params):
         '''
         Main function for generating and assessing optimal specificity position-weighted matrices
 
@@ -159,7 +160,6 @@ class SpecificityMatrix:
         control_idx = specificity_params["control_peptide_index"]
         control_threshold = specificity_params["control_peptide_threshold"]
         matrix_alpha = specificity_params["matrix_alpha"]
-        standardize = specificity_params["standardize_matrix"]
         self.make_specificity_matrix(control_idx, control_threshold, max_bait_mean_col, matrix_alpha, standardize)
         self.score_source_peptides(use_weighted = False)
         self.plus_threshold, self.minus_threshold = specificity_params["plus_threshold"], specificity_params["minus_threshold"]
@@ -287,6 +287,18 @@ class SpecificityMatrix:
 
         return passing_scaling_values
 
+    def standardize_matrix(self, standardize = True):
+        # Standardize matrix by max column values
+
+        if standardize:
+            max_values = np.max(np.abs(self.matrix_df.values), axis=0)
+            max_values[max_values == 0] = 1  # avoid divide-by-zero
+            self.matrix_df = self.matrix_df / max_values
+            self.standardized = True
+
+        else:
+            self.standardized = False
+
     def make_specificity_matrix(self, control_peptide_idx, control_peptide_threshold, signal_col,
                                 alpha = 0.2, standardize = False):
         '''
@@ -369,18 +381,8 @@ class SpecificityMatrix:
                             matrix_df.at[aa, col_name] = aa_points
 
         # Add missing amino acid rows if necessary and reorder matrix_df by aa_list
-        matrix_df = self.reorder_matrix(matrix_df)
-
-        # Standardize matrix by max column values
-        if standardize:
-            max_values = np.max(np.abs(matrix_df.values), axis=0)
-            max_values[max_values == 0] = 1 # avoid divide-by-zero
-            matrix_df = matrix_df / max_values
-            self.standardized = True
-        else:
-            self.standardized = False
-
-        self.matrix_df = matrix_df
+        self.matrix_df = self.reorder_matrix(matrix_df)
+        self.standardize_matrix(standardize)
 
     def score_source_peptides(self, use_weighted = True):
         # Function to back-calculate specificity scores on peptide sequences based on the generated specificity matrix

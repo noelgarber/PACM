@@ -261,7 +261,8 @@ def main(source_df, comparator_info = comparator_info, specificity_params = spec
     '''
 
     # Construct the specificity matrix from source data
-    specificity_matrix = SpecificityMatrix(source_df, comparator_info, specificity_params)
+    specificity_matrix = SpecificityMatrix(source_df, standardize = False, comparator_info = comparator_info,
+                                           specificity_params = specificity_params)
     optimize_weights = specificity_params.get("optimize_weights")
 
     # Save the unweighted results
@@ -283,6 +284,9 @@ def main(source_df, comparator_info = comparator_info, specificity_params = spec
         chunk_size = specificity_params["chunk_size"]
         ignore_positions = specificity_params["ignore_positions"]
         fit_mode = specificity_params["fit_mode"]
+
+        # Standardize specificity matrix prior to applying weights
+        specificity_matrix.standardize_matrix(standardize = True)
 
         print(f"---\nOptimizing specificity matrix weights for positive log2fc values: ")
         upper_specificity_matrix = deepcopy(specificity_matrix)
