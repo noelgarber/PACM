@@ -156,10 +156,11 @@ class SpecificityMatrix:
         self.include_phospho = specificity_params.get("include_phospho")
 
         # Generate the unweighted specificity matrix, calculate unweighted scores, and generate statistics
-        control_peptide_index = specificity_params["control_peptide_index"]
-        control_peptide_threshold = specificity_params["control_peptide_threshold"]
+        control_idx = specificity_params["control_peptide_index"]
+        control_threshold = specificity_params["control_peptide_threshold"]
+        matrix_alpha = specificity_params["matrix_alpha"]
         standardize = specificity_params["standardize_matrix"]
-        self.make_specificity_matrix(control_peptide_index, control_peptide_threshold, max_bait_mean_col, standardize)
+        self.make_specificity_matrix(control_idx, control_threshold, max_bait_mean_col, matrix_alpha, standardize)
         self.score_source_peptides(use_weighted = False)
         self.plus_threshold, self.minus_threshold = specificity_params["plus_threshold"], specificity_params["minus_threshold"]
         self.set_specificity_statistics(use_weighted = False)
@@ -286,7 +287,8 @@ class SpecificityMatrix:
 
         return passing_scaling_values
 
-    def make_specificity_matrix(self, control_peptide_idx, control_peptide_threshold, signal_col, standardize = False):
+    def make_specificity_matrix(self, control_peptide_idx, control_peptide_threshold, signal_col,
+                                alpha = 0.2, standardize = False):
         '''
         Function for generating a position-weighted matrix by assigning points based on seqs and their log2fc values
 
@@ -294,6 +296,9 @@ class SpecificityMatrix:
             control_peptide_idx (int):              positive control peptide row index as an integer
             control_peptide_threshold (int|float):  percent threshold of positive control that a peptide must pass to
                                                     be able to contribute to specificity matrix-building
+            signal_col (str):                       signal column to use for thresholding; low-level peptides are not
+                                                    used for matrix-building
+            alpha (float):                          p-value threshold for adding a value to the matrix
             standardize (bool):                     whether to standardize the matrix to the max values in each column
 
         Returns:
@@ -345,7 +350,7 @@ class SpecificityMatrix:
                     result = ttest_ind(qualifying, other, equal_var=False)
                     pvalue = result.pvalue
 
-                    if pvalue < 0.2:
+                    if pvalue < alpha:
                         matrix_df.at[aa, col_name] = aa_points
                         continue
 
@@ -357,7 +362,7 @@ class SpecificityMatrix:
                     group_result = ttest_ind(group_qualifying, group_other, equal_var=False)
                     group_pvalue = group_result.pvalue
 
-                    if group_pvalue < 0.2:
+                    if group_pvalue < alpha:
                         both_lesser = group_qualifying.mean() < group_other.mean() and qualifying.mean() < other.mean()
                         both_greater = group_qualifying.mean() > group_other.mean() and qualifying.mean() > other.mean()
                         if both_lesser or both_greater:
