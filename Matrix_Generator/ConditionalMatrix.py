@@ -5,17 +5,18 @@ import pandas as pd
 import os
 import warnings
 import multiprocessing
+from copy import deepcopy
 from tqdm import trange
 from functools import partial
-from scipy.stats import barnard_exact, ttest_ind
+from scipy.stats import barnard_exact, ttest_ind, ks_2samp
 from general_utils.general_utils import unravel_seqs, check_seq_lengths
 from general_utils.matrix_utils import make_empty_matrix, collapse_phospho
 from general_utils.user_helper_functions import get_thresholds
 from Matrix_Generator.ScoredPeptideResult import ScoredPeptideResult
 try:
-    from Matrix_Generator.config_local import data_params, matrix_params, aa_equivalence_dict
+    from Matrix_Generator.config_local import data_params, matrix_params, aa_equivalence_dict, amino_acids_phos
 except:
-    from Matrix_Generator.config import data_params, matrix_params, aa_equivalence_dict
+    from Matrix_Generator.config import data_params, matrix_params, aa_equivalence_dict, amino_acids_phos
 
 def barnard_disfavoured(test_aa, aa_col_passing, aa_col_failing, equivalent_residues = None):
     '''
@@ -289,6 +290,96 @@ class ConditionalMatrix:
             collapse_phospho(self.suboptimal_elements_matrix, in_place=True)
             collapse_phospho(self.forbidden_elements_matrix, in_place=True)
 
+    def copy_matrix_col(self, col_idx):
+        # User-initiated function for copying a specific column from each sub-matrix
+
+        positive_matrix_col = self.positive_matrix.values[:,col_idx]
+        suboptimal_matrix_col = self.suboptimal_elements_matrix.values[:,col_idx]
+        forbidden_matrix_col = self.forbidden_elements_matrix.values[:,col_idx]
+
+        return (positive_matrix_col, suboptimal_matrix_col, forbidden_matrix_col)
+
+    def substitute_matrix_col(self, col_idx, substituted_positive_col, substituted_suboptimal_col,
+                              substituted_forbidden_col, substitution_bools = (True, True, True)):
+        # User-initiated function for substituting a specific column into each sub-matrix
+
+        col = self.positive_matrix.columns[col_idx]
+        if substitution_bools[0]:
+            self.positive_matrix[col] = substituted_positive_col
+        if substitution_bools[1]:
+            self.suboptimal_elements_matrix[col] = substituted_suboptimal_col
+        if substitution_bools[2]:
+            self.forbidden_elements_matrix[col] = substituted_forbidden_col
+
+# --------------------------------------------------------------------------------------------------------------------
+
+def test_substitute(motif_length, baseline_matrix, test_matrix, alpha = 0.5):
+    '''
+    This is a function that statistically tests whether the values in cols of a test matrix differ from baseline;
+    if not, baseline values are substituted into the test matrix
+
+    Args:
+        motif_length (int):                  motif length referring to the matrices
+        baseline_matrix (ConditionalMatrix): baseline matrix trained on all data
+        test_matrix (ConditionalMatrix):     conditional matrix trained on a subset of the data
+        alpha (float):                       Kolmogorov-Smirnov threshold; if pvalue > alpha, col is substituted
+
+    Returns:
+        substitution_report (list):          report, as a list of text lines, informing on screening results;
+                                             note that substitutions are performed in-place on test_matrix
+    '''
+
+    test_filter_position, test_included_residues = test_matrix.rule
+    rule_str = f"#{test_filter_position}=[" + ",".join(test_included_residues) + "]"
+    substitution_report = [f"{rule_str} Substantially Conditional Positions\n"]
+
+    col_indices = np.arange(motif_length)
+    for i in col_indices:
+        # Extract comparator columns as numpy arrays
+        baseline_cols = baseline_matrix.copy_matrix_col(i)
+        test_cols = test_matrix.copy_matrix_col(i)
+
+        # Use the Kolmogorov-Smirnov test to find the likelihood that two arrays are drawn from the same distribution
+        p_values = []
+        for baseline_col, test_col in zip(baseline_cols, test_cols):
+            baseline_col = baseline_col / baseline_col.sum() if baseline_col.sum() > 0 else baseline_col
+            test_col = test_col / test_col.sum() if test_col.sum() > 0 else test_col
+            statistic, pvalue = ks_2samp(baseline_col, test_col)
+            p_values.append(pvalue)
+
+        p_values = np.array(p_values)
+
+        # Substitute baseline cols into test matrix if pvalue is above threshold, since baseline is usually less noisy
+        baseline_positive_col, baseline_suboptimal_col, baseline_forbidden_col = baseline_cols
+        substitution_bools = np.greater_equal(p_values, alpha)
+        test_matrix.substitute_matrix_col(i, baseline_positive_col, baseline_suboptimal_col,
+                                          baseline_forbidden_col, substitution_bools)
+
+        # Add outcomes to the report
+        if not substitution_bools[0]:
+            line = f"\t#{i} @ positive matrix --> conditional (p = {p_values[0]})\n"
+            substitution_report.append(line)
+        else:
+            line = f"\t#{i} @ positive matrix --> substituted from non-conditional matrix (p = {p_values[0]})\n"
+            substitution_report.append(line)
+
+        if not substitution_bools[1]:
+            line = f"\t#{i} @ suboptimal matrix --> conditional (p = {p_values[0]})\n"
+            substitution_report.append(line)
+        else:
+            line = f"\t#{i} @ suboptimal matrix --> substituted from non-conditional matrix (p = {p_values[0]})\n"
+            substitution_report.append(line)
+
+        if not substitution_bools[2]:
+            line = f"\t#{i} @ forbidden matrix --> conditional (p = {p_values[0]})\n"
+            substitution_report.append(line)
+        else:
+            line = f"\t#{i} @ forbidden matrix --> substituted from non-conditional matrix (p = {p_values[0]})\n"
+            substitution_report.append(line)
+
+    return substitution_report
+
+
 # --------------------------------------------------------------------------------------------------------------------
 
 class ConditionalMatrices:
@@ -316,6 +407,9 @@ class ConditionalMatrices:
                 matrix_params["thresholds_points_dict"] = get_thresholds(percentiles_dict, use_percentiles = True,
                                                                          show_guidance = True)
 
+        # Generate a baseline non-conditional matrix for statistical comparisons
+        self.generate_baseline_matrix(motif_length, source_df, data_params, matrix_params)
+
         # Declare dict where keys are position-type rules (e.g. "#1=Acidic") and values are corresponding weighted matrices
         self.conditional_matrix_dict = {}
 
@@ -335,9 +429,22 @@ class ConditionalMatrices:
 
         rule_tuples = self.get_rule_tuples(residue_charac_dict, motif_length)
         results_list = self.generate_matrices(rule_tuples, motif_length, source_df, data_params, matrix_params)
+        use_kolmogorov_smirnov = matrix_params["use_kolmogorov_smirnov"]
+        self.substitution_reports = {}
+        substitution_report = ["---"]
+
         for results in results_list:
             conditional_matrix, dict_key_name, report_line = results
+
+            # Perform substitutions as necessary, then assign to dict
+            if use_kolmogorov_smirnov:
+                ks_alpha = matrix_params["kolmogorov_smirnov_alpha"]
+                current_report = test_substitute(motif_length, self.baseline_matrix, conditional_matrix, ks_alpha)
+                substitution_report.extend(current_report)
+                substitution_report.append("---")
+
             self.conditional_matrix_dict[dict_key_name] = conditional_matrix
+            self.substitution_reports[dict_key_name] = substitution_report
 
             # Assign the constituent matrices to lists for 3D stacking
             positive_matrices_list.append(conditional_matrix.positive_matrix.to_numpy())
@@ -388,6 +495,18 @@ class ConditionalMatrices:
                 rule_tuples.append(rule_tuple)
 
         return rule_tuples
+
+    def generate_baseline_matrix(self, motif_length, source_df, data_params, matrix_params,
+                                 amino_acids = amino_acids_phos):
+        # Simple function to generate a non-conditional baseline matrix for statistical comparison
+
+        current_matrix_params = matrix_params.copy()
+        current_matrix_params["min_members"] = np.inf # forces non-conditional matrix to be generated
+        current_matrix_params["included_residues"] = amino_acids
+        current_matrix_params["position_for_filtering"] = 0
+
+        # Generate the matrix object and dict key name
+        self.baseline_matrix = ConditionalMatrix(motif_length, source_df, data_params, current_matrix_params)
 
     def generate_matrices(self, rule_tuples, motif_length, source_df, data_params, matrix_params):
         '''
@@ -548,8 +667,10 @@ class ConditionalMatrices:
 
         # Save output report
         output_report_path = os.path.join(parent_folder, "conditional_matrices_report.txt")
+        final_report = deepcopy(self.report)
+        final_report.extend(self.substitution_reports)
         with open(output_report_path, "w") as file:
-            file.writelines(self.report)
+            file.writelines(final_report)
 
         # Display saved message
         print(f"Saved unweighted matrices, weighted matrices, and output report to {parent_folder}")
