@@ -146,6 +146,7 @@ def optimize_points_2d(points_2d, value_range, mode, actual_truths, signal_value
     # Points optimization
     array_len = points_2d.shape[1]
     search_sample = 1000000
+    print(f"RandomSearchOptimizer mode: {mode}")
     points_optimizer = RandomSearchOptimizer(objective, array_len, value_range, mode)
     done = False
     while not done:
