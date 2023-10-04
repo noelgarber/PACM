@@ -374,11 +374,23 @@ class SpecificityMatrix:
                     group_result = ttest_ind(group_qualifying, group_other, equal_var=False)
                     group_pvalue = group_result.pvalue
 
-                    if group_pvalue < alpha:
-                        both_lesser = group_qualifying.mean() < group_other.mean() and qualifying.mean() < other.mean()
-                        both_greater = group_qualifying.mean() > group_other.mean() and qualifying.mean() > other.mean()
-                        if both_lesser or both_greater:
+                    both_lesser = group_qualifying.mean() < group_other.mean() and qualifying.mean() < other.mean()
+                    both_greater = group_qualifying.mean() > group_other.mean() and qualifying.mean() > other.mean()
+                    both_match = both_lesser or both_greater
+
+                    if group_pvalue < alpha and both_match:
+                        matrix_df.at[aa, col_name] = aa_points
+                        continue
+
+                    equivalent_exclusive = equivalent_residues[1:]
+                    if len(equivalent_exclusive) > 0:
+                        exclusive_qualifying = self.passing_log2fc_values[np.isin(col_slice, equivalent_exclusive)]
+                        exclusive_qualifying = exclusive_qualifying[np.isfinite(exclusive_qualifying)]
+                        exclusive_result = ttest_ind(exclusive_qualifying, group_other, equal_var=False)
+                        exclusive_pvalue = exclusive_result.pvalue
+                        if exclusive_pvalue < alpha and both_match:
                             matrix_df.at[aa, col_name] = aa_points
+                            continue
 
         # Add missing amino acid rows if necessary and reorder matrix_df by aa_list
         self.matrix_df = self.reorder_matrix(matrix_df)
