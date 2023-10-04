@@ -351,7 +351,7 @@ def test_substitute(motif_length, baseline_matrix, test_matrix, alpha = 0.5):
 
         # Substitute baseline cols into test matrix if pvalue is above threshold, since baseline is usually less noisy
         baseline_positive_col, baseline_suboptimal_col, baseline_forbidden_col = baseline_cols
-        substitution_bools = np.greater_equal(p_values, alpha)
+        substitution_bools = np.less_equal(p_values, alpha)
         test_matrix.substitute_matrix_col(i, baseline_positive_col, baseline_suboptimal_col,
                                           baseline_forbidden_col, substitution_bools)
 
@@ -431,7 +431,7 @@ class ConditionalMatrices:
         results_list = self.generate_matrices(rule_tuples, motif_length, source_df, data_params, matrix_params)
         use_kolmogorov_smirnov = matrix_params["use_kolmogorov_smirnov"]
         self.substitution_reports = {}
-        substitution_report = ["---"]
+        substitution_report = ["---\n"]
 
         for results in results_list:
             conditional_matrix, dict_key_name, report_line = results
@@ -441,7 +441,7 @@ class ConditionalMatrices:
                 ks_alpha = matrix_params["kolmogorov_smirnov_alpha"]
                 current_report = test_substitute(motif_length, self.baseline_matrix, conditional_matrix, ks_alpha)
                 substitution_report.extend(current_report)
-                substitution_report.append("---")
+                substitution_report.append("---\n")
 
             self.conditional_matrix_dict[dict_key_name] = conditional_matrix
             self.substitution_reports[dict_key_name] = substitution_report
@@ -668,7 +668,10 @@ class ConditionalMatrices:
         # Save output report
         output_report_path = os.path.join(parent_folder, "conditional_matrices_report.txt")
         final_report = deepcopy(self.report)
-        final_report.extend(self.substitution_reports)
+        for rule_name, substitution_report in self.substitution_reports.items():
+            final_report.append("---\n")
+            final_report.append(f"{rule_name} Substitution Report\n")
+            final_report.extend(substitution_report)
         with open(output_report_path, "w") as file:
             file.writelines(final_report)
 
