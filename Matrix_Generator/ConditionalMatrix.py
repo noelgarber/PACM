@@ -364,17 +364,17 @@ def test_substitute(motif_length, baseline_matrix, test_matrix, alpha = 0.5):
             substitution_report.append(line)
 
         if not substitution_bools[1]:
-            line = f"\t#{i+1} @ suboptimal matrix --> conditional (p = {p_values[0]})\n"
+            line = f"\t#{i+1} @ suboptimal matrix --> conditional (p = {p_values[1]})\n"
             substitution_report.append(line)
         else:
-            line = f"\t#{i+1} @ suboptimal matrix --> substituted from non-conditional matrix (p = {p_values[0]})\n"
+            line = f"\t#{i+1} @ suboptimal matrix --> substituted from non-conditional matrix (p = {p_values[1]})\n"
             substitution_report.append(line)
 
         if not substitution_bools[2]:
-            line = f"\t#{i+1} @ forbidden matrix --> conditional (p = {p_values[0]})\n"
+            line = f"\t#{i+1} @ forbidden matrix --> conditional (p = {p_values[2]})\n"
             substitution_report.append(line)
         else:
-            line = f"\t#{i+1} @ forbidden matrix --> substituted from non-conditional matrix (p = {p_values[0]})\n"
+            line = f"\t#{i+1} @ forbidden matrix --> substituted from non-conditional matrix (p = {p_values[2]})\n"
             substitution_report.append(line)
 
     return substitution_report
