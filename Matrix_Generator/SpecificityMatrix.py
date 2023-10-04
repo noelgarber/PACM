@@ -348,14 +348,15 @@ class SpecificityMatrix:
         cols = np.char.add("#", np.arange(1, self.motif_length + 1).astype(str))
         matrix_df = pd.DataFrame(index=unique_residues, columns=cols, dtype=float).fillna(0.0)
 
+        # Iteratively add points to the matrix
         for col_name, col_slice in zip(cols, np.transpose(self.passing_seqs_2d)):
             col_unique_residues = np.unique(col_slice)
-
             for aa in col_unique_residues:
                 aa_log2fc_values = self.passing_log2fc_values[col_slice == aa]
                 aa_points = np.mean(aa_log2fc_values[np.isfinite(aa_log2fc_values)])
 
                 if not np.all(~np.isfinite(aa_log2fc_values)):
+                    # Test if the log2fc values in peptides meeting this type-position rule are different from the rest
                     qualifying = aa_log2fc_values[np.isfinite(aa_log2fc_values)]
                     other = self.passing_log2fc_values[col_slice != aa]
                     other = other[np.isfinite(other)]
@@ -366,6 +367,7 @@ class SpecificityMatrix:
                         matrix_df.at[aa, col_name] = aa_points
                         continue
 
+                    # If the first test fails, pool with equivalent residues and try again
                     equivalent_residues = aa_equivalence_dict[aa]
                     group_qualifying = self.passing_log2fc_values[np.isin(col_slice, equivalent_residues)]
                     group_qualifying = group_qualifying[np.isfinite(group_qualifying)]
@@ -382,6 +384,7 @@ class SpecificityMatrix:
                         matrix_df.at[aa, col_name] = aa_points
                         continue
 
+                    # If the above test fails, try again with all equivalent residues except the current residue
                     equivalent_exclusive = equivalent_residues[1:]
                     if len(equivalent_exclusive) > 0:
                         exclusive_qualifying = self.passing_log2fc_values[np.isin(col_slice, equivalent_exclusive)]
@@ -391,6 +394,19 @@ class SpecificityMatrix:
                         if exclusive_pvalue < alpha and both_match:
                             matrix_df.at[aa, col_name] = aa_points
                             continue
+
+        # When there are no examples of a specific residue, insert a value from equivalent residues for completeness
+        for col_name, col_slice in zip(cols, np.transpose(self.passing_seqs_2d)):
+            for aa in matrix_df.index:
+                aa_log2fc_values = self.passing_log2fc_values[col_slice == aa]
+                aa_log2fc_values = aa_log2fc_values[np.isfinite(aa_log2fc_values)]
+                if len(aa_log2fc_values) == 0 and aa not in ("B", "J", "O"):
+                    equivalent_residues = aa_equivalence_dict[aa]
+                    group_qualifying = self.passing_log2fc_values[np.isin(col_slice, equivalent_residues)]
+                    group_qualifying = group_qualifying[np.isfinite(group_qualifying)]
+                    if len(group_qualifying) > 0:
+                        points = np.mean(group_qualifying)
+                        matrix_df.at[aa, col_name] = points
 
         # Add missing amino acid rows if necessary and reorder matrix_df by aa_list
         self.matrix_df = self.reorder_matrix(matrix_df)
