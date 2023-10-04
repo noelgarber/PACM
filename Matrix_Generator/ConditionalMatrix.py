@@ -351,30 +351,30 @@ def test_substitute(motif_length, baseline_matrix, test_matrix, alpha = 0.5):
 
         # Substitute baseline cols into test matrix if pvalue is above threshold, since baseline is usually less noisy
         baseline_positive_col, baseline_suboptimal_col, baseline_forbidden_col = baseline_cols
-        substitution_bools = np.less_equal(p_values, alpha)
+        substitution_bools = np.greater(p_values, alpha)
         test_matrix.substitute_matrix_col(i, baseline_positive_col, baseline_suboptimal_col,
                                           baseline_forbidden_col, substitution_bools)
 
         # Add outcomes to the report
         if not substitution_bools[0]:
-            line = f"\t#{i} @ positive matrix --> conditional (p = {p_values[0]})\n"
+            line = f"\t#{i+1} @ positive matrix --> conditional (p = {p_values[0]})\n"
             substitution_report.append(line)
         else:
-            line = f"\t#{i} @ positive matrix --> substituted from non-conditional matrix (p = {p_values[0]})\n"
+            line = f"\t#{i+1} @ positive matrix --> substituted from non-conditional matrix (p = {p_values[0]})\n"
             substitution_report.append(line)
 
         if not substitution_bools[1]:
-            line = f"\t#{i} @ suboptimal matrix --> conditional (p = {p_values[0]})\n"
+            line = f"\t#{i+1} @ suboptimal matrix --> conditional (p = {p_values[0]})\n"
             substitution_report.append(line)
         else:
-            line = f"\t#{i} @ suboptimal matrix --> substituted from non-conditional matrix (p = {p_values[0]})\n"
+            line = f"\t#{i+1} @ suboptimal matrix --> substituted from non-conditional matrix (p = {p_values[0]})\n"
             substitution_report.append(line)
 
         if not substitution_bools[2]:
-            line = f"\t#{i} @ forbidden matrix --> conditional (p = {p_values[0]})\n"
+            line = f"\t#{i+1} @ forbidden matrix --> conditional (p = {p_values[0]})\n"
             substitution_report.append(line)
         else:
-            line = f"\t#{i} @ forbidden matrix --> substituted from non-conditional matrix (p = {p_values[0]})\n"
+            line = f"\t#{i+1} @ forbidden matrix --> substituted from non-conditional matrix (p = {p_values[0]})\n"
             substitution_report.append(line)
 
     return substitution_report
