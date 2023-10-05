@@ -304,11 +304,27 @@ class ConditionalMatrix:
         # User-initiated function for substituting a specific column into each sub-matrix
 
         col = self.positive_matrix.columns[col_idx]
+        original_positive_mean = self.positive_matrix[col].values.mean()
+        original_suboptimal_mean = self.suboptimal_elements_matrix[col].values.mean()
+        original_forbidden_mean = self.forbidden_elements_matrix[col].values.mean()
+
         if substitution_bools[0]:
+            if original_positive_mean != 0:
+                divisor = substituted_positive_col.max() if substituted_positive_col.max() != 0 else 1
+                substituted_positive_col = substituted_positive_col / divisor
+                substituted_positive_col = substituted_positive_col * original_positive_mean
             self.positive_matrix[col] = substituted_positive_col
         if substitution_bools[1]:
+            if original_suboptimal_mean != 0:
+                divisor = substituted_suboptimal_col.max() if substituted_suboptimal_col.max() != 0 else 1
+                substituted_suboptimal_col = substituted_suboptimal_col / divisor
+                substituted_suboptimal_col = substituted_suboptimal_col * original_suboptimal_mean
             self.suboptimal_elements_matrix[col] = substituted_suboptimal_col
         if substitution_bools[2]:
+            if original_forbidden_mean != 0:
+                divisor = substituted_forbidden_col.max() if substituted_forbidden_col.max() != 0 else 1
+                substituted_forbidden_col = substituted_forbidden_col / divisor
+                substituted_forbidden_col = substituted_forbidden_col * original_forbidden_mean
             self.forbidden_elements_matrix[col] = substituted_forbidden_col
 
 # --------------------------------------------------------------------------------------------------------------------
