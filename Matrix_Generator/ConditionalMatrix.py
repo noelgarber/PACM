@@ -8,7 +8,7 @@ import multiprocessing
 from copy import deepcopy
 from tqdm import trange
 from functools import partial
-from scipy.stats import barnard_exact, ttest_ind, ks_2samp
+from scipy.stats import barnard_exact, ttest_ind
 from general_utils.general_utils import unravel_seqs, check_seq_lengths
 from general_utils.matrix_utils import make_empty_matrix, collapse_phospho
 from general_utils.user_helper_functions import get_thresholds
