@@ -120,12 +120,25 @@ class ConditionalMatrix:
         filter_position_chars = get_nth_position(sequences)
         qualifying_member_calls = np.isin(filter_position_chars, included_residues)
 
-        # Generate and assign the binding signal prediction matrix
+        '''
+        Generate and assign the binding signal prediction matrix
+            - To do this, we use signal values from both passing and failing peptides that qualify under the current
+              type-position rule (e.g. #1=Acidic). 
+            - Including the failing peptides ensures that residues associated with 
+              very low signal values are represented correctly. 
+        '''
         amino_acids = matrix_params.get("amino_acids")
         include_phospho = matrix_params.get("include_phospho")
-        self.generate_positive_matrix(sequences_2d, mean_signal_values, amino_acids, include_phospho)
+        qualifying_seqs_2d = sequences_2d[qualifying_member_calls] # includes both pass and fail
+        qualifying_signals_2d = mean_signal_values[qualifying_member_calls] # includes both pass and fail
 
-        # Generate and assign the suboptimal and forbidden element matrices for disfavoured residues
+        self.generate_positive_matrix(qualifying_seqs_2d, qualifying_signals_2d, amino_acids, include_phospho)
+
+        '''
+        Generate and assign the suboptimal and forbidden element matrices for disfavoured residues
+            - To do this, we first segregate passing and failing peptides
+            - We then look for predictors of failure to bind and represent as suboptimal/forbidden element points
+        '''
         barnard_alpha = matrix_params["barnard_alpha"]
 
         passing_mask = np.logical_and(pass_calls, qualifying_member_calls)
@@ -304,32 +317,72 @@ class ConditionalMatrix:
         # User-initiated function for substituting a specific column into each sub-matrix
 
         col = self.positive_matrix.columns[col_idx]
-        original_positive_mean = self.positive_matrix[col].values.mean()
-        original_suboptimal_mean = self.suboptimal_elements_matrix[col].values.mean()
-        original_forbidden_mean = self.forbidden_elements_matrix[col].values.mean()
 
         if substitution_bools[0]:
-            if original_positive_mean != 0:
-                divisor = substituted_positive_col.max() if substituted_positive_col.max() != 0 else 1
-                substituted_positive_col = substituted_positive_col / divisor
-                substituted_positive_col = substituted_positive_col * original_positive_mean
             self.positive_matrix[col] = substituted_positive_col
         if substitution_bools[1]:
-            if original_suboptimal_mean != 0:
-                divisor = substituted_suboptimal_col.max() if substituted_suboptimal_col.max() != 0 else 1
-                substituted_suboptimal_col = substituted_suboptimal_col / divisor
-                substituted_suboptimal_col = substituted_suboptimal_col * original_suboptimal_mean
             self.suboptimal_elements_matrix[col] = substituted_suboptimal_col
         if substitution_bools[2]:
-            if original_forbidden_mean != 0:
-                divisor = substituted_forbidden_col.max() if substituted_forbidden_col.max() != 0 else 1
-                substituted_forbidden_col = substituted_forbidden_col / divisor
-                substituted_forbidden_col = substituted_forbidden_col * original_forbidden_mean
             self.forbidden_elements_matrix[col] = substituted_forbidden_col
 
 # --------------------------------------------------------------------------------------------------------------------
 
-def test_substitute(motif_length, baseline_matrix, test_matrix, alpha = 0.5):
+def bootstrap_euclidean_threshold(dims = 20, num_samples = 10000, alpha = 0.05):
+    '''
+    Bootstrap function to find distribution of Euclidean distances of random arrays with floats from 0.0 to 1.0
+
+    Args:
+        dims (int):        number of dimensions in the vectors of interest
+        num_samples (int): number of random samples for bootstrapping; higher sampling is slower but more precise
+        alpha (float):     significance threshold as a float from 0-1
+
+    Returns:
+        lower_tail (float): Euclidean distance threshold below which there is a significant difference
+        upper_tail (float): Euclidean distance threshold above which there is a significant difference
+    '''
+
+    arr1 = np.random.uniform(0.0, 1.0, size=(num_samples, dims))
+    arr1 = arr1 / arr1.max(axis=1, keepdims=True)
+
+    arr2 = np.random.uniform(0.0, 1.0, size=(num_samples, dims))
+    arr2 = arr2 / arr2.max(axis=1, keepdims=True)
+
+    deltas = arr1 - arr2
+    euclidean_distances = np.linalg.norm(deltas, axis=1)
+
+    percentile_threshold = alpha * 100
+    lower_tail = np.percentile(euclidean_distances, percentile_threshold)
+    upper_tail = np.percentile(euclidean_distances, 100 - percentile_threshold)
+
+    return lower_tail, upper_tail
+
+def test_euclidean_distance(arr1, arr2, threshold = None, alpha = None):
+    '''
+    Simple function to test whether the Euclidean distance between two vectors is above a significance threshold
+
+    Args:
+        arr1 (np.ndarray):  first vector
+        arr2 (np.ndarray):  second vector
+        threshold (float):  if precalculated, can be given here for performance improvement; if not, alpha must be given
+        alpha (float):      required if threshold was not precalculated
+
+    Returns:
+        euclidean_distance (float):  the Euclidean distance between the two input vectors
+        significant (bool):          whether the distance is significant or not
+    '''
+
+    if arr1.shape != arr2.shape:
+        raise Exception("test_euclidean_shape() encountered an error: the input vectors are different sizes")
+    elif threshold is None:
+        _, threshold = bootstrap_euclidean_threshold(dims = arr1.shape[0], num_samples = 1000000, alpha = alpha)
+
+    euclidean_distance = np.linalg.norm(arr1 - arr2)
+    significant = euclidean_distance > threshold
+
+    return (euclidean_distance, significant)
+
+def test_substitute(motif_length, baseline_matrix, test_matrix, alpha = 0.25, always_substitute_forbidden = True,
+                    verbose = True):
     '''
     This is a function that statistically tests whether the values in cols of a test matrix differ from baseline;
     if not, baseline values are substituted into the test matrix
@@ -338,63 +391,144 @@ def test_substitute(motif_length, baseline_matrix, test_matrix, alpha = 0.5):
         motif_length (int):                  motif length referring to the matrices
         baseline_matrix (ConditionalMatrix): baseline matrix trained on all data
         test_matrix (ConditionalMatrix):     conditional matrix trained on a subset of the data
-        alpha (float):                       Kolmogorov-Smirnov threshold; if pvalue > alpha, col is substituted
+        alpha (float):                       significance threshold for testing the Euclidean distance between a
+                                             conditional matrix column and the corresponding unconditional column
+        always_substitute_forbidden (bool):  whether to always substitute forbidden matrix with unconditional matrix
+                                             values; useful when sample size is too small to infer forbiddenness in
+                                             conditional subsets of the source data
+        verbose (bool):                      whether to print progress information about substitutions
 
     Returns:
         substitution_report (list):          report, as a list of text lines, informing on screening results;
                                              note that substitutions are performed in-place on test_matrix
     '''
 
+    # Get type-position rule for current conditional matrix (test_matrix)
     test_filter_position, test_included_residues = test_matrix.rule
     rule_str = f"#{test_filter_position}=[" + ",".join(test_included_residues) + "]"
     substitution_report = [f"{rule_str} Substantially Conditional Positions\n"]
 
+    if verbose:
+        print(f"---")
+        print(f"Rule: {rule_str}")
+
+    # Check if the test matrix is already the same as the baseline matrix
+    same_positive_matrix = np.all(np.equal(baseline_matrix.positive_matrix.values,
+                                           test_matrix.positive_matrix.values))
+    same_suboptimal_matrix = np.all(np.equal(baseline_matrix.suboptimal_elements_matrix.values,
+                                             test_matrix.suboptimal_elements_matrix.values))
+    same_forbidden_matrix = np.all(np.equal(baseline_matrix.forbidden_elements_matrix.values,
+                                            test_matrix.forbidden_elements_matrix.values))
+    all_same_matrices = np.all([same_positive_matrix, same_suboptimal_matrix, same_forbidden_matrix])
+
+    # If test matrix is the same as the baseline matrix, skip substitution
+    if all_same_matrices:
+        line = "\tConditional matrices and unconditional baseline matrices are already the same\n"
+        substitution_report.append(line)
+        print(line) if verbose else None
+        return substitution_report
+
+    if same_positive_matrix:
+        line = "\tNote: conditional positive points matrix is the same as its unconditional counterpart\n"
+        substitution_report.append(line)
+        print(line) if verbose else None
+    if same_suboptimal_matrix:
+        line = "\tNote: conditional suboptimal elements matrix is the same as its unconditional counterpart\n"
+        substitution_report.append(line)
+        print(line) if verbose else None
+    if same_forbidden_matrix:
+        line = "\tNote: conditional forbidden elements matrix is the same as its unconditional counterpart\n"
+        substitution_report.append(line)
+        print(line) if verbose else None
+
+    # Iterate over columns to perform substitution as necessary
     col_indices = np.arange(motif_length)
     for i in col_indices:
         # Extract comparator columns as numpy arrays
         baseline_cols = baseline_matrix.copy_matrix_col(i)
         test_cols = test_matrix.copy_matrix_col(i)
 
-        # Use the Kolmogorov-Smirnov test to find the likelihood that two arrays are drawn from the same distribution
-        p_values = []
-        for baseline_col, test_col in zip(baseline_cols, test_cols):
-            baseline_col = baseline_col / baseline_col.sum() if baseline_col.sum() > 0 else baseline_col
-            test_col = test_col / test_col.sum() if test_col.sum() > 0 else test_col
-            statistic, pvalue = ks_2samp(baseline_col, test_col)
-            p_values.append(pvalue)
-
-        p_values = np.array(p_values)
-
-        # Substitute baseline cols into test matrix if pvalue is above threshold, since baseline is usually less noisy
+        # Extract individual matrix columns
         baseline_positive_col, baseline_suboptimal_col, baseline_forbidden_col = baseline_cols
-        substitution_bools = np.greater(p_values, alpha)
+        test_positive_col, test_suboptimal_col, test_forbidden_col = test_cols
+
+        # Positive matrix column Euclidean distance thresholding
+        pos_nonzero_indices = np.logical_or(np.greater(baseline_positive_col, 0),
+                                                 np.greater(test_positive_col, 0))
+        baseline_pos_nonzero = baseline_positive_col[pos_nonzero_indices]
+        test_pos_nonzero = test_positive_col[pos_nonzero_indices]
+        _, pos_thres = bootstrap_euclidean_threshold(dims=len(pos_nonzero_indices), num_samples=100000, alpha=alpha)
+        positive_col_results = test_euclidean_distance(baseline_pos_nonzero, test_pos_nonzero, pos_thres)
+        positive_euclidean_distance, positive_significant = positive_col_results
+        substitute_positive = not positive_significant
+
+        # Suboptimal element matrix column Euclidean distance thresholding
+        sub_nonzero_indices = np.logical_or(np.greater(baseline_suboptimal_col, 0),
+                                                   np.greater(test_suboptimal_col, 0))
+        baseline_sub_nonzero = baseline_suboptimal_col[sub_nonzero_indices]
+        test_sub_nonzero = test_suboptimal_col[sub_nonzero_indices]
+        _, sub_thres = bootstrap_euclidean_threshold(dims=len(sub_nonzero_indices), num_samples=100000, alpha=alpha)
+        suboptimal_col_results = test_euclidean_distance(baseline_sub_nonzero, test_sub_nonzero, sub_thres)
+        suboptimal_euclidean_distance, suboptimal_significant = suboptimal_col_results
+        substitute_suboptimal = not suboptimal_significant
+
+        # Forbidden element matrix column Euclidean distance thresholding
+        if always_substitute_forbidden:
+            substitute_forbidden = True
+        else:
+            forbidden_nonzero_indices = np.logical_or(np.greater(baseline_forbidden_col, 0),
+                                                      np.greater(test_forbidden_col, 0))
+            baseline_forbidden_nonzero = baseline_suboptimal_col[forbidden_nonzero_indices]
+            test_forbidden_nonzero = test_forbidden_col[forbidden_nonzero_indices]
+            _, forbidden_thres = bootstrap_euclidean_threshold(dims=len(forbidden_nonzero_indices), num_samples=100000,
+                                                               alpha=alpha)
+            forbidden_col_results = test_euclidean_distance(baseline_forbidden_nonzero, test_forbidden_nonzero,
+                                                            forbidden_thres)
+            forbidden_euclidean_distance, forbidden_significant = forbidden_col_results
+            substitute_forbidden = not forbidden_significant
+
+        substitution_bools = np.array([substitute_positive, substitute_suboptimal, substitute_forbidden])
         test_matrix.substitute_matrix_col(i, baseline_positive_col, baseline_suboptimal_col,
                                           baseline_forbidden_col, substitution_bools)
 
-        # Add outcomes to the report
-        if not substitution_bools[0]:
-            line = f"\t#{i+1} @ positive matrix --> conditional (p = {p_values[0]})\n"
-            substitution_report.append(line)
+        # Add positive matrix substitution outcomes to the report
+        positive_stat = f"Euclidean distance = {positive_euclidean_distance}"
+        if substitute_positive:
+            positive_line = f"\t#{i+1} @ positive matrix --> substituted from non-conditional ({positive_stat})\n"
         else:
-            line = f"\t#{i+1} @ positive matrix --> substituted from non-conditional matrix (p = {p_values[0]})\n"
-            substitution_report.append(line)
+            positive_line = f"\t#{i + 1} @ positive matrix --> conditional ({positive_statistic_str})\n"
+        substitution_report.append(positive_line)
+        print("\t" + positive_line.rsplit("\n",1)[0]) if verbose else None
 
-        if not substitution_bools[1]:
-            line = f"\t#{i+1} @ suboptimal matrix --> conditional (p = {p_values[1]})\n"
-            substitution_report.append(line)
+        # Add suboptimal element matrix substitution outcomes to the report
+        suboptimal_stat = f"Euclidean distance = {suboptimal_euclidean_distance}"
+        if substitute_suboptimal:
+            suboptimal_line = f"\t#{i+1} @ suboptimal matrix --> substituted from non-conditional ({suboptimal_stat})\n"
         else:
-            line = f"\t#{i+1} @ suboptimal matrix --> substituted from non-conditional matrix (p = {p_values[1]})\n"
-            substitution_report.append(line)
+            suboptimal_line = f"\t#{i + 1} @ suboptimal matrix --> conditional ({suboptimal_stat})\n"
+        substitution_report.append(suboptimal_line)
+        print("\t" + suboptimal_line.rsplit("\n",1)[0]) if verbose else None
 
-        if not substitution_bools[2]:
-            line = f"\t#{i+1} @ forbidden matrix --> conditional (p = {p_values[2]})\n"
-            substitution_report.append(line)
+        # Add forbidden matrix substitution outcomes to the report, noting whether always_substitute_forbidden is True
+        if substitute_forbidden and always_substitute_forbidden:
+            continue
+        elif substitute_forbidden:
+            forbidden_stat = f"Euclidean distance = {forbidden_euclidean_distance}"
+            forbidden_line = f"\t#{i+1} @ forbidden matrix --> substituted from non-conditional ({forbidden_stat})\n"
+        elif always_substitute_forbidden:
+            raise Exception("test_substitute() always_substitute_forbidden is True, but substitute_forbidden is False")
         else:
-            line = f"\t#{i+1} @ forbidden matrix --> substituted from non-conditional matrix (p = {p_values[2]})\n"
-            substitution_report.append(line)
+            forbidden_stat = f"Euclidean distance = {forbidden_euclidean_distance}"
+            forbidden_line = f"\t#{i + 1} @ forbidden matrix --> conditional ({forbidden_stat})\n"
+        substitution_report.append(forbidden_line)
+        print("\t" + forbidden_line.rsplit("\n",1)[0]) if verbose else None
+
+    if always_substitute_forbidden:
+        line = f"\tAll forbidden matrix columns were substituted with unconditional matrix values\n"
+        substitution_report.append(line)
+        print(line.rsplit("\n",1)[0]) if verbose else None
 
     return substitution_report
-
 
 # --------------------------------------------------------------------------------------------------------------------
 
@@ -445,7 +579,7 @@ class ConditionalMatrices:
 
         rule_tuples = self.get_rule_tuples(residue_charac_dict, motif_length)
         results_list = self.generate_matrices(rule_tuples, motif_length, source_df, data_params, matrix_params)
-        use_kolmogorov_smirnov = matrix_params["use_kolmogorov_smirnov"]
+        use_euclidean_thresholding = matrix_params["use_euclidean_thresholding"]
         self.substitution_reports = {}
         substitution_report = ["---\n"]
 
@@ -453,9 +587,11 @@ class ConditionalMatrices:
             conditional_matrix, dict_key_name, report_line = results
 
             # Perform substitutions as necessary, then assign to dict
-            if use_kolmogorov_smirnov:
-                ks_alpha = matrix_params["kolmogorov_smirnov_alpha"]
-                current_report = test_substitute(motif_length, self.baseline_matrix, conditional_matrix, ks_alpha)
+            if use_euclidean_thresholding:
+                euclidean_alpha = matrix_params["euclidean_alpha"]
+                always_substitute_forbidden = matrix_params["always_substitute_forbidden"]
+                current_report = test_substitute(motif_length, self.baseline_matrix, conditional_matrix,
+                                                 euclidean_alpha, always_substitute_forbidden)
                 substitution_report.extend(current_report)
                 substitution_report.append("---\n")
 
