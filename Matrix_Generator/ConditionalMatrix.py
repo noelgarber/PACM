@@ -327,25 +327,35 @@ class ConditionalMatrix:
 
 # --------------------------------------------------------------------------------------------------------------------
 
-def bootstrap_euclidean_threshold(dims = 20, num_samples = 10000, alpha = 0.05):
+def bootstrap_euclidean_threshold(dims = 20, num_samples = 10000, alpha = 0.05, resampling = False, source_data = None):
     '''
     Bootstrap function to find distribution of Euclidean distances of random arrays with floats from 0.0 to 1.0
 
     Args:
-        dims (int):        number of dimensions in the vectors of interest
-        num_samples (int): number of random samples for bootstrapping; higher sampling is slower but more precise
-        alpha (float):     significance threshold as a float from 0-1
+        dims (int):               number of dimensions in the vectors of interest
+        num_samples (int):        number of random samples for bootstrapping; higher sampling is slower but more precise
+        alpha (float):            significance threshold as a float from 0-1
+        resampling (bool):        if True, data is randomly resampled from source_data; if False, uniform is used
+        source_data (np.ndarray): only required if resampling is True
 
     Returns:
         lower_tail (float): Euclidean distance threshold below which there is a significant difference
         upper_tail (float): Euclidean distance threshold above which there is a significant difference
     '''
 
-    arr1 = np.random.uniform(0.0, 1.0, size=(num_samples, dims))
-    arr1 = arr1 / arr1.max(axis=1, keepdims=True)
+    if resampling:
+        source_data = source_data.flatten()
+        arr1 = np.random.choice(source_data, (num_samples, dims), replace=True)
+        arr2 = np.random.choice(source_data, (num_samples, dims), replace=True)
 
-    arr2 = np.random.uniform(0.0, 1.0, size=(num_samples, dims))
-    arr2 = arr2 / arr2.max(axis=1, keepdims=True)
+    else:
+        arr1 = np.random.uniform(0.0, 1.0, size=(num_samples, dims))
+        arr1 = arr1 - arr1.min(axis=1, keepdims=True)
+        arr1 = arr1 / arr1.max(axis=1, keepdims=True)
+
+        arr2 = np.random.uniform(0.0, 1.0, size=(num_samples, dims))
+        arr2 = arr2 - arr2.min(axis=1, keepdims=True)
+        arr2 = arr2 / arr2.max(axis=1, keepdims=True)
 
     deltas = arr1 - arr2
     euclidean_distances = np.linalg.norm(deltas, axis=1)
@@ -356,15 +366,17 @@ def bootstrap_euclidean_threshold(dims = 20, num_samples = 10000, alpha = 0.05):
 
     return lower_tail, upper_tail
 
-def test_euclidean_distance(arr1, arr2, threshold = None, alpha = None):
+def test_euclidean_distance(arr1, arr2, threshold = None, alpha = None, resampling = False, source_data = None):
     '''
     Simple function to test whether the Euclidean distance between two vectors is above a significance threshold
 
     Args:
-        arr1 (np.ndarray):  first vector
-        arr2 (np.ndarray):  second vector
-        threshold (float):  if precalculated, can be given here for performance improvement; if not, alpha must be given
-        alpha (float):      required if threshold was not precalculated
+        arr1 (np.ndarray):        first vector
+        arr2 (np.ndarray):        second vector
+        threshold (float):        if precalculated, can be given here for performance improvement; if not, give alpha
+        alpha (float):            required if threshold was not precalculated
+        resampling (bool):        if True, data is randomly resampled from source_data; if False, uniform is used
+        source_data (np.ndarray): only required if resampling is True
 
     Returns:
         euclidean_distance (float):  the Euclidean distance between the two input vectors
@@ -374,7 +386,9 @@ def test_euclidean_distance(arr1, arr2, threshold = None, alpha = None):
     if arr1.shape != arr2.shape:
         raise Exception("test_euclidean_shape() encountered an error: the input vectors are different sizes")
     elif threshold is None:
-        _, threshold = bootstrap_euclidean_threshold(dims = arr1.shape[0], num_samples = 1000000, alpha = alpha)
+        dims = arr1.shape[0]
+        num_samples = 100000
+        _, threshold = bootstrap_euclidean_threshold(dims, num_samples, alpha, resampling, source_data)
 
     euclidean_distance = np.linalg.norm(arr1 - arr2)
     significant = euclidean_distance > threshold
@@ -382,7 +396,7 @@ def test_euclidean_distance(arr1, arr2, threshold = None, alpha = None):
     return (euclidean_distance, significant)
 
 def test_substitute(motif_length, baseline_matrix, test_matrix, alpha = 0.25, always_substitute_forbidden = True,
-                    verbose = True):
+                    resampling = True, verbose = True):
     '''
     This is a function that statistically tests whether the values in cols of a test matrix differ from baseline;
     if not, baseline values are substituted into the test matrix
@@ -396,6 +410,8 @@ def test_substitute(motif_length, baseline_matrix, test_matrix, alpha = 0.25, al
         always_substitute_forbidden (bool):  whether to always substitute forbidden matrix with unconditional matrix
                                              values; useful when sample size is too small to infer forbiddenness in
                                              conditional subsets of the source data
+        resampling (bool):                   if True, bootstrapping is done by resampling source data;
+                                             otherwise a uniform distribution is used
         verbose (bool):                      whether to print progress information about substitutions
 
     Returns:
@@ -457,7 +473,9 @@ def test_substitute(motif_length, baseline_matrix, test_matrix, alpha = 0.25, al
                                                  np.greater(test_positive_col, 0))
         baseline_pos_nonzero = baseline_positive_col[pos_nonzero_indices]
         test_pos_nonzero = test_positive_col[pos_nonzero_indices]
-        _, pos_thres = bootstrap_euclidean_threshold(dims=len(pos_nonzero_indices), num_samples=100000, alpha=alpha)
+        pos_source = np.concatenate([baseline_matrix.positive_matrix.values.flatten(),
+                                     test_matrix.positive_matrix.values.flatten()])
+        _, pos_thres = bootstrap_euclidean_threshold(len(pos_nonzero_indices), 100000, alpha, resampling, pos_source)
         positive_col_results = test_euclidean_distance(baseline_pos_nonzero, test_pos_nonzero, pos_thres)
         positive_euclidean_distance, positive_significant = positive_col_results
         substitute_positive = not positive_significant
@@ -467,7 +485,9 @@ def test_substitute(motif_length, baseline_matrix, test_matrix, alpha = 0.25, al
                                                    np.greater(test_suboptimal_col, 0))
         baseline_sub_nonzero = baseline_suboptimal_col[sub_nonzero_indices]
         test_sub_nonzero = test_suboptimal_col[sub_nonzero_indices]
-        _, sub_thres = bootstrap_euclidean_threshold(dims=len(sub_nonzero_indices), num_samples=100000, alpha=alpha)
+        sub_source = np.concatenate([baseline_matrix.suboptimal_elements_matrix.values.flatten(),
+                                     test_matrix.suboptimal_elements_matrix.values.flatten()])
+        _, sub_thres = bootstrap_euclidean_threshold(len(sub_nonzero_indices), 100000, alpha, resampling, sub_source)
         suboptimal_col_results = test_euclidean_distance(baseline_sub_nonzero, test_sub_nonzero, sub_thres)
         suboptimal_euclidean_distance, suboptimal_significant = suboptimal_col_results
         substitute_suboptimal = not suboptimal_significant
@@ -480,8 +500,10 @@ def test_substitute(motif_length, baseline_matrix, test_matrix, alpha = 0.25, al
                                                       np.greater(test_forbidden_col, 0))
             baseline_forbidden_nonzero = baseline_suboptimal_col[forbidden_nonzero_indices]
             test_forbidden_nonzero = test_forbidden_col[forbidden_nonzero_indices]
-            _, forbidden_thres = bootstrap_euclidean_threshold(dims=len(forbidden_nonzero_indices), num_samples=100000,
-                                                               alpha=alpha)
+            forbidden_source = np.concatenate([baseline_matrix.forbidden_elements_matrix.values.flatten(),
+                                               test_matrix.forbidden_elements_matrix.values.flatten()])
+            _, forbidden_thres = bootstrap_euclidean_threshold(len(forbidden_nonzero_indices), 100000, alpha,
+                                                               resampling, forbidden_source)
             forbidden_col_results = test_euclidean_distance(baseline_forbidden_nonzero, test_forbidden_nonzero,
                                                             forbidden_thres)
             forbidden_euclidean_distance, forbidden_significant = forbidden_col_results
@@ -496,7 +518,7 @@ def test_substitute(motif_length, baseline_matrix, test_matrix, alpha = 0.25, al
         if substitute_positive:
             positive_line = f"\t#{i+1} @ positive matrix --> substituted from non-conditional ({positive_stat})\n"
         else:
-            positive_line = f"\t#{i + 1} @ positive matrix --> conditional ({positive_statistic_str})\n"
+            positive_line = f"\t#{i + 1} @ positive matrix --> conditional ({positive_stat})\n"
         substitution_report.append(positive_line)
         print("\t" + positive_line.rsplit("\n",1)[0]) if verbose else None
 
