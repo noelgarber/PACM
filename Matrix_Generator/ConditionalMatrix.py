@@ -458,7 +458,7 @@ def test_substitute(motif_length, baseline_matrix, test_matrix, alpha = 0.25, al
         print(line) if verbose else None
 
     # Iterate over columns to perform substitution as necessary
-    col_indices = np.arange(motif_length)
+    col_indices = np.delete(np.arange(motif_length), test_filter_position - 1)
     for i in col_indices:
         # Extract comparator columns as numpy arrays
         baseline_cols = baseline_matrix.copy_matrix_col(i)
@@ -470,7 +470,7 @@ def test_substitute(motif_length, baseline_matrix, test_matrix, alpha = 0.25, al
 
         # Positive matrix column Euclidean distance thresholding
         pos_nonzero_indices = np.logical_or(np.greater(baseline_positive_col, 0),
-                                                 np.greater(test_positive_col, 0))
+                                            np.greater(test_positive_col, 0))
         baseline_pos_nonzero = baseline_positive_col[pos_nonzero_indices]
         test_pos_nonzero = test_positive_col[pos_nonzero_indices]
         pos_source = np.concatenate([baseline_matrix.positive_matrix.values.flatten(),
