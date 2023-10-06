@@ -398,10 +398,9 @@ class ConditionalMatrix:
 
 # --------------------------------------------------------------------------------------------------------------------
 
-
 def substitute_forbidden(baseline_matrix, test_matrix, verbose = True):
     '''
-    This is a function that statistically tests whether the values in cols of a test matrix differ from baseline;
+    Statistically tests whether the values in cols of a test matrix differ from baseline;
     if not, baseline values are substituted into the test matrix
 
     Args:
