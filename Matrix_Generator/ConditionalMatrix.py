@@ -75,7 +75,7 @@ class ConditionalMatrix:
     rule, e.g. position #1 = [D,E]
     '''
     def __init__(self, motif_length, source_df, data_params = data_params, matrix_params = matrix_params,
-                 aa_equivalence_dict = aa_equivalence_dict):
+                 aa_equivalence_dict = aa_equivalence_dict, reference_suboptimal_matrix = None):
         '''
         Function for initializing unadjusted conditional matrices from source peptide data,
         based on type-position rules (e.g. #1=Acidic)
@@ -151,7 +151,7 @@ class ConditionalMatrix:
 
         self.generate_suboptimal_matrix(sequences_2d, mean_signal_values, passing_seqs_2d, failed_seqs_2d, amino_acids,
                                         aa_equivalence_dict, barnard_alpha, suboptimal_points_mode, min_aa_entries,
-                                        include_phospho)
+                                        reference_suboptimal_matrix, include_phospho)
 
     def qualifying_entries_count(self, source_df, seq_col, position_for_filtering, residues_included_at_filter_position):
         # Helper function to get the number of sequences that qualify under the current type-position rule
@@ -222,20 +222,22 @@ class ConditionalMatrix:
 
     def generate_suboptimal_matrix(self, sequences_2d, signal_values, passing_seqs_2d, failed_seqs_2d,
                                    amino_acids, aa_equivalence_dict = aa_equivalence_dict, alpha = 0.2,
-                                   suboptimal_points_mode = "counts", min_aa_entries = 4, include_phospho = False):
+                                   suboptimal_points_mode = "counts", min_aa_entries = 4,
+                                   reference_suboptimal_matrix = None, include_phospho = False):
         '''
         This function generates a suboptimal element scoring matrix and a forbidden element matrix
 
         Args:
-            passing_seqs_2d (np.ndarray):              peptide sequences that bind the protein of interest
-            passing_signal_values (np.ndarray):        corresponding signal values for passing peptides
-            failed_seqs_2d (np.ndarray):               peptide sequences that do NOT bind the protein of interest
-            failed_signal_values (np.ndarray):         corresponding signal values for failing peptides
-            aa_equivalence_dict (dict):                dictionary of amino acid --> tuple of 'equivalent' amino acids
-            alpha (float):                             Barnard exact test threshold to contribute a trend to the matrix
-            suboptimal_points_mode (str):              if "counts", points are assigned as a ratio of % positive counts;
-                                                       if "signal", points are assigned as a ratio of signal values
-            min_aa_entries (int):                      minimum number of qualifying peptides to derive suboptimal points
+            passing_seqs_2d (np.ndarray):               peptide sequences that bind the protein of interest
+            passing_signal_values (np.ndarray):         corresponding signal values for passing peptides
+            failed_seqs_2d (np.ndarray):                peptide sequences that do NOT bind the protein of interest
+            failed_signal_values (np.ndarray):          corresponding signal values for failing peptides
+            aa_equivalence_dict (dict):                 dictionary of amino acid --> tuple of 'equivalent' amino acids
+            alpha (float):                              Barnard exact test threshold to contribute a trend to the matrix
+            suboptimal_points_mode (str):               if "counts", points are assigned as ratio of % positive counts;
+                                                        if "signal", points are assigned as ratio of signal values
+            min_aa_entries (int):                       min number of qualifying peptides to derive suboptimal points
+            reference_suboptimal_matrix (pd.DataFrame): baseline suboptimal element matrix, if known, for default values
 
         Returns:
             None; assigns self.suboptimal_elements_matrix and self.forbidden_elements_matrix
@@ -290,8 +292,10 @@ class ConditionalMatrix:
                     pass_rate_ratio = qualifying_pass_rate / other_pass_rate # is less than 1 when aa is disfavoured
                     if not np.isfinite(pass_rate_ratio):
                         pass_rate_ratio = 1
+                    use_default = False
                 else:
                     pass_rate_ratio = 1 # prevents high variability when only a few example peptides exist
+                    use_default = True
 
                 # Test whether peptides with this aa at the current position are more likely to be classed as passing
                 barnard_pvalue = barnard_disfavoured(aa, passing_col, failing_col)
@@ -300,6 +304,8 @@ class ConditionalMatrix:
                 if ttest_pvalue <= alpha or barnard_pvalue <= alpha:
                     if use_counts and pass_rate_ratio <= 1:
                         points_value = 1 - pass_rate_ratio
+                    elif use_counts and use_default:
+                        points_value = reference_suboptimal_matrix.at[aa, col_name]
                     elif use_counts:
                         points_value = 0
                     else:
@@ -336,8 +342,10 @@ class ConditionalMatrix:
                     group_rate_ratio = group_pass_rate / nongroup_pass_rate # is less than 1 when aa is disfavoured
                     if not np.isfinite(group_rate_ratio):
                         group_rate_ratio = 1
+                    group_use_default = False
                 else:
                     group_rate_ratio = 1 # prevents high variability when only a few example peptides exist
+                    group_use_default = True
 
                 # Test whether peptides with similar residues at this position are more likely to be classed as passing
                 group_barnard_pvalue = barnard_disfavoured(aa, passing_col, failing_col, equivalent_residues)
@@ -348,6 +356,8 @@ class ConditionalMatrix:
                         both_less = pass_rate_ratio < 1 and group_rate_ratio < 1
                         less_intense_ratio = np.max([pass_rate_ratio, group_rate_ratio])
                         points_value = 1 - less_intense_ratio if both_less else 0
+                    elif use_counts and group_use_default:
+                        points_value = reference_suboptimal_matrix.at[aa, col_name]
                     elif use_counts:
                         points_value = 0
                     else:
