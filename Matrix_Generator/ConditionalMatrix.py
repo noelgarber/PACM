@@ -18,7 +18,7 @@ try:
 except:
     from Matrix_Generator.config import data_params, matrix_params, aa_equivalence_dict, amino_acids_phos
 
-def barnard_disfavoured(test_aa, aa_col_passing, aa_col_failing, equivalent_residues = None):
+def barnard_disfavoured(test_aa, aa_col_passing, aa_col_failing, equivalent_residues = None, alternative = "less"):
     '''
     Helper function that uses Barnard's exact test to determine if a test amino acid appears less often in a sliced col
     of peptide sequences for the passing peptides vs. the failing ones.
@@ -45,15 +45,15 @@ def barnard_disfavoured(test_aa, aa_col_passing, aa_col_failing, equivalent_resi
     contingency_table = [[aa_passing_count, other_passing_count],
                          [aa_failing_count, other_failing_count]]
 
-    barnard_pvalue = barnard_exact(contingency_table, alternative="less").pvalue
+    barnard_pvalue = barnard_exact(contingency_table, alternative = alternative).pvalue
 
     return barnard_pvalue
 
-def welch_ttest_catch(a, b):
+def welch_ttest_catch(a, b, alternative = "less"):
     # Helper function that performs Welch's t-test on two independent samples where the alternative hypothesis is "less"
 
     with warnings.catch_warnings(record=True) as warning_list:
-        result = ttest_ind(a, b, axis=None, equal_var=False, nan_policy="omit", alternative="less")
+        result = ttest_ind(a, b, axis=None, equal_var=False, nan_policy="omit", alternative=alternative)
         pvalue = result.pvalue
 
         runtime_warnings = []
@@ -140,6 +140,8 @@ class ConditionalMatrix:
             - We then look for predictors of failure to bind and represent as suboptimal/forbidden element points
         '''
         barnard_alpha = matrix_params["barnard_alpha"]
+        suboptimal_points_mode = matrix_params["suboptimal_points_mode"]
+        min_aa_entries = matrix_params["min_aa_entries"]
 
         passing_mask = np.logical_and(pass_calls, qualifying_member_calls)
         passing_seqs_2d = sequences_2d[passing_mask]
@@ -147,8 +149,9 @@ class ConditionalMatrix:
         failed_mask = np.logical_and(~pass_calls, qualifying_member_calls)
         failed_seqs_2d = sequences_2d[failed_mask]
 
-        self.generate_suboptimal_matrix(sequences_2d, mean_signal_values, passing_seqs_2d, failed_seqs_2d,
-                                        amino_acids, aa_equivalence_dict, barnard_alpha, include_phospho)
+        self.generate_suboptimal_matrix(sequences_2d, mean_signal_values, passing_seqs_2d, failed_seqs_2d, amino_acids,
+                                        aa_equivalence_dict, barnard_alpha, suboptimal_points_mode, min_aa_entries,
+                                        include_phospho)
 
     def qualifying_entries_count(self, source_df, seq_col, position_for_filtering, residues_included_at_filter_position):
         # Helper function to get the number of sequences that qualify under the current type-position rule
@@ -219,7 +222,7 @@ class ConditionalMatrix:
 
     def generate_suboptimal_matrix(self, sequences_2d, signal_values, passing_seqs_2d, failed_seqs_2d,
                                    amino_acids, aa_equivalence_dict = aa_equivalence_dict, alpha = 0.2,
-                                   include_phospho = False):
+                                   suboptimal_points_mode = "counts", min_aa_entries = 4, include_phospho = False):
         '''
         This function generates a suboptimal element scoring matrix and a forbidden element matrix
 
@@ -230,6 +233,9 @@ class ConditionalMatrix:
             failed_signal_values (np.ndarray):         corresponding signal values for failing peptides
             aa_equivalence_dict (dict):                dictionary of amino acid --> tuple of 'equivalent' amino acids
             alpha (float):                             Barnard exact test threshold to contribute a trend to the matrix
+            suboptimal_points_mode (str):              if "counts", points are assigned as a ratio of % positive counts;
+                                                       if "signal", points are assigned as a ratio of signal values
+            min_aa_entries (int):                      minimum number of qualifying peptides to derive suboptimal points
 
         Returns:
             None; assigns self.suboptimal_elements_matrix and self.forbidden_elements_matrix
@@ -244,6 +250,15 @@ class ConditionalMatrix:
 
         signal_values[signal_values < 0] = 0
 
+        # Check suboptimal points mode
+        if suboptimal_points_mode == "counts":
+            use_counts = True
+        elif suboptimal_points_mode == "signal" or suboptimal_points_mode == "signals":
+            use_counts = False
+        else:
+            raise ValueError(f"got suboptimal_points_mode = {suboptimal_points_mode}, but must be `counts` or `signal`")
+
+        # Loop over the matrix
         for col_index, col_name in enumerate(matrix_cols):
             passing_col = passing_seqs_2d[:,col_index]
             failing_col = failed_seqs_2d[:,col_index]
@@ -261,12 +276,35 @@ class ConditionalMatrix:
                 mean_signal_other = signals_other.mean()
                 signal_ratio = mean_signal_while / mean_signal_other if mean_signal_other > 0 else np.nan
 
+                # Find the pass rate ratio
+                qualifying_count = np.sum(full_col == aa)
+                if qualifying_count >= min_aa_entries and use_counts:
+                    qualifying_pass_count = np.sum(passing_col == aa)
+                    qualifying_fail_count = np.sum(failing_col == aa)
+                    qualifying_count = qualifying_pass_count + qualifying_fail_count
+                    other_pass_count = len(passing_col) - qualifying_pass_count
+                    other_fail_count = len(failing_col) - qualifying_fail_count
+                    other_count = other_pass_count + other_fail_count
+                    qualifying_pass_rate = qualifying_pass_count / qualifying_count if qualifying_count != 0 else np.nan
+                    other_pass_rate = other_pass_count / other_count if other_count != 0 else np.nan
+                    pass_rate_ratio = qualifying_pass_rate / other_pass_rate # is less than 1 when aa is disfavoured
+                    if not np.isfinite(pass_rate_ratio):
+                        pass_rate_ratio = 1
+                else:
+                    pass_rate_ratio = 1 # prevents high variability when only a few example peptides exist
+
                 # Test whether peptides with this aa at the current position are more likely to be classed as passing
                 barnard_pvalue = barnard_disfavoured(aa, passing_col, failing_col)
 
                 # Assign values to matrix only if one of the tests passes the alpha; if not, proceed to checking related
                 if ttest_pvalue <= alpha or barnard_pvalue <= alpha:
-                    points_value = 1 - signal_ratio if mean_signal_while < mean_signal_other else 0
+                    if use_counts and pass_rate_ratio <= 1:
+                        points_value = 1 - pass_rate_ratio
+                    elif use_counts:
+                        points_value = 0
+                    else:
+                        points_value = 1 - signal_ratio if mean_signal_while < mean_signal_other else 0
+
                     suboptimal_elements_matrix.at[aa, col_name] = points_value
                     if np.sum(passing_col == aa) == 0:
                         forbidden_elements_matrix.at[aa, col_name] = 1
@@ -284,14 +322,38 @@ class ConditionalMatrix:
                 mean_signal_nongroup = signals_while_nongroup.mean()
                 signal_ratio_group = mean_signal_group / mean_signal_nongroup if mean_signal_nongroup > 0 else np.nan
 
+                # Find the group pass rate ratio
+                group_qualifying_count = np.sum(has_equivalent_residue)
+                if group_qualifying_count >= min_aa_entries and use_counts:
+                    group_passing_count = np.sum(np.isin(passing_col, equivalent_residues))
+                    group_failing_count = np.sum(np.isin(failing_col, equivalent_residues))
+                    group_count = group_passing_count + group_failing_count
+                    nongroup_passing_count = len(passing_col) - group_passing_count
+                    nongroup_failing_count = len(failing_col) - group_failing_count
+                    nongroup_count = nongroup_passing_count + nongroup_failing_count
+                    group_pass_rate = group_passing_count / group_count if group_count != 0 else np.nan
+                    nongroup_pass_rate = nongroup_passing_count / nongroup_count if nongroup_count != 0 else np.nan
+                    group_rate_ratio = group_pass_rate / nongroup_pass_rate # is less than 1 when aa is disfavoured
+                    if not np.isfinite(group_rate_ratio):
+                        group_rate_ratio = 1
+                else:
+                    group_rate_ratio = 1 # prevents high variability when only a few example peptides exist
+
                 # Test whether peptides with similar residues at this position are more likely to be classed as passing
                 group_barnard_pvalue = barnard_disfavoured(aa, passing_col, failing_col, equivalent_residues)
 
                 # Assign values to matrix only if one of the group tests passes alpha
                 if group_ttest_pvalue <= alpha or group_barnard_pvalue <= alpha:
-                    both_less = mean_signal_while < mean_signal_other and mean_signal_group < mean_signal_nongroup
-                    more_similar_ratio = np.max([signal_ratio, signal_ratio_group])
-                    points_value = 1 - more_similar_ratio if both_less else 0
+                    if use_counts and group_rate_ratio <= 1:
+                        both_less = pass_rate_ratio < 1 and group_rate_ratio < 1
+                        less_intense_ratio = np.max([pass_rate_ratio, group_rate_ratio])
+                        points_value = 1 - less_intense_ratio if both_less else 0
+                    elif use_counts:
+                        points_value = 0
+                    else:
+                        both_less = mean_signal_while < mean_signal_other and mean_signal_group < mean_signal_nongroup
+                        more_similar_ratio = np.max([signal_ratio, signal_ratio_group])
+                        points_value = 1 - more_similar_ratio if both_less else 0
                     suboptimal_elements_matrix.at[aa, col_name] = points_value
                     if np.sum(np.isin(passing_col, equivalent_residues)) == 0:
                         forbidden_elements_matrix.at[aa, col_name] = 1
