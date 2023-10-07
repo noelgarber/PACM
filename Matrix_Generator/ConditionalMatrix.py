@@ -764,8 +764,8 @@ class ConditionalMatrices:
         # Display saved message
         print(f"Saved unweighted matrices, weighted matrices, and output report to {parent_folder}")
 
-    def score_peptides(self, sequences_2d, actual_truths, signal_values = None, use_r2 = False, slice_scores_subsets = None,
-                       use_weighted = False, precision_recall_path = None):
+    def score_peptides(self, sequences_2d, actual_truths, signal_values = None, objective_type = "accuracy",
+                       slice_scores_subsets = None, use_weighted = False, precision_recall_path = None):
         '''
         Vectorized function to score amino acid sequences based on the dictionary of context-aware weighted matrices
 
@@ -773,7 +773,7 @@ class ConditionalMatrices:
             sequences_2d (np.ndarray):                  unravelled peptide sequences to score
             actual_truths (np.ndarray):                 array of boolean calls for whether peptides bind in experiments
             signal_values (np.ndarray):                 array of binding signal values for peptides against protein bait(s)
-            use_r2 (bool):                              whether to maximize linear R2 (if False, f1-score will be maximized)
+            objective_type (str):                       defines the objective function for weight optimization
             conditional_matrices (ConditionalMatrices): conditional weighted matrices for scoring peptides
             slice_scores_subsets (np.ndarray):          array of stretches of positions to stratify results into;
                                                         e.g. [6,7,2] is stratified into scores for positions
@@ -861,7 +861,7 @@ class ConditionalMatrices:
         forbidden_scores_2d = (left_forbidden_2d + right_forbidden_2d) / 2
 
         result = ScoredPeptideResult(sequences_2d, slice_scores_subsets, positive_scores_2d, suboptimal_scores_2d,
-                                     forbidden_scores_2d, actual_truths, signal_values, use_r2,
+                                     forbidden_scores_2d, actual_truths, signal_values, objective_type,
                                      fig_path = precision_recall_path)
 
         return result
