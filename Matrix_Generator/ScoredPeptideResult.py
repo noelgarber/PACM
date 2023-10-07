@@ -18,7 +18,7 @@ except:
                       Define optimization functions for determining position and score weights
     ---------------------------------------------------------------------------------------------------------------- '''
 
-def plot_precision_recall(precision_values, recall_values, thresholds, save_path = None):
+def plot_precision_recall(precisions, recalls, accuracies, thresholds, save_path = None):
     # Helper function that plots precision against recall
 
     if save_path is not None:
@@ -26,10 +26,10 @@ def plot_precision_recall(precision_values, recall_values, thresholds, save_path
         if not os.path.exists(save_folder):
             os.makedirs(save_folder)
 
-    plt.plot(thresholds, precision_values, marker='o', linestyle='-', label="Precision")
-    plt.plot(thresholds, recall_values, marker='o', linestyle='-', label="Recall")
+    plt.plot(thresholds, precisions, linestyle="-", label="Precision")
+    plt.plot(thresholds, recalls, linestyle="-", label="Recall")
+    plt.plot(thresholds, accuracies, linestyle="-", label="Accuracy")
     plt.xlabel("Score Threshold")
-    plt.ylabel("Precision/Recall")
     plt.legend()
     plt.savefig(save_path, format="pdf") if save_path is not None else None
     plt.show()
@@ -153,13 +153,6 @@ def optimize_points_2d(points_2d, value_range, mode, actual_truths, signal_value
         points_optimizer.search(search_sample)
         search_again = input("\tSearch again? (Y/N)  ")
         done = search_again != "Y"
-
-    # Plot PPV/NPV
-    weighted_points = np.multiply(points_2d, points_optimizer.best_array).sum(axis=1)
-    if invert_points:
-        weighted_points = weighted_points * -1
-    precision_values, recall_values, thresholds = precision_recall_curve(actual_truths, weighted_points)
-    plot_precision_recall(precision_values[:-1], recall_values[:-1], thresholds, fig_path)
 
     return points_optimizer.best_array, points_optimizer.x
 
@@ -303,7 +296,9 @@ class ScoredPeptideResult:
 
         # Plot precisions and recalls for different thresholds
         precisions, recalls, thresholds = precision_recall_curve(actual_truths, self.standardized_weighted_scores)
-        plot_precision_recall(precisions[:-1], recalls[:-1], thresholds)
+        threshold_predictions = np.greater_equal(self.standardized_weighted_scores, thresholds[:, np.newaxis])
+        accuracies = np.mean(threshold_predictions == actual_truths, axis=1)
+        plot_precision_recall(precisions[:-1], recalls[:-1], accuracies, thresholds)
 
     def apply_weights(self, positives_weights, suboptimals_weights, forbiddens_weights, type_weights):
         '''
