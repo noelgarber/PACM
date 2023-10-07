@@ -55,7 +55,8 @@ def points_objective(weights, actual_truths, points_2d, invert_points = False):
     precision, recall, thresholds = precision_recall_curve(actual_truths, weighted_points)
     precision_recall_products = precision * recall
     precision_recall_sums = precision + recall
-    valid_f1_scores = 2 * precision_recall_products[precision_recall_sums != 0] / precision_recall_sums[precision_recall_sums != 0]
+    valid_f1_scores = 2 * np.divide(precision_recall_products[precision_recall_sums != 0],
+                                    precision_recall_sums[precision_recall_sums != 0])
     max_f1_score = np.nanmax(valid_f1_scores)
 
     return max_f1_score
