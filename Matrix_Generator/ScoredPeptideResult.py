@@ -133,12 +133,6 @@ def optimize_points_2d(points_2d, value_range, mode, actual_truths, signal_value
         x (float):                   value of points_objective for best_weights
     '''
 
-    # Catch missing arguments
-    if use_r2 and signal_values is None:
-        raise ValueError(f"optimize_points_2d got signal_values=None, but when use_r2=True, this argument is required")
-    elif not use_r2 and actual_truths is None:
-        raise ValueError(f"optimize_points_2d got actual_truths=None, but when use_r2=False, this argument is required")
-
     # Set the appropriate objective function
     if objective_type == "accuracy":
         objective = partial(accuracy_objective, signal_values = signal_values, points_2d = points_2d,
