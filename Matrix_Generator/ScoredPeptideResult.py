@@ -135,7 +135,7 @@ def optimize_points_2d(points_2d, value_range, mode, actual_truths, signal_value
 
     # Set the appropriate objective function
     if objective_type == "accuracy":
-        objective = partial(accuracy_objective, signal_values = signal_values, points_2d = points_2d,
+        objective = partial(accuracy_objective, actual_truths = actual_truths, points_2d = points_2d,
                             invert_points = invert_points)
     elif objective_type == "r2":
         objective = partial(r2_objective, signal_values = signal_values, points_2d = points_2d,
