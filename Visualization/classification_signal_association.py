@@ -73,7 +73,7 @@ for (group1, group2), p_val in p_values.items():
         x2 = type_order.index(group2)
         ax.plot([x1, x2], [y_max + 3, y_max + 3], color = "black", linewidth = 1, zorder = 3)
         ax.text((x1 + x2) / 2, y_max + 4, "*", ha = "center", va = "center", color = "black", fontsize = 20, zorder = 3)
-        y_max += 12
+        y_max += 10
 
 ax.yaxis.grid(True, linestyle = "-", which = "major", color = "gray", alpha = 0.25)
 
