@@ -19,15 +19,19 @@ fig, ax = plt.subplots()
 ax.set_facecolor('white')
 fig.set_facecolor('white')
 
-sns.swarmplot(data = df, y = "Max Mean Signal", x = "Type", size = 6, palette = palette)
+sns.swarmplot(data = df, y = "Max Mean Signal", x = "Type", size = 6, palette = palette, zorder = 1)
 
 type_order = ["TP", "TN", "FP", "FN"]
 means = df.groupby("Type")["Max Mean Signal"].mean().reindex(type_order)
 stds = df.groupby("Type")["Max Mean Signal"].std().reindex(type_order)
+
 for i, (mean, std) in enumerate(zip(means, stds)):
-    ax.hlines(mean, i-0.05, i+0.05, color="black", linewidth=2)  # for mean
-    ax.hlines(mean + std, i-0.1, i+0.1, color="black", linewidth=2)  # for mean + standard deviation
-    ax.hlines(mean - std, i-0.1, i+0.1, color="black", linewidth=2)  # for mean - standard deviation
+    ax.hlines(mean, i-0.05, i+0.05, color = "black", linewidth = 2, zorder = 2)  # for mean
+    ax.hlines(mean + std, i-0.1, i+0.1, color = "black", linewidth = 2, zorder = 2)  # for mean + standard deviation
+    ax.hlines(mean - std, i-0.1, i+0.1, color = "black", linewidth = 2, zorder = 2)  # for mean - standard deviation
+
+for i, (mean, std) in enumerate(zip(means, stds)):
+    ax.vlines(i, mean - std, mean + std, color = "black", linewidth = 1, zorder = 2)
 
 ax.yaxis.grid(True, linestyle = "-", which = "major", color = "gray", alpha = 0.25)
 
