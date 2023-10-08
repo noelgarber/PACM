@@ -77,10 +77,9 @@ for (group1, group2), p_val in p_values.items():
 
 ax.yaxis.grid(True, linestyle = "-", which = "major", color = "gray", alpha = 0.25)
 
-plt.xlabel("Type", fontname = font, fontsize = 18)
 plt.ylabel("Max Mean Signal", fontname = font, fontsize = 18)
 
-plt.xticks(fontsize=14)
+plt.xticks(fontsize=18)
 plt.yticks(fontsize=14)
 
 ax = plt.gca()
