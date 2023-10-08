@@ -31,7 +31,7 @@ sns.set_context("poster")
 sns.set_style("whitegrid")
 sns.set(font=font)
 
-fig, ax = plt.subplots()
+fig, ax = plt.subplots(figsize=(10,8))
 ax.set_facecolor('white')
 fig.set_facecolor('white')
 
