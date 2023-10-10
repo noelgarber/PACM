@@ -334,15 +334,20 @@ class ConditionalMatrix:
                     group_passing_count = np.sum(np.isin(passing_col, equivalent_residues))
                     group_failing_count = np.sum(np.isin(failing_col, equivalent_residues))
                     group_count = group_passing_count + group_failing_count
+
                     nongroup_passing_count = len(passing_col) - group_passing_count
                     nongroup_failing_count = len(failing_col) - group_failing_count
                     nongroup_count = nongroup_passing_count + nongroup_failing_count
+
                     group_pass_rate = group_passing_count / group_count if group_count != 0 else np.nan
                     nongroup_pass_rate = nongroup_passing_count / nongroup_count if nongroup_count != 0 else np.nan
-                    group_rate_ratio = group_pass_rate / nongroup_pass_rate # is less than 1 when aa is disfavoured
+
+                    # The group rate ratio will be less than 1 when an aa is disfavoured
+                    group_rate_ratio = group_pass_rate / nongroup_pass_rate if nongroup_pass_rate > 0 else np.nan
                     if not np.isfinite(group_rate_ratio):
                         group_rate_ratio = 1
                     group_use_default = False
+
                 else:
                     group_rate_ratio = 1 # prevents high variability when only a few example peptides exist
                     group_use_default = True
