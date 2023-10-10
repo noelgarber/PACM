@@ -40,11 +40,11 @@ def process_weights_chunk(chunk, specificity_matrix, fit_mode = "f1", side = Non
     optimized_mcc = 0
     optimized_accuracy = 0
     optimized_weights = np.ones(sequence_length)
-    optimized_weights_std = np.inf
+    optimized_weights_cv = np.inf # coefficient of variation = SD/mean
 
     if fit_mode == "accuracy":
         for weights in chunk:
-            current_weights_std = weights.std()
+            current_weights_cv = weights.std() / weights.mean()
 
             specificity_matrix.apply_weights(weights)
             specificity_matrix.score_source_peptides(use_weighted=True)
@@ -52,11 +52,11 @@ def process_weights_chunk(chunk, specificity_matrix, fit_mode = "f1", side = Non
 
             current_accuracy = specificity_matrix.weighted_accuracy
             better_accuracy = current_accuracy > optimized_accuracy
-            better_std = current_accuracy == optimized_accuracy and current_weights_std < optimized_weights_std
-            if better_accuracy or better_std:
+            better_cv = current_accuracy == optimized_accuracy and current_weights_cv < optimized_weights_cv
+            if better_accuracy or better_cv:
                 optimized_accuracy = current_accuracy
                 optimized_weights = weights
-                optimized_weights_std = current_weights_std
+                optimized_weights_cv = current_weights_cv
 
         specificity_matrix.apply_weights(optimized_weights)
         specificity_matrix.score_source_peptides(use_weighted=True)
@@ -75,7 +75,7 @@ def process_weights_chunk(chunk, specificity_matrix, fit_mode = "f1", side = Non
 
     elif fit_mode == "MCC" or fit_mode == "mcc":
         for weights in chunk:
-            current_weights_std = weights.std()
+            current_weights_cv = weights.std() / weights.mean()
 
             specificity_matrix.apply_weights(weights)
             specificity_matrix.score_source_peptides(use_weighted=True)
@@ -89,11 +89,11 @@ def process_weights_chunk(chunk, specificity_matrix, fit_mode = "f1", side = Non
                 current_mcc = specificity_matrix.weighted_mean_mcc
 
             better_mcc = current_mcc > optimized_mcc
-            better_std = current_mcc == optimized_mcc and current_weights_std < optimized_weights_std
-            if better_mcc or better_std:
+            better_cv = current_mcc == optimized_mcc and current_weights_cv < optimized_weights_cv
+            if better_mcc or better_cv:
                 optimized_mcc = current_mcc
                 optimized_weights = weights
-                optimized_weights_std = current_weights_std
+                optimized_weights_cv = current_weights_cv
 
         specificity_matrix.apply_weights(optimized_weights)
         specificity_matrix.score_source_peptides(use_weighted=True)
@@ -111,7 +111,7 @@ def process_weights_chunk(chunk, specificity_matrix, fit_mode = "f1", side = Non
 
     elif fit_mode == "f1":
         for weights in chunk:
-            current_weights_std = weights.std()
+            current_weights_cv = weights.std() / weights.mean()
 
             specificity_matrix.apply_weights(weights)
             specificity_matrix.score_source_peptides(use_weighted=True)
@@ -125,11 +125,11 @@ def process_weights_chunk(chunk, specificity_matrix, fit_mode = "f1", side = Non
                 current_f1 = specificity_matrix.weighted_mean_f1
 
             better_f1 = current_f1 > optimized_f1
-            better_std = current_f1 == optimized_f1 and current_weights_std < optimized_weights_std
-            if better_f1 or better_std:
+            better_cv = current_f1 == optimized_f1 and current_weights_cv < optimized_weights_cv
+            if better_f1 or better_cv:
                 optimized_f1 = current_f1
                 optimized_weights = weights
-                optimized_weights_std = current_weights_std
+                optimized_weights_cv = current_weights_cv
 
         specificity_matrix.apply_weights(optimized_weights)
         specificity_matrix.score_source_peptides(use_weighted=True)
@@ -147,7 +147,7 @@ def process_weights_chunk(chunk, specificity_matrix, fit_mode = "f1", side = Non
 
     elif fit_mode == "R2":
         for weights in chunk:
-            current_weights_std = weights.std()
+            current_weights_cv = weights.std() / weights.mean()
 
             specificity_matrix.apply_weights(weights)
             specificity_matrix.score_source_peptides(use_weighted=True)
@@ -155,11 +155,11 @@ def process_weights_chunk(chunk, specificity_matrix, fit_mode = "f1", side = Non
 
             current_r2 = specificity_matrix.weighted_linear_r2
             better_r2 = current_r2 > optimized_r2
-            better_std = current_r2 == optimized_r2 and current_weights_std < optimized_weights_std
-            if better_r2 or better_std:
+            better_cv = current_r2 == optimized_r2 and current_weights_cv < optimized_weights_cv
+            if better_r2 or better_cv:
                 optimized_r2 = current_r2
                 optimized_weights = weights
-                optimized_weights_std = current_weights_std
+                optimized_weights_cv = current_weights_cv
 
         specificity_matrix.apply_weights(optimized_weights)
         specificity_matrix.score_source_peptides(use_weighted=True)
@@ -180,7 +180,7 @@ def process_weights_chunk(chunk, specificity_matrix, fit_mode = "f1", side = Non
 
     output = (maximizable_value,
               optimized_accuracy, optimized_mcc, optimized_f1, optimized_r2,
-              optimized_weights, optimized_weights_std)
+              optimized_weights, optimized_weights_cv)
 
     return output
 
@@ -227,14 +227,14 @@ def process_weights(weights_array_chunks, specificity_matrix, fit_mode = "f1", s
     best_r2 = 0
     best_accuracy = 0
     best_weights = None
-    best_weights_std = np.inf
+    best_weights_cv = np.inf
 
     with trange(len(weights_array_chunks), desc="Processing specificity matrix weights") as pbar:
         for chunk_results in pool.imap_unordered(process_partial, weights_array_chunks):
             better_value = chunk_results[0] > best_maximizable_value
-            better_std = chunk_results[0] == best_maximizable_value and chunk_results[6] < best_weights_std
-            if better_value or better_std:
-                best_maximizable_value, best_accuracy, best_mcc, best_f1, best_r2, best_weights, best_weights_std = chunk_results
+            better_cv = chunk_results[0] == best_maximizable_value and chunk_results[6] < best_weights_cv
+            if better_value or better_cv:
+                best_maximizable_value, best_accuracy, best_mcc, best_f1, best_r2, best_weights, best_weights_cv = chunk_results
                 weights_str = ", ".join(best_weights.round(2).astype(str))
 
                 if side is not None:
@@ -243,10 +243,10 @@ def process_weights(weights_array_chunks, specificity_matrix, fit_mode = "f1", s
                     max_str = f"{fit_mode} = {best_maximizable_value}"
 
                 if fit_mode == "accuracy":
-                    print(f"\nNew record: {max_str} for weights: [{weights_str}] (SD = {best_weights_std})")
+                    print(f"\nNew record: {max_str} for weights: [{weights_str}] (CV = {best_weights_cv})")
                 else:
                     acc_str = f"{side} accuracy = {best_accuracy}" if side is not None else f"accuracy = {best_accuracy}"
-                    print(f"\nNew record: {max_str} ({acc_str}) for weights: [{weights_str}] (SD = {best_weights_std})")
+                    print(f"\nNew record: {max_str} ({acc_str}) for weights: [{weights_str}] (CV = {best_weights_cv})")
 
             pbar.update()
 
