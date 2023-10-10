@@ -2,13 +2,12 @@
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import os
 from functools import partial
 from sklearn.metrics import precision_recall_curve, matthews_corrcoef
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
 from Matrix_Generator.random_search import RandomSearchOptimizer
+from visualization_tools.precision_recall import plot_precision_recall
 try:
     from Matrix_Generator.config_local import aa_charac_dict
 except:
@@ -17,22 +16,6 @@ except:
 ''' ----------------------------------------------------------------------------------------------------------------
                       Define optimization functions for determining position and score weights
     ---------------------------------------------------------------------------------------------------------------- '''
-
-def plot_precision_recall(precisions, recalls, accuracies, thresholds, save_path = None):
-    # Helper function that plots precision against recall
-
-    if save_path is not None:
-        save_folder = save_path.rsplit("/",1)[0]
-        if not os.path.exists(save_folder):
-            os.makedirs(save_folder)
-
-    plt.plot(thresholds, precisions, linestyle="-", label="Precision")
-    plt.plot(thresholds, recalls, linestyle="-", label="Recall")
-    plt.plot(thresholds, accuracies, linestyle="-", label="Accuracy")
-    plt.xlabel("Score Threshold")
-    plt.legend()
-    plt.savefig(save_path, format="pdf") if save_path is not None else None
-    plt.show()
 
 def accuracy_objective(weights, actual_truths, points_2d, invert_points = False):
     '''
