@@ -63,7 +63,14 @@ def process_weights_chunk(chunk, specificity_matrix, fit_mode = "f1", side = Non
         specificity_matrix.set_specificity_statistics(use_weighted=True, statistic_type="f1")
         optimized_r2 = specificity_matrix.weighted_linear_r2
         optimized_f1 = specificity_matrix.weighted_mean_f1
-        optimized_accuracy = specificity_matrix.weighted_accuracy
+
+        if side == "upper":
+            optimized_accuracy = specificity_matrix.weighted_upper_accuracy
+        elif side == "lower":
+            optimized_accuracy = specificity_matrix.weighted_lower_accuracy
+        else:
+            optimized_accuracy = specificity_matrix.weighted_accuracy
+
         maximizable_value = optimized_accuracy
 
     elif fit_mode == "MCC" or fit_mode == "mcc":
@@ -94,7 +101,13 @@ def process_weights_chunk(chunk, specificity_matrix, fit_mode = "f1", side = Non
         optimized_r2 = specificity_matrix.weighted_linear_r2
         optimized_f1 = np.nan
         maximizable_value = optimized_mcc
-        optimized_accuracy = specificity_matrix.weighted_accuracy
+
+        if side == "upper":
+            optimized_accuracy = specificity_matrix.weighted_upper_accuracy
+        elif side == "lower":
+            optimized_accuracy = specificity_matrix.weighted_lower_accuracy
+        else:
+            optimized_accuracy = specificity_matrix.weighted_accuracy
 
     elif fit_mode == "f1":
         for weights in chunk:
@@ -124,7 +137,13 @@ def process_weights_chunk(chunk, specificity_matrix, fit_mode = "f1", side = Non
         optimized_r2 = specificity_matrix.weighted_linear_r2
         optimized_mcc = np.nan
         maximizable_value = optimized_f1
-        optimized_accuracy = specificity_matrix.weighted_accuracy
+
+        if side == "upper":
+            optimized_accuracy = specificity_matrix.weighted_upper_accuracy
+        elif side == "lower":
+            optimized_accuracy = specificity_matrix.weighted_lower_accuracy
+        else:
+            optimized_accuracy = specificity_matrix.weighted_accuracy
 
     elif fit_mode == "R2":
         for weights in chunk:
@@ -148,7 +167,13 @@ def process_weights_chunk(chunk, specificity_matrix, fit_mode = "f1", side = Non
         optimized_f1 = specificity_matrix.weighted_mean_f1
         optimized_mcc = np.nan
         maximizable_value = optimized_r2
-        optimized_accuracy = specificity_matrix.weighted_accuracy
+
+        if side == "upper":
+            optimized_accuracy = specificity_matrix.weighted_upper_accuracy
+        elif side == "lower":
+            optimized_accuracy = specificity_matrix.weighted_lower_accuracy
+        else:
+            optimized_accuracy = specificity_matrix.weighted_accuracy
 
     else:
         raise ValueError(f"process_weights_chunk got fit_mode={fit_mode}, but must be `mcc`, `f1`, or `R2`")
@@ -210,8 +235,18 @@ def process_weights(weights_array_chunks, specificity_matrix, fit_mode = "f1", s
             better_std = chunk_results[0] == best_maximizable_value and chunk_results[6] < best_weights_std
             if better_value or better_std:
                 best_maximizable_value, best_accuracy, best_mcc, best_f1, best_r2, best_weights, best_weights_std = chunk_results
-                formatted_weights = ", ".join(best_weights.round(2).astype(str))
-                print(f"\nNew record: {side} {fit_mode} = {best_maximizable_value} (overall accuracy = {best_accuracy}) for weights: [{formatted_weights}] (SD = {best_weights_std})")
+                weights_str = ", ".join(best_weights.round(2).astype(str))
+
+                if side is not None:
+                    max_str = f"{side} {fit_mode} = {best_maximizable_value}"
+                else:
+                    max_str = f"{fit_mode} = {best_maximizable_value}"
+
+                if fit_mode == "accuracy":
+                    print(f"\nNew record: {max_str} for weights: [{weights_str}] (SD = {best_weights_std})")
+                else:
+                    acc_str = f"{side} accuracy = {best_accuracy}" if side is not None else f"accuracy = {best_accuracy}"
+                    print(f"\nNew record: {max_str} ({acc_str}) for weights: [{weights_str}] (SD = {best_weights_std})")
 
             pbar.update()
 

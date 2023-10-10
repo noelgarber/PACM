@@ -52,7 +52,7 @@ def optimize_accuracy(actual_labels, score_values):
     valid_total_matches = np.equal(valid_predicted_labels, valid_actual_labels)
     best_total_accuracy = valid_total_matches.mean()
 
-    return (best_total_accuracy, best_above_threshold, best_below_threshold)
+    return (best_total_accuracy, best_above_accuracy, best_below_accuracy, best_above_threshold, best_below_threshold)
 
 def optimize_mcc(actual_truths, score_values):
     # Helper function that finds the best MCC at the optimal threshold for numerical scores in a binary classification
@@ -469,14 +469,19 @@ class SpecificityMatrix:
             multiclass_labels = np.zeros(shape=log2fc_above_upper.shape)
             multiclass_labels[log2fc_above_upper] = 1
             multiclass_labels[log2fc_below_lower] = 2
-            best_accuracy, best_thres_upper, best_thres_lower = optimize_accuracy(multiclass_labels, valid_score_values)
+            result = optimize_accuracy(multiclass_labels, valid_score_values)
+            best_accuracy, best_upper_accuracy, best_lower_accuracy, best_thres_upper, best_thres_lower = result
 
             if use_weighted:
                 self.weighted_upper_threshold, self.weighted_lower_threshold = best_thres_upper, best_thres_lower
                 self.weighted_accuracy = best_accuracy
+                self.weighted_upper_accuracy = best_upper_accuracy
+                self.weighted_lower_accuracy = best_lower_accuracy
             else:
                 self.unweighted_upper_threshold, self.unweighted_lower_threshold = best_thres_upper, best_thres_lower
                 self.unweighted_accuracy = best_accuracy
+                self.unweighted_upper_accuracy = best_upper_accuracy
+                self.unweighted_lower_accuracy = best_lower_accuracy
 
         elif statistic_type == "mcc":
             # Find upper and lower MCC values
@@ -497,6 +502,8 @@ class SpecificityMatrix:
             actual_classes[log2fc_above_upper] = 1
             actual_classes[log2fc_below_lower] = 2
 
+            upper_accuracy = np.equal(log2fc_above_upper, predicted_upper).mean()
+            lower_accuracy = np.equal(log2fc_below_lower, predicted_lower).mean()
             accuracy = np.equal(predicted_classes, actual_classes).mean()
 
             if use_weighted:
@@ -504,11 +511,13 @@ class SpecificityMatrix:
                 self.weighted_upper_mcc, self.weighted_lower_mcc = best_mcc_upper, best_mcc_lower
                 self.weighted_upper_threshold, self.weighted_lower_threshold = best_thres_upper, best_thres_lower
                 self.weighted_accuracy = accuracy
+                self.weighted_upper_accuracy, self.weighted_lower_accuracy = upper_accuracy, lower_accuracy
             else:
                 self.unweighted_mean_mcc = weighted_mean_mcc
                 self.unweighted_upper_mcc, self.unweighted_lower_mcc = best_mcc_upper, best_mcc_lower
                 self.unweighted_upper_threshold, self.unweighted_lower_threshold = best_thres_upper, best_thres_lower
                 self.unweighted_accuracy = accuracy
+                self.unweighted_upper_accuracy, self.unweighted_lower_accuracy = upper_accuracy, lower_accuracy
 
         elif statistic_type == "f1":
             # Find upper and lower f1-scores
@@ -529,6 +538,8 @@ class SpecificityMatrix:
             actual_classes[log2fc_above_upper] = 1
             actual_classes[log2fc_below_lower] = 2
 
+            upper_accuracy = np.equal(log2fc_above_upper, predicted_upper).mean()
+            lower_accuracy = np.equal(log2fc_below_lower, predicted_lower).mean()
             accuracy = np.equal(predicted_classes, actual_classes).mean()
 
             if use_weighted:
@@ -536,11 +547,13 @@ class SpecificityMatrix:
                 self.weighted_upper_f1, self.weighted_lower_f1 = best_f1_upper, best_f1_lower
                 self.weighted_upper_threshold, self.weighted_lower_threshold = best_thres_upper, best_thres_lower
                 self.weighted_accuracy = accuracy
+                self.weighted_upper_accuracy, self.weighted_lower_accuracy = upper_accuracy, lower_accuracy
             else:
                 self.unweighted_mean_f1 = weighted_mean_f1
                 self.unweighted_upper_f1, self.unweighted_lower_f1 = best_f1_upper, best_f1_lower
                 self.unweighted_upper_threshold, self.unweighted_lower_threshold = best_thres_upper, best_thres_lower
                 self.unweighted_accuracy = accuracy
+                self.unweighted_upper_accuracy, self.unweighted_lower_accuracy = upper_accuracy, lower_accuracy
 
         # Also find R2 of a linear function relating log2fc to specificity score
         r2_value, linear_model = linear_regression(valid_score_values, valid_log2fc_values)
