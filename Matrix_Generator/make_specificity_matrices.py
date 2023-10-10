@@ -256,7 +256,7 @@ def process_weights(weights_array_chunks, specificity_matrix, fit_mode = "f1", s
     return (best_weights, best_accuracy, best_mcc, best_f1, best_r2)
 
 def find_optimal_weights(specificity_matrix, motif_length, chunk_size = 5000, ignore_positions = None,
-                         fit_mode = "f1", side = None):
+                         fit_mode = "f1", side = None, plot_curves = False, plot_directory = None):
     '''
     Parent function for finding optimal position weights to generate an optimally weighted specificity matrix
 
@@ -267,6 +267,8 @@ def find_optimal_weights(specificity_matrix, motif_length, chunk_size = 5000, ig
         ignore_positions (iterable):            positions to force to 0 for weights arrays
         fit_mode (str):                         which value to maximize
         side (str|None):                        can be "upper", "lower", or None (default; takes mean of the two)
+        plot_curves (bool):                     whether to plot precision-recall curves; only applies to f1-score
+        plot_directory (str):                   if plot_curves is True, this is the folder where plots will be saved
 
     Returns:
         specificity_matrix (SpecificityMatrix): the fitted SpecificityMatrix object containing matrices and scored data
@@ -286,17 +288,26 @@ def find_optimal_weights(specificity_matrix, motif_length, chunk_size = 5000, ig
     weights_array_chunks = [trial_weights[i:i + chunk_size] for i in range(0, len(trial_weights), chunk_size)]
 
     # Run the parallelized optimization process
+    print(f"---\nSpecificity weights optimization mode: maximize {fit_mode}")
     results = process_weights(weights_array_chunks, specificity_matrix, fit_mode, side)
     best_weights, best_accuracy, best_mcc, best_mean_f1, best_linear_r2 = results
 
     # Apply the final best weights onto the specificity matrix and score the source data
     specificity_matrix.apply_weights(best_weights)
     specificity_matrix.score_source_peptides(use_weighted=True)
-    print(f"Specificity weights optimization mode: maximize {fit_mode}")
     if fit_mode == "accuracy":
         specificity_matrix.set_specificity_statistics(use_weighted=True, statistic_type="accuracy")
     elif fit_mode == "f1" or fit_mode == "R2":
-        specificity_matrix.set_specificity_statistics(use_weighted=True, statistic_type="f1")
+        use_weighted = True
+        statistic_type = "f1"
+        plot_upper_curve = side == "upper" and plot_curves
+        plot_lower_curve = side == "lower" and plot_curves
+        plot_file_name = f"{str(side)}-specific_precision_recall_curve.pdf"
+        plot_path = os.path.join(plot_directory, plot_file_name)
+        upper_plot_path = plot_path if plot_upper_curve else None
+        lower_plot_path = plot_path if plot_lower_curve else None
+        specificity_matrix.set_specificity_statistics(use_weighted, statistic_type, plot_upper_curve, plot_lower_curve,
+                                                      upper_plot_path, lower_plot_path)
     else:
         specificity_matrix.set_specificity_statistics(use_weighted=True, statistic_type="mcc")
 
@@ -306,7 +317,8 @@ def find_optimal_weights(specificity_matrix, motif_length, chunk_size = 5000, ig
                                       Define main functions and default parameters
    ------------------------------------------------------------------------------------------------------------------'''
 
-def main(source_df, comparator_info = comparator_info, specificity_params = specificity_params, save=True, plot=False):
+def main(source_df, comparator_info = comparator_info, specificity_params = specificity_params, save = True,
+         plot_sigmoid = False, plot_precision_recall = True):
     '''
     Main function for generating and assessing optimal specificity position-weighted matrices
 
@@ -334,7 +346,7 @@ def main(source_df, comparator_info = comparator_info, specificity_params = spec
     if save:
         save_df = not optimize_weights
         specificity_matrix.save(output_folder, save_df)
-        specificity_matrix.plot_regression(output_folder, use_weighted=False) if plot else None
+        specificity_matrix.plot_regression(output_folder, use_weighted=False) if plot_sigmoid else None
 
     # Save the unweighted SpecificityMatrix object
     specificity_matrix_path = os.path.join(output_folder, "specificity_matrix.pkl")
@@ -354,13 +366,18 @@ def main(source_df, comparator_info = comparator_info, specificity_params = spec
 
         print(f"---\nOptimizing specificity matrix weights for positive log2fc values: ")
         upper_specificity_matrix = deepcopy(specificity_matrix)
+        curves_path = os.path.join(output_folder, "precision_recall_curves")
+        if not os.path.exists(curves_path):
+            os.makedirs(curves_path)
         upper_specificity_matrix = find_optimal_weights(upper_specificity_matrix, length, chunk_size,
-                                                        ignore_positions, fit_mode, side="upper")
+                                                        ignore_positions, fit_mode, side="upper", plot_curves=True,
+                                                        plot_directory=curves_path)
 
         print(f"---\nOptimizing specificity matrix weights for negative log2fc values: ")
         lower_specificity_matrix = deepcopy(specificity_matrix)
         lower_specificity_matrix = find_optimal_weights(lower_specificity_matrix, length, chunk_size,
-                                                        ignore_positions, fit_mode, side="lower")
+                                                        ignore_positions, fit_mode, side="lower", plot_curves=True,
+                                                        plot_directory=curves_path)
 
         # Save the weighted matrices
         if save:
@@ -368,13 +385,13 @@ def main(source_df, comparator_info = comparator_info, specificity_params = spec
             if not os.path.exists(weighted_upper_folder):
                 os.makedirs(weighted_upper_folder)
             upper_specificity_matrix.save(weighted_upper_folder, save_df=False)
-            upper_specificity_matrix.plot_regression(weighted_upper_folder, use_weighted=True) if plot else None
+            upper_specificity_matrix.plot_regression(weighted_upper_folder, use_weighted=True) if plot_sigmoid else None
 
             weighted_lower_folder = os.path.join(output_folder, "weighted_lower")
             if not os.path.exists(weighted_lower_folder):
                 os.makedirs(weighted_lower_folder)
             lower_specificity_matrix.save(weighted_lower_folder, save_df=False)
-            lower_specificity_matrix.plot_regression(weighted_lower_folder, use_weighted=True) if plot else None
+            lower_specificity_matrix.plot_regression(weighted_lower_folder, use_weighted=True) if plot_sigmoid else None
 
             # Save merged scored dataframe of upper and lower matrices
             output_df = upper_specificity_matrix.scored_source_df.copy()

@@ -9,6 +9,7 @@ from sklearn.linear_model import LinearRegression
 from general_utils.user_helper_functions import get_comparator_baits
 from general_utils.matrix_utils import collapse_phospho
 from Matrix_Generator.sigmoid_regression import fit_sigmoid
+from visualization_tools.precision_recall import plot_precision_recall
 try:
     from Matrix_Generator.config_local import *
 except:
@@ -75,7 +76,7 @@ def optimize_mcc(actual_truths, score_values):
 
     return best_mcc, best_threshold
 
-def optimize_f1(actual_truths, score_values):
+def optimize_f1(actual_truths, score_values, plot_curve = False, plot_path = None):
     # Helper function that optimizes f1-score using a precision-recall curve
 
     valid_mask = np.logical_and(np.isfinite(actual_truths), np.isfinite(score_values))
@@ -90,6 +91,11 @@ def optimize_f1(actual_truths, score_values):
     best_idx = np.nanargmax(f1_scores)
     best_f1 = f1_scores[best_idx]
     best_threshold = thresholds[best_idx]
+
+    if plot_curve:
+        threshold_predictions = np.greater_equal(score_values, thresholds[:, np.newaxis])
+        accuracies = np.mean(threshold_predictions == actual_truths, axis=1)
+        plot_precision_recall(precision[:-1], recall[:-1], accuracies, thresholds, plot_path)
 
     return best_f1, best_threshold
 
@@ -436,13 +442,18 @@ class SpecificityMatrix:
             all_score_values[self.passing_indices] = self.passing_unweighted_scores
             self.scored_source_df["Unweighted_Specificity_Score"] = all_score_values
 
-    def set_specificity_statistics(self, use_weighted = True, statistic_type = "mcc"):
+    def set_specificity_statistics(self, use_weighted = True, statistic_type = "mcc", plot_upper_curve = False,
+                                   plot_lower_curve = False, upper_plot_path = None, lower_plot_path = None):
         '''
         Function to evaluate specificity score correlation with actual log2fc values that are observed
 
         Args:
-            use_weighted (bool):  whether to assess weighted or unweighted scores
-            statistic_type (str): can either be "mcc", "f1", or "accuracy"
+            use_weighted (bool):     whether to assess weighted or unweighted scores
+            statistic_type (str):    can either be "mcc", "f1", or "accuracy"
+            plot_upper_curve (bool): whether to plot (+)-specific precision-recall curve when statistic_type="f1"
+            plot_lower_curve (bool): whether to plot (-)-specific precision-recall curve when statistic_type="f1"
+            upper_plot_path (str):   the path to save the (+)-specific precision-recall curve to, if generated
+            lower_plot_path (str):   the path to save the (-)-specific precision-recall curve to, if generated
 
         Returns:
             None
@@ -521,8 +532,10 @@ class SpecificityMatrix:
 
         elif statistic_type == "f1":
             # Find upper and lower f1-scores
-            best_f1_upper, best_thres_upper = optimize_f1(log2fc_above_upper, valid_score_values)
-            best_f1_lower, best_thres_lower = optimize_f1(log2fc_below_lower, valid_score_values * -1)
+            best_f1_upper, best_thres_upper = optimize_f1(log2fc_above_upper, valid_score_values,
+                                                          plot_upper_curve, upper_plot_path)
+            best_f1_lower, best_thres_lower = optimize_f1(log2fc_below_lower, valid_score_values * -1,
+                                                          plot_lower_curve, lower_plot_path)
             best_thres_lower = best_thres_lower * -1 # corrected the inverted sign
             weighted_mean_f1 = (best_f1_lower + best_f1_upper * upper_lower_ratio) / (1 + upper_lower_ratio)
 
