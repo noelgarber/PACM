@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -34,6 +35,9 @@ sns.set(font=font)
 fig, ax = plt.subplots(figsize=(10,8))
 ax.set_facecolor('white')
 fig.set_facecolor('white')
+if np.nanmin(df["Max Mean Signal"].values) > 0:
+    y_max = 1.1 * np.nanmax(df["Max Mean Signal"].values)
+    ax.set_ylim(bottom=-0.5, top=y_max)
 
 sns.swarmplot(data = df, y = "Max Mean Signal", x = "Type", size = 6, palette = palette, zorder = 1)
 
