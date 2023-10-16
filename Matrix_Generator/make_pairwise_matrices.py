@@ -150,4 +150,12 @@ def main(input_df, general_params = general_params, data_params = data_params, m
     with open(conditional_matrices_path, "wb") as f:
         pickle.dump(conditional_matrices, f)
 
+    # Save weights for later use in motif_predictor
+    weights_path = os.path.join(output_folder, "conditional_weights_tuple.pkl")
+    weights_tuple = (scored_result.positives_weights,
+                     scored_result.suboptimals_weights,
+                     scored_result.forbiddens_weights)
+    with open(weights_path, "wb") as f:
+        pickle.dump(weights_tuple, f)
+
     return (output_df, scored_result)
