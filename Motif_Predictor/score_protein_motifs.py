@@ -3,20 +3,140 @@
 import numpy as np
 import pandas as pd
 import pickle
+import multiprocessing
+from tqdm import trange
 from functools import partial
-from Motif_Predictor.predictor_config import predictor_params
-from Matrix_Generator.conditional_scoring import apply_motif_scores
+from Matrix_Generator.ConditionalMatrix import ConditionalMatrices
 from general_utils.general_utils import finite_sorted_indices, add_number_suffix
 
+# If selected, import a parallel method for comparison
 if predictor_params["compare_classical_method"]:
     from Motif_Predictor.classical_method import classical_method
 
-def scan_protein_seq(protein_seq, conditional_matrices, predictor_params = predictor_params):
+# Import the user-specified params, either from a local version or the git-linked version
+try:
+    from Motif_Predictor.predictor_config_local import predictor_params
+except:
+    from Motif_Predictor.predictor_config import predictor_params
+
+def score_sliced_protein(sequences_2d, conditional_matrices, weights_tuple = None, return_count = 3):
+    '''
+    Vectorized function to score amino acid sequences based on the dictionary of context-aware weighted matrices
+
+    Args:
+        sequences_2d (np.ndarray):                  unravelled peptide sequences to score
+        conditional_matrices (ConditionalMatrices): conditional weighted matrices for scoring peptides
+        weights_tuple (tuple):                      (positives_weights, suboptimals_weights, forbiddens_weights)
+
+    Returns:
+        output_motifs (list):                       list of motifs as strings
+        output_scores (list):                       list of matching scores for each motif
+    '''
+
+    motif_length = sequences_2d.shape[1]
+
+    # Get row indices for unique residues
+    unique_residues = np.unique(sequences_2d)
+    unique_residue_indices = conditional_matrices.index.get_indexer_for(unique_residues)
+    if (unique_residue_indices == -1).any():
+        failed_residues = unique_residues[unique_residue_indices == -1]
+        raise Exception(f"residues not found by matrix indexer: {failed_residues}")
+
+    # Get the matrix row indices for all the residues
+    aa_row_indices_2d = np.ones(shape=sequences_2d.shape, dtype=int) * -1
+    for unique_residue, row_index in zip(unique_residues, unique_residue_indices):
+        aa_row_indices_2d[sequences_2d == unique_residue] = row_index
+
+    # Define residues flanking either side of the residues of interest; for out-of-bounds cases, use opposite side
+    flanking_left_2d = np.concatenate((sequences_2d[:, 0:1], sequences_2d[:, 0:-1]), axis=1)
+    flanking_right_2d = np.concatenate((sequences_2d[:, 1:], sequences_2d[:, -1:]), axis=1)
+
+    # Get integer-encoded chemical classes for each residue
+    left_encoded_classes_2d = np.zeros(flanking_left_2d.shape, dtype=int)
+    right_encoded_classes_2d = np.zeros(flanking_right_2d.shape, dtype=int)
+    for member_aa, encoded_class in conditional_matrices.encoded_chemical_classes.items():
+        left_encoded_classes_2d[flanking_left_2d == member_aa] = encoded_class
+        right_encoded_classes_2d[flanking_right_2d == member_aa] = encoded_class
+
+    # Find the matrix identifier number (1st dim of 3D matrix) for each encoded class, depending on seq position
+    encoded_positions = np.arange(motif_length) * conditional_matrices.chemical_class_count
+    left_encoded_matrix_refs = left_encoded_classes_2d + encoded_positions
+    right_encoded_matrix_refs = right_encoded_classes_2d + encoded_positions
+
+    # Flatten the encoded matrix refs, which serve as the 1st dimension referring to 3D matrices
+    left_encoded_matrix_refs_flattened = left_encoded_matrix_refs.flatten()
+    right_encoded_matrix_refs_flattened = right_encoded_matrix_refs.flatten()
+
+    # Flatten the amino acid row indices into a matching array serving as the 2nd dimension
+    aa_row_indices_flattened = aa_row_indices_2d.flatten()
+
+    # Tile the column indices into a matching array serving as the 3rd dimension
+    column_indices = np.arange(motif_length)
+    column_indices_tiled = np.tile(column_indices, len(sequences_2d))
+
+    # Define dimensions for 3D matrix indexing
+    shape_2d = sequences_2d.shape
+    left_dim1 = left_encoded_matrix_refs_flattened
+    right_dim1 = right_encoded_matrix_refs_flattened
+    dim2 = aa_row_indices_flattened
+    dim3 = column_indices_tiled
+
+    # Calculate predicted signal values
+    left_positive_2d = conditional_matrices.stacked_positive_weighted[left_dim1, dim2, dim3].reshape(shape_2d)
+    right_positive_2d = conditional_matrices.stacked_positive_weighted[right_dim1, dim2, dim3].reshape(shape_2d)
+    positive_scores_2d = (left_positive_2d + right_positive_2d) / 2
+
+    # Calculate suboptimal element scores
+    left_suboptimal_2d = conditional_matrices.stacked_suboptimal_weighted[left_dim1, dim2, dim3].reshape(shape_2d)
+    right_suboptimal_2d = conditional_matrices.stacked_suboptimal_weighted[right_dim1, dim2, dim3].reshape(shape_2d)
+    suboptimal_scores_2d = (left_suboptimal_2d + right_suboptimal_2d) / 2
+
+    # Calculate forbidden element scores
+    left_forbidden_2d = conditional_matrices.stacked_forbidden_weighted[left_dim1, dim2, dim3].reshape(shape_2d)
+    right_forbidden_2d = conditional_matrices.stacked_forbidden_weighted[right_dim1, dim2, dim3].reshape(shape_2d)
+    forbidden_scores_2d = (left_forbidden_2d + right_forbidden_2d) / 2
+
+    # Apply weights if a tuple of arrays of weights values were given
+    if weights_tuple is not None:
+        positives_weights, suboptimals_weights, forbiddens_weights = weights_tuple
+        positive_scores_2d = np.multiply(positive_scores_2d, positives_weights)
+        suboptimal_scores_2d = np.multiply(suboptimal_scores_2d, suboptimals_weights)
+        forbidden_scores_2d = np.multiply(forbidden_scores_2d, forbiddens_weights)
+
+    # Calculate total scores
+    total_scores_2d = positive_scores_2d - suboptimal_scores_2d - forbidden_scores_2d
+    total_scores = total_scores_2d.sum(axis=1)
+
+    valid_row_indices = np.isfinite(total_scores)
+    valid_seqs_2d = sequences_2d[valid_row_indices]
+    valid_scores = total_scores[valid_row_indices]
+
+    sorted_indices = np.argsort(valid_scores * -1) # multiply by -1 to get indices in descending order
+    sorted_seqs_2d = valid_seqs_2d[sorted_indices]
+    sorted_scores = valid_scores[sorted_indices]
+
+    # Return the desired number of motifs and handle cases when less motifs than desired are found
+    output_motifs = []
+    output_scores = []
+    real_output_count = return_count if return_count <= len(sorted_scores) else len(sorted_scores)
+    for i in np.arange(real_output_count):
+        output_motifs.append("".join(sorted_seqs_2d[i]))
+        output_scores.append(sorted_scores[i])
+
+    if len(sorted_scores) < return_count:
+        for i in np.arange(real_output_count, return_count):
+            output_motifs.append("")
+            output_scores.append(np.nan)
+
+    return output_motifs, output_scores
+
+def scan_protein_seq(protein_seq, conditional_matrices, weights_tuple, predictor_params = predictor_params):
     '''
 
     Args:
         protein_seq (str):                          full length protein sequence to score
         conditional_matrices (ConditionalMatrices): object containing conditional weighted matrices
+        weights_tuple (tuple):                      tuple of arrays of weights values
         predictor_params (dict):                    dictionary of user-defined parameters from predictor_config.py
 
     Returns:
@@ -25,8 +145,6 @@ def scan_protein_seq(protein_seq, conditional_matrices, predictor_params = predi
 
     # Get necessary arguments
     motif_length = predictor_params["motif_length"]
-    use_weighted = predictor_params["use_weighted"]
-    convert_phospho = predictor_params["convert_phospho"]
     return_count = predictor_params["return_count"]
 
     # Get N-term and C-term trailing residue info
@@ -62,58 +180,46 @@ def scan_protein_seq(protein_seq, conditional_matrices, predictor_params = predi
                 residues_allowed = np.isin(column_residues, allowed_residues)
                 sliced_seqs_2d = sliced_seqs_2d[residues_allowed]
 
-        # After rules have been enforced, replace uncertain residues (X) with G (no side chain) for purposes of scoring
+        # After rules have been enforced, remove slices with uncertain residues (X)
         missing_residues = "X" in sliced_seqs_2d
         cleaned_sliced_2d = sliced_seqs_2d.copy()
         if missing_residues:
-            cleaned_sliced_2d[cleaned_sliced_2d == "X"] = "G"
+            missing_counts = np.sum(cleaned_sliced_2d == "X", axis = 1)
+            cleaned_sliced_2d = cleaned_sliced_2d[missing_counts == 0]
 
         # Optionally replace selenocysteine with cysteine for scoring purposes
         replace_selenocysteine = predictor_params["replace_selenocysteine"]
         if replace_selenocysteine and "U" in sliced_seqs_2d:
             cleaned_sliced_2d[cleaned_sliced_2d == "U"] = "C"
 
-        # Apply motif scores
-        motif_scores = apply_motif_scores(None, motif_length, conditional_matrices, cleaned_sliced_2d, convert_phospho,
-                                          use_weighted, return_array = True, return_2d = False, return_df = False)
-        sorted_score_indices = finite_sorted_indices(motif_scores)
-        sorted_motifs = []
-        sorted_score_values = []
-        for i in np.arange(return_count):
-            if i < len(motif_scores):
-                next_best_idx = sorted_score_indices[i]
-                next_best_score = motif_scores[next_best_idx]
-                next_best_motif = "".join(sliced_seqs_2d[next_best_idx])
-                sorted_motifs.append(next_best_motif)
-                sorted_score_values.append(next_best_score)
-            else:
-                sorted_motifs.append(" " * motif_length)
-                sorted_score_values.append(np.nan)
+        # Calculate motif scores
+        if len(cleaned_sliced_2d) > 0:
+            motifs, scores = score_sliced_protein(cleaned_sliced_2d, conditional_matrices, weights_tuple, return_count)
+        else:
+            motifs = ["" for i in np.arange(return_count)]
+            scores = [np.nan for i in np.arange(return_count)]
 
     else:
-        sorted_motifs = np.repeat("", return_count)
-        sorted_score_values = np.repeat(np.nan, return_count)
+        motifs = ["" for i in np.arange(return_count)]
+        scores = [np.nan for i in np.arange(return_count)]
 
-    sorted_motifs = np.array(sorted_motifs)
-    sorted_score_values = np.array(sorted_score_values)
+    return motifs, scores
 
-    return sorted_motifs, sorted_score_values
-
-def score_protein_seqs(protein_seqs_df, predictor_params = predictor_params):
+def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
     '''
-    Top level function to score protein sequences based on conditional matrices
+    Lower level function to score a chunk of protein sequences in parallel based on conditional matrices
 
     Args:
-        protein_seqs_df (pd.DataFrame): protein sequences dataframe
+        df_chunk (pd.DataFrame):        chunk of protein sequences dataframe
         predictor_params (dict):        dictionary of user-defined parameters from predictor_config.py
 
     Returns:
-        protein_seqs_df (pd.DataFrame): dataframe with protein sequences and found motifs
-        motif_col_names (list):         list of column names containing motif sequences for each protein
+        df_chunk_scored (pd.DataFrame): dataframe with protein sequences and found motifs
     '''
 
     # Get protein sequences to score
-    protein_seqs_list = protein_seqs_df["Sequence"].to_list()
+    protein_seqs_list = df_chunk["Sequence"].to_list()
+    df_chunk_scored = df_chunk.copy()
 
     # Load ConditionalMatrices object to be used in scoring
     conditional_matrices_path = predictor_params["conditional_matrices_path"]
@@ -124,36 +230,33 @@ def score_protein_seqs(protein_seqs_df, predictor_params = predictor_params):
     return_count = predictor_params["return_count"]
     compare_classical_method = predictor_params["compare_classical_method"]
 
-    ordered_motifs_cols = []
-    ordered_scores_cols = []
+    ordered_motifs_cols = [[] for i in np.arange(return_count)]
+    ordered_scores_cols = [[] for i in np.arange(return_count)]
+    classical_motifs_cols = [[] for i in np.arange(return_count)]
+    classical_scores_cols = [[] for i in np.arange(return_count)]
+
     motif_col_names = []
     score_col_names = []
-    if compare_classical_method:
-        classical_motifs_cols = []
-        classical_scores_cols = []
-
     for i in np.arange(return_count):
-        ordered_motifs_cols.append([])
-        ordered_scores_cols.append([])
-        if compare_classical_method:
-            classical_motifs_cols.append([])
-            classical_scores_cols.append([])
         suffix_number = add_number_suffix(i+1)
         motif_col_names.append(suffix_number+"_motif")
         score_col_names.append(suffix_number+"_motif_score")
 
-    # Loop over the protein sequences to score them
-    scan_seq_partial = partial(scan_protein_seq, conditional_matrices = conditional_matrices,
-                               predictor_params = predictor_params)
+    # Assemble a partial function for scoring individual proteins
+    weights_path = predictor_params["pickled_weights_path"]
+    with open(weights_path, "rb") as f:
+        weights_tuple = pickle.load(f)
 
+    scan_seq_partial = partial(scan_protein_seq, conditional_matrices = conditional_matrices,
+                               weights_tuple = weights_tuple, predictor_params = predictor_params)
+
+    # Loop over the protein sequences to score them
     for i, protein_seq in enumerate(protein_seqs_list):
-        print(f"Current entry: #{i}")
         # Score the protein sequence using conditional matrices
-        sorted_motifs, sorted_score_values = scan_seq_partial(protein_seq)
-        for j, (motif, score) in enumerate(zip(sorted_motifs, sorted_score_values)):
+        motifs, scores = scan_seq_partial(protein_seq)
+        for j, (motif, score) in enumerate(zip(motifs, scores)):
             ordered_motifs_cols[j].append(motif)
             ordered_scores_cols[j].append(score)
-        #print(f"\tNovel method found motifs {sorted_motifs} with scores {sorted_score_values}")
 
         # Optionally score the sequence using a classical method for comparison
         if compare_classical_method:
@@ -161,7 +264,6 @@ def score_protein_seqs(protein_seqs_df, predictor_params = predictor_params):
             for j, (classical_motif, classical_score) in enumerate(zip(classical_motifs, classical_scores)):
                 classical_motifs_cols[j].append(classical_motif)
                 classical_scores_cols[j].append(classical_score)
-            #print(f"\tClassical method found motifs {classical_motifs} with scores {classical_scores}")
 
     # Apply motifs and scores as columns to the dataframe
     zipped_cols = zip(ordered_motifs_cols, motif_col_names, ordered_scores_cols, score_col_names)
@@ -169,8 +271,8 @@ def score_protein_seqs(protein_seqs_df, predictor_params = predictor_params):
         if compare_classical_method:
             motif_col_name = "Novel_" + motif_col_name
             score_col_name = "Novel_" + score_col_name
-        protein_seqs_df[motif_col_name] = ordered_motifs_col
-        protein_seqs_df[score_col_name] = ordered_scores_col
+        df_chunk_scored[motif_col_name] = ordered_motifs_col
+        df_chunk_scored[score_col_name] = ordered_scores_col
 
     # Optionally apply classical motifs and scores as columns if they were generated
     if compare_classical_method:
@@ -178,7 +280,39 @@ def score_protein_seqs(protein_seqs_df, predictor_params = predictor_params):
         for classical_motif_col, motif_col_name, classical_scores_col, score_col_name in zipped_classical_cols:
             motif_col_name = "Classical_" + motif_col_name
             score_col_name = "Classical_" + score_col_name
-            protein_seqs_df[motif_col_name] = classical_motif_col
-            protein_seqs_df[score_col_name] = classical_scores_col
+            df_chunk_scored[motif_col_name] = classical_motif_col
+            df_chunk_scored[score_col_name] = classical_scores_col
 
-    return protein_seqs_df, motif_col_names
+    return df_chunk_scored
+
+def score_proteins(protein_seqs_df, predictor_params = predictor_params):
+    '''
+    Upper level function to score protein sequences in parallel based on conditional matrices
+
+    Args:
+        protein_seqs_df (pd.DataFrame):   protein sequences dataframe
+        predictor_params (dict):          dictionary of user-defined parameters from predictor_config.py
+
+    Returns:
+        scored_protein_df (pd.DataFrame): dataframe with protein sequences and found motifs
+    '''
+
+    chunk_size = predictor_params["chunk_size"]
+    df_chunks = [protein_seqs_df.iloc[i:i + chunk_size] for i in range(0, len(protein_seqs_df), chunk_size)]
+
+    score_chunk_partial = partial(score_proteins_chunk, predictor_params = predictor_params)
+
+    pool = multiprocessing.Pool()
+    scored_chunks = []
+
+    with trange(len(protein_seqs_df), desc="Scoring proteins...") as pbar:
+        for df_chunk_scored in pool.imap_unordered(score_chunk_partial, df_chunks):
+            scored_chunks.append(df_chunk_scored)
+            pbar.update()
+
+    pool.close()
+    pool.join()
+
+    scored_protein_df = pd.concat(scored_chunks, ignore_index=True)
+
+    return scored_protein_df
