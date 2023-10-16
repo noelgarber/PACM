@@ -153,7 +153,8 @@ class ScoredPeptideResult:
     '''
     def __init__(self, seqs_2d, slice_scores_subsets,
                  positive_scores_2d, suboptimal_scores_2d, forbidden_scores_2d, actual_truths = None,
-                 signal_values = None, objective_type = "accuracy", predefined_weights = None, fig_path = None):
+                 signal_values = None, objective_type = "accuracy", predefined_weights = None, fig_path = None,
+                 make_df = True):
         '''
         Initialization function to generate the score values and assign them to self
 
@@ -170,6 +171,7 @@ class ScoredPeptideResult:
             predefined_weights (tuple):        tuple of (position_weights, positive_score_weight,
                                                suboptimal_score_weight, forbidden_score_weight)
             fig_path (str):                    desired file name, as full path, to save precision/recall graph
+            make_df (bool):                    whether to generate a dataframe containing scores
         '''
 
         # Check validity of slice_scores_subsets
@@ -198,7 +200,8 @@ class ScoredPeptideResult:
 
         # Apply and assess score weightings, and assign them to a dataframe
         self.process_weights(actual_truths, signal_values, objective_type, predefined_weights, fig_path)
-        self.generate_scored_df()
+        if make_df:
+            self.generate_scored_df()
 
     def process_weights(self, actual_truths = None, signal_values = None, objective_type = "accuracy",
                         predefined_weights = None, fig_path = None):
