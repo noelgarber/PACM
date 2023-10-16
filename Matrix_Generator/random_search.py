@@ -64,6 +64,9 @@ class RandomSearchOptimizer():
 
                 pbar.update()
 
+        pool.close()
+        pool.join()
+
     def search_chunk(self, chunk):
         '''
         Helper function to parallelize the search task
