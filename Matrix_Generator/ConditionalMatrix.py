@@ -289,8 +289,9 @@ class ConditionalMatrix:
                     other_count = other_pass_count + other_fail_count
                     qualifying_pass_rate = qualifying_pass_count / qualifying_count if qualifying_count != 0 else np.nan
                     other_pass_rate = other_pass_count / other_count if other_count != 0 else np.nan
-                    pass_rate_ratio = qualifying_pass_rate / other_pass_rate # is less than 1 when aa is disfavoured
-                    if not np.isfinite(pass_rate_ratio):
+                    if other_pass_rate != 0:
+                        pass_rate_ratio = qualifying_pass_rate / other_pass_rate # is less than 1 when aa is disfavoured
+                    else:
                         pass_rate_ratio = 1
                     use_default = False
                 else:
