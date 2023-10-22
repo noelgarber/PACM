@@ -39,9 +39,9 @@ if np.nanmin(df["Max Mean Signal"].values) > 0:
     y_max = 1.1 * np.nanmax(df["Max Mean Signal"].values)
     ax.set_ylim(bottom=-0.5, top=y_max)
 
-sns.swarmplot(data = df, y = "Max Mean Signal", x = "Type", size = 6, palette = palette, zorder = 1)
-
 type_order = ["TP", "TN", "FP", "FN"]
+sns.swarmplot(data = df, y = "Max Mean Signal", x = "Type", size = 6, palette = palette, zorder = 1, order = type_order)
+
 means = df.groupby("Type")["Max Mean Signal"].mean().reindex(type_order)
 stds = df.groupby("Type")["Max Mean Signal"].std().reindex(type_order)
 
