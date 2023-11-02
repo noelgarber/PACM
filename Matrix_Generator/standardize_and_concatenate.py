@@ -180,15 +180,16 @@ def main_workflow(image_params = image_params):
 
     # Inter-Group Standardization to enforce a consistent shared control between datasets
     standardized_df_list = standardize_between_datasets(intraset_standardized_df_list, image_params)
-
-    # Concatenate the dataframes together
     concatenated_df = pd.concat(standardized_df_list, axis=0)
 
-    # Find the percentiles of the concatenated df
+    # Add standardized max bait mean col
     max_bait_mean_col = image_params["max_bait_mean_col"]
     control_probe_name = image_params["control_probe_name"]
-    _, concatenated_percentiles_dict = find_max_bait_signal(concatenated_df, bait_cols_dict, control_probe_name,
-                                                            max_bait_mean_col, return_percentiles_dict = True)
+    for bait, cols in bait_cols_dict.items():
+        bait_cols_dict[bait] = [col[:-7] + "_Standardized_Signal" for col in cols]
+    concatenated_df, concatenated_percentiles_dict = find_max_bait_signal(concatenated_df, bait_cols_dict,
+                                                                          control_probe_name, max_bait_mean_col,
+                                                                          return_percentiles_dict = True)
 
     return concatenated_df, bait_cols_dict, concatenated_percentiles_dict
 
