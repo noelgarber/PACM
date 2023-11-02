@@ -185,10 +185,13 @@ def main_workflow(image_params = image_params):
     # Add standardized max bait mean col
     max_bait_mean_col = image_params["max_bait_mean_col"]
     control_probe_name = image_params["control_probe_name"]
+    control_multiplier = image_params["control_multiplier"]
     for bait, cols in bait_cols_dict.items():
         bait_cols_dict[bait] = [col[:-7] + "_Standardized_Signal" for col in cols]
+    subtract_control = True
     concatenated_df, concatenated_percentiles_dict = find_max_bait_signal(concatenated_df, bait_cols_dict,
-                                                                          control_probe_name, max_bait_mean_col,
+                                                                          control_probe_name, subtract_control,
+                                                                          control_multiplier, max_bait_mean_col,
                                                                           return_percentiles_dict = True)
 
     return concatenated_df, bait_cols_dict, concatenated_percentiles_dict

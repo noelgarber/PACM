@@ -191,7 +191,7 @@ def one_passes(input_df, bait_cols_dict, bait_pass_cols, control_probe_name, con
 
     return output_df
 
-def find_max_bait_signal(input_df, bait_cols_dict, control_probe_name,
+def find_max_bait_signal(input_df, bait_cols_dict, control_probe_name, subtract_control = False, control_multiplier = 1,
                          max_bait_mean_col = "Max_Bait_Background-Adjusted_Mean", return_percentiles_dict = True):
     '''
     Function for finding the max bait signal, averaged accross replicates, of any of the baits (excluding control)
@@ -201,6 +201,8 @@ def find_max_bait_signal(input_df, bait_cols_dict, control_probe_name,
         bait_col_dict (dict):           a dictionary where each key-value pair is a bait name and a list of columns pointing
                                         to background-adjusted values for that bait
         control_probe_name (str):       the name of the control probe
+        subtract_control (bool):        whether to subtract the control from the max signal values
+        control_multiplier (int|float): multiplier for control values before they are used for max signal adjustment
         max_bait_mean_col (str):        the destination column name for assigning max bait signal values
         return_percentiles_dict (bool): whether to return a dict of signal value percentiles
 
@@ -218,6 +220,15 @@ def find_max_bait_signal(input_df, bait_cols_dict, control_probe_name,
         signal_means = output_df[signal_cols].mean(axis=1)
         if bait != control_probe_name:
             bait_signal_means_dict[bait] = signal_means
+
+    # Apply control correction
+    if subtract_control:
+        control_signal_cols = bait_cols_dict[control_probe_name]
+        control_signal_means = output_df[control_signal_cols].mean(axis=1) * control_multiplier
+        for bait, signal_means in bait_signal_means_dict.items():
+            corrected_means = signal_means - control_signal_means
+            corrected_means[corrected_means < 0] = 0
+            bait_signal_means_dict[bait] = corrected_means
 
     # Get a series containing the max mean signal at each index
     series_list = list(bait_signal_means_dict.values())
