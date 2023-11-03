@@ -2,10 +2,13 @@
 
 import numpy as np
 import pandas as pd
-from Motif_Predictor.score_protein_motifs import score_protein_seqs
+from Motif_Predictor.score_protein_motifs import score_proteins
 from Motif_Predictor.specificity_score_assigner import apply_specificity_scores
 from Motif_Predictor.motif_topology_predictor import predict_topology
-from Motif_Predictor.predictor_config import predictor_params
+try:
+    from Motif_Predictor.predictor_config_local import predictor_params
+except:
+    from Motif_Predictor.predictor_config import predictor_params
 
 def main(predictor_params = predictor_params):
     '''
@@ -23,18 +26,13 @@ def main(predictor_params = predictor_params):
     protein_seqs_df = pd.read_csv(protein_seqs_path)
 
     # Apply conditional matrices motif scoring
-    protein_seqs_df, motif_col_names = score_protein_seqs(protein_seqs_df, predictor_params)
+    results = score_proteins(protein_seqs_df, predictor_params)
+    protein_seqs_df, novel_motif_cols, novel_score_cols, classical_motif_cols, classical_score_cols = results
+    all_motif_cols = novel_motif_cols.copy()
+    all_motif_cols.extend(classical_motif_cols)
 
     # Apply bait specificity scoring of discovered motifs
-    compare_classical_method = predictor_params["compare_classical_method"]
-    if compare_classical_method:
-        motif_seq_cols = []
-        for motif_col in motif_col_names:
-            motif_seq_cols.append("Novel_" + motif_col)
-            motif_seq_cols.append("Classical_" + motif_col)
-    else:
-        motif_seq_cols = motif_col_names
-    protein_seqs_df = apply_specificity_scores(protein_seqs_df, motif_seq_cols, predictor_params)
+    protein_seqs_df = apply_specificity_scores(protein_seqs_df, all_motif_cols, predictor_params)
 
     # Save scored data
     output_path = predictor_params["scored_output_path"]
