@@ -9,15 +9,15 @@ from functools import partial
 from Matrix_Generator.ConditionalMatrix import ConditionalMatrices
 from general_utils.general_utils import finite_sorted_indices, add_number_suffix
 
-# If selected, import a parallel method for comparison
-if predictor_params["compare_classical_method"]:
-    from Motif_Predictor.classical_method import classical_method
-
 # Import the user-specified params, either from a local version or the git-linked version
 try:
     from Motif_Predictor.predictor_config_local import predictor_params
 except:
     from Motif_Predictor.predictor_config import predictor_params
+
+# If selected, import a parallel method for comparison
+if predictor_params["compare_classical_method"]:
+    from Motif_Predictor.classical_method import classical_method
 
 def score_sliced_protein(sequences_2d, conditional_matrices, weights_tuple = None, return_count = 3):
     '''
