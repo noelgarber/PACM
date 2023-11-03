@@ -40,7 +40,7 @@ def main(predictor_params = predictor_params):
     print(f"Saved scored motifs to {output_path}")
 
     # Get topology for predicted motifs
-    protein_seqs_df = predict_topology(protein_seqs_df, motif_seq_cols, predictor_params)
+    protein_seqs_df = predict_topology(protein_seqs_df, all_motif_cols, predictor_params)
     topology_path = predictor_params["protein_seqs_path"][:-4] + "_with_Topology.csv"
     print(f"Saved scored motifs with topology information to {topology_path}")
 

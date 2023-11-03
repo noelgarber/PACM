@@ -23,6 +23,8 @@ def convert_ensembl(data_df, predictor_params = predictor_params):
         ensembl_ids = data_df["Ensembl_Protein_ID"].to_numpy()
     elif "Ensembl_ID" in data_df.columns:
         ensembl_ids = data_df["Ensembl_ID"].to_numpy()
+    elif "Gene" in data_df.columns:
+        ensembl_ids = data_df["Gene"].to_numpy()
     else:
         raise IndexError("convert_ensembl error: could not find Ensembl_ID or Ensembl_Protein_ID col in input data_df")
     unique_ensembl_ids = list(np.unique(ensembl_ids))
@@ -71,9 +73,18 @@ def assign_uniprot(data_df, predictor_params = predictor_params):
 
     # Insert blank Uniprot ID column
     cols = list(data_df.columns)
-    ensembl_col_name = "Ensembl_ID" if "Ensembl_ID" in cols else "Ensembl_Protein_ID"
-    ensembl_col_idx = cols.index(ensembl_col_name)
+
+    if "Protein_ID" in cols:
+        ensembl_col_idx = cols.index("Protein_ID")
+    elif "Ensembl_Protein_ID" in cols:
+        ensembl_col_idx = cols.index("Ensembl_Protein_ID")
+    elif "Ensembl_ID" in cols:
+        ensembl_col_idx = cols.index("Ensembl_ID")
+    else:
+        raise Exception("Ensembl protein ID could not be found in dataframe cols")
+
     cols.insert(ensembl_col_idx+1, "Uniprot_ID")
+
     data_df["Uniprot_ID"] = ""
     data_df = data_df[cols]
 
