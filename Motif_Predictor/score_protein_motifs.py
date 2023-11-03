@@ -266,15 +266,23 @@ def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
                 classical_scores_cols[j].append(classical_score)
 
     # Apply motifs and scores as columns to the dataframe
+    novel_motif_headers = []
+    novel_score_headers = []
     zipped_cols = zip(ordered_motifs_cols, motif_col_names, ordered_scores_cols, score_col_names)
     for ordered_motifs_col, motif_col_name, ordered_scores_col, score_col_name in zipped_cols:
         if compare_classical_method:
             motif_col_name = "Novel_" + motif_col_name
             score_col_name = "Novel_" + score_col_name
+
         df_chunk_scored[motif_col_name] = ordered_motifs_col
         df_chunk_scored[score_col_name] = ordered_scores_col
 
+        novel_motif_headers.append(motif_col_name)
+        novel_score_headers.append(score_col_name)
+
     # Optionally apply classical motifs and scores as columns if they were generated
+    classical_motif_headers = []
+    classical_score_headers = []
     if compare_classical_method:
         zipped_classical_cols = zip(classical_motifs_cols, motif_col_names, classical_scores_cols, score_col_names)
         for classical_motif_col, motif_col_name, classical_scores_col, score_col_name in zipped_classical_cols:
@@ -283,7 +291,10 @@ def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
             df_chunk_scored[motif_col_name] = classical_motif_col
             df_chunk_scored[score_col_name] = classical_scores_col
 
-    return df_chunk_scored
+            classical_motif_headers.append(motif_col_name)
+            classical_score_headers.append(score_col_name)
+
+    return (df_chunk_scored, novel_motif_headers, novel_score_headers, classical_motif_headers, classical_score_headers)
 
 def score_proteins(protein_seqs_df, predictor_params = predictor_params):
     '''
@@ -304,10 +315,15 @@ def score_proteins(protein_seqs_df, predictor_params = predictor_params):
 
     pool = multiprocessing.Pool()
     scored_chunks = []
+    novel_motif_cols, novel_score_cols, classical_motif_cols, classical_score_cols = [], [], [], []
 
-    with trange(len(protein_seqs_df), desc="Scoring proteins...") as pbar:
-        for df_chunk_scored in pool.imap_unordered(score_chunk_partial, df_chunks):
+    with trange(len(df_chunks), desc="Scoring proteins...") as pbar:
+        for results in pool.imap_unordered(score_chunk_partial, df_chunks):
+            df_chunk_scored = results[0]
             scored_chunks.append(df_chunk_scored)
+
+            novel_motif_cols, novel_score_cols, classical_motif_cols, classical_score_cols = results[1:]
+
             pbar.update()
 
     pool.close()
@@ -315,4 +331,4 @@ def score_proteins(protein_seqs_df, predictor_params = predictor_params):
 
     scored_protein_df = pd.concat(scored_chunks, ignore_index=True)
 
-    return scored_protein_df
+    return (scored_protein_df, novel_motif_cols, novel_score_cols, classical_motif_cols, classical_score_cols)
