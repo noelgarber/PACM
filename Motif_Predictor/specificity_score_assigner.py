@@ -41,8 +41,9 @@ def apply_specificity_scores(protein_seqs_df, motif_cols, predictor_params=predi
         valid_specificity_scores = specificity_matrix.score_motifs(valid_motifs_2d, use_specificity_weighted)
 
         # Apply the specificity score values to rows where there are non-blank motifs present
-        protein_seqs_df[specificity_score_col] = ""
-        protein_seqs_df[np.where(not_blank),specificity_score_col] = valid_specificity_scores
+        specificity_score_vals = np.full(shape=len(protein_seqs_df), fill_value=np.nan, dtype=float)
+        specificity_score_vals[not_blank] = valid_specificity_scores
+        protein_seqs_df[specificity_score_col] = specificity_score_vals
         cols.insert(motif_col_index + 2, specificity_score_col)
 
     # Reorder dataframe
