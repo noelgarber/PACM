@@ -134,7 +134,7 @@ def response_to_df(index, resp, motif_cols, dataframe, predictor_params = predic
                 motif_end = motif_start + motif_length
                 motif_topo_assigner(motif_start, motif_end, features_list_dicts, index, output_col, dataframe)
             else:
-                dataframe.at[index, output_col] = "Motif not found (usually due to UniProt/Ensembl sequence discrepancy"
+                dataframe.at[index, output_col] = "Motif not found"
 
     else:
         print(f"Error {resp.status_code} at row {index} while requesting topology information from Uniprot")
