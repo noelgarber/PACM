@@ -135,7 +135,7 @@ def generate_dataset(accession_dataset_name = "hsapiens_gene_ensembl", sequence_
                 for taxid, matches in matches_by_taxid.items():
                     for j, match in enumerate(matches):
                         col_name = f"{taxid}_homolog_{j}"
-                        data_df[i, col_name] = match
+                        data_df.at[i, col_name] = match
 
     return data_df
 
