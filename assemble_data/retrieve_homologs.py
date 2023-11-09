@@ -39,7 +39,6 @@ def get_homolog_ids(homologene_data, reference_taxid = 9606, target_taxids = (37
     '''
 
     reference_df = homologene_data[homologene_data["taxid"].eq(reference_taxid)]
-    homology_group_ids = list(set(reference_df["hid"].to_list()))
 
     # Retrieve target species dataframes
     target_dfs = {}
