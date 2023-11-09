@@ -52,7 +52,7 @@ def fetch_accessions(dataset_name = "hsapiens_gene_ensembl"):
     matching_trembl_ids = [trembl_dict.get(ensembl_id) for ensembl_id in ensembl_peptide_ids]
     accessions_df["uniprot"] = matching_uniprot_ids
     accessions_df["trembl"] = matching_trembl_ids
-    print("Done! Accessions were successfully retrieved.")
+    print("\tDone! Accessions were successfully retrieved.")
 
     return accessions_df
 
