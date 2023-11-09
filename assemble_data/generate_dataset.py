@@ -127,6 +127,7 @@ def generate_dataset(accession_dataset_name = "hsapiens_gene_ensembl", protein_f
                     for j, match in enumerate(matches):
                         col_name = f"{taxid}_homolog_{j}"
                         data_df.at[i, col_name] = match
+                        data_df.at[i, col_name + "_sequence"] = sequence_data.get(match)
 
     return data_df
 
