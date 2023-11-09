@@ -65,38 +65,42 @@ def get_homolog_ids(homologene_data, reference_taxid = 9606, target_taxids = (37
 
     return homologs
 
-def fetch_sequences(accession_ids, batch_size = 100):
+def fetch_sequences(accession_ids):
     '''
     Fetches protein sequences for a list of accession ids in batches from Entrez
 
     Args:
         accession_ids (list|tuple): NCBI protein accession IDs
-        batch_size (int):           number of proteins to request at a time; NCBI recommends a limit of 100
 
     Returns:
         sequence_data (dict):       dictionary of NCBI protein identifiers --> protein sequences
     '''
 
+    accession_ids = list(set(accession_ids))
+    joined_accessions = ",".join(accession_ids)
     sequence_data = {}
 
-    for start in range(0, len(accession_ids), batch_size):
-        end = min(len(accession_ids), start + batch_size)
-        print(f"Fetching records {start + 1} to {end}...")
+    chunk_size = 50000
+    chunks = [accession_ids[i:i+chunk_size] for i in range(0, len(accession_ids), chunk_size)]
 
-        done_chunk = False
-        while not done_chunk:
+    for i, subset_ids in enumerate(chunks):
+        print(f"Fetching sequences for accessions list chunk #{i+1} (n={len(subset_ids)})...")
+        done = False
+        while not done:
             try:
-                ids_subset = ','.join(accession_ids[start:end])
-                handle = Entrez.efetch(db="protein", id=ids_subset, rettype="fasta", retmode="text")
+                handle = Entrez.efetch(db="protein", id=joined_accessions, rettype="fasta", retmode="text")
                 fasta_data = handle.read()
                 handle.close()
-                for record in SeqIO.parse(StringIO(fasta_data), "fasta"):
-                    sequence_data[record.id] = record.seq
-                done_chunk = True
-                time.sleep(0.2)
+                done = True
             except Exception as e:
-                print(f"Error fetching records {start + 1} to {end}: {e} | retrying...")
-                done_chunk = False
+                print(f"\tError during sequence request ({e}); retrying in 1 second")
+                time.sleep(1)
+
+        print(f"Parsing received sequences...")
+        for record in SeqIO.parse(StringIO(fasta_data), "fasta"):
+            sequence_data[record.id] = str(record.seq)
+
+    print(f"Done! Generated dictionary of {len(list(sequence_data.keys()))} accessions with their sequences.")
 
     return sequence_data
 
@@ -142,8 +146,14 @@ if __name__ == "__main__":
 
     homologs, sequence_data = retrieve_homologs(homologene_data_path, reference_taxid, target_taxids)
 
-    cache_folder = input("Enter folder to save cached dict into:  ")
-    current_dir = cache_folder if cache_folder != "" else os.getcwd()
-    cache_id_path = os.path.join(current_dir, "cached_homolog_data.pkl")
-    with open(cache_id_path, "wb") as f:
-        pickle.dump((homologs, sequence_data), f)
+    saved = False
+    while not saved:
+        try:
+            cache_folder = input("Enter folder to save cached dict into:  ")
+            current_dir = cache_folder if cache_folder != "" else os.getcwd()
+            cache_id_path = os.path.join(current_dir, "cached_homolog_data.pkl")
+            with open(cache_id_path, "wb") as f:
+                pickle.dump((homologs, sequence_data), f)
+            saved = True
+        except Exception as e:
+            print(f"Error while saving ({e}); retrying...")
