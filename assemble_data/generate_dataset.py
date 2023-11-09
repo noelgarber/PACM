@@ -5,6 +5,7 @@ import pandas as pd
 import os
 from biomart import BiomartServer
 from io import StringIO
+from assemble_data.retrieve_homologs import retrieve_homologs
 
 def fetch_accessions(dataset_name = "hsapiens_gene_ensembl"):
     '''
@@ -87,31 +88,54 @@ def fetch_seqs(dataset_name = "hsapiens_gene_ensembl"):
     print("\tMaking dataframe...")
     response_df = pd.read_csv(response_tsv, header=None, sep="\t")
     response_df.columns = ["sequence", "ensembl_peptide_id"]
+    seqs = response_df["sequence"].to_list()
+    ids = response_df["ensembl_peptide_id"].to_list()
     print("\tConverting to dictionary...")
-    sequence_data = {id: seq for id, seq in response_df.iterrows()}
+    sequence_data = {id: seq for id, seq in zip(ids, seqs)}
+    random_key = list(sequence_data.keys())[0]
+    print("sequence_data sample entry:", random_key, "-->", sequence_data.get(random_key))
 
     print("Done! Sequences were successfully retrieved.")
 
     return sequence_data
 
-def generate_dataset(accession_dataset_name = "hsapiens_gene_ensembl", sequence_dataset_name = "hsapiens_gene_ensembl"):
+def generate_dataset(accession_dataset_name = "hsapiens_gene_ensembl", sequence_dataset_name = "hsapiens_gene_ensembl",
+                     retrieve_matching_homologs = True, homologene_path = None, reference_taxid = 9606,
+                     target_taxids = (10090, 10116, 7955, 6239, 7227, 4932, 4896, 3702)):
     '''
     Main function that generates the dataset
 
     Args:
-        accession_dataset_name (str): name of the Biomart dataset containing your species' accession numbers
-        sequence_dataset_name (str):  name of the Biomart dataset containing your species' protein sequences
+        accession_dataset_name (str):      name of the Biomart dataset containing your species' accession numbers
+        sequence_dataset_name (str):       name of the Biomart dataset containing your species' protein sequences
+        retrieve_matching_homologs (bool): whether to retrieve matching homolog sequences from NCBI
+        homologene_data_path (str):        path to homologene.data file available over NCBI FTP
+        reference_taxid (int):             taxonomic identifier for the reference species (e.g. human = 9606)
+        target_taxids (list|tuple):        taxonomic identifiers for the target species set
 
     Returns:
         data_df (pd.DataFrame): dataframe with the accessions and protein sequence data
     '''
 
+    # Get accession numbers for all host proteins
     data_df = fetch_accessions(accession_dataset_name)
-    sequence_data = fetch_seqs(sequence_dataset_name)
 
+    # Assign sequences to these proteins
+    sequence_data = fetch_seqs(sequence_dataset_name)
     ensembl_ids = data_df["ensembl_peptide_id"].to_list()
     seqs = [sequence_data.get(ensembl_id) for ensembl_id in ensembl_ids]
     data_df["sequence"] = seqs
+
+    # Assign homolog accessions and sequences
+    if retrieve_matching_homologs:
+        homologs, sequence_data = retrieve_homologs(homologene_path, reference_taxid, target_taxids)
+        for i, reference_ensembl_id in enumerate(ensembl_ids):
+            matches_by_taxid = homologs.get(reference_ensembl_id)
+            if matches_by_taxid is not None:
+                for taxid, matches in matches_by_taxid.items():
+                    for j, match in enumerate(matches):
+                        col_name = f"{taxid}_homolog_{j}"
+                        data_df[i, col_name] = match
 
     return data_df
 

@@ -30,13 +30,12 @@ def get_homolog_ids(homologene_data, reference_taxid = 9606, target_taxids = (37
     Retrieves homolog IDs matching target TaxIDs and the reference TaxID
 
     Args:
-        homologene_data_df (pd.DataFrame): dataframe containing data from the homologene.data file available over NCBI FTP
+        homologene_data_df (pd.DataFrame): df containing data from the homologene.data file available over NCBI FTP
         reference_taxid (int):             taxonomic identifier for the reference species (e.g. human = 9606)
         target_taxids (list|tuple):        taxonomic identifiers for the target species set
 
     Returns:
-        homologs (dict):                   dictionary of hid --> hid_matches, which is a dict of protein_id --> matches,
-                                           which is a dict of target_protein_id --> (reference gene, target gene)
+        homologs (dict):                   dictionary of reference_protein_id --> homolog_taxid --> matching_ids
     '''
 
     reference_df = homologene_data[homologene_data["taxid"].eq(reference_taxid)]
@@ -48,29 +47,22 @@ def get_homolog_ids(homologene_data, reference_taxid = 9606, target_taxids = (37
         target_df = homologene_data[homologene_data["taxid"].eq(target_taxid)]
         target_dfs[target_taxid] = target_df
 
-    # Set up a recursive dictionary with the homolog data
+    # Construct a non-redundant homolog dictionary
+    reference_protein_ids = reference_df["protein_accession"].to_list()
     homologs = {}
-    for hid in homology_group_ids:
-        hid_matches = {}
+    for reference_protein_id in reference_protein_ids:
+        reference_entries_df = reference_df[reference_df["protein_accession"].eq(reference_protein_id)]
+        reference_protein_hids = reference_entries_df["hid"].to_list()
 
-        reference_match_df = reference_df[reference_df["hid"].eq(hid)]
-        reference_gene_names = reference_match_df["gene_name"]
-        reference_protein_ids = reference_match_df["protein_accession"]
+        target_matches = {}
 
-        for target_taxid, target_df in target_dfs.items():
-            target_match_df = target_df[target_df["hid"].eq(hid)]
-            target_gene_names = target_match_df["gene_name"]
-            target_protein_ids = target_match_df["protein_accession"]
+        for reference_protein_hid in reference_protein_hids:
+            for target_taxid, target_df in target_dfs.items():
+                filtered_target_df = target_df[target_df["hid"].eq(reference_protein_hid)]
+                matching_target_ids = filtered_target_df["protein_accession"].to_list()
+                target_matches[target_taxid] = matching_target_ids
 
-            for reference_gene_name, reference_protein_id in zip(reference_gene_names, reference_protein_ids):
-                matches = {}
-                for target_gene_name, target_protein_id in zip(target_gene_names, target_protein_ids):
-                    gene_names = {"reference_gene_name": reference_gene_name, "target_gene_name": target_gene_name}
-                    matches[target_protein_id] = gene_names
-
-                hid_matches[reference_protein_id] = matches
-
-        homologs[hid] = hid_matches
+        homologs[reference_protein_id] = target_matches
 
     return homologs
 
@@ -114,8 +106,7 @@ def retrieve_homologs(homologene_data_path, reference_taxid = 9606, target_taxid
         target_taxids (list|tuple): taxonomic identifiers for the target species set
 
     Returns:
-        homologs (pd.DataFrame):    dictionary of hid --> hid_matches, which is a dict of protein_id --> matches,
-                                    which is a dict of target_protein_id --> (reference gene, target gene)
+        homologs (dict):            dictionary of hid --> hid_matches, which is a dict of taxid --> protein_ids
         sequence_data (dict):       dictionary of NCBI protein identifiers --> protein sequences
     '''
 
@@ -123,11 +114,11 @@ def retrieve_homologs(homologene_data_path, reference_taxid = 9606, target_taxid
     homologs = get_homolog_ids(homologene_data, reference_taxid, target_taxids)
 
     total_identifiers = []
-    for hid_matches in homologs.values():
-        for reference_protein, value in hid_matches.items():
-            total_identifiers.append(reference_protein)
-            for target_protein in value.keys():
-                total_identifiers.append(target_protein)
+    for reference_protein_id, target_matches in homologs.items():
+        total_identifiers.append(reference_protein_id)
+        for target_protein_ids in target_matches.values():
+            for target_protein_id in target_protein_ids:
+                total_identifiers.append(target_protein_id)
 
     total_identifiers = list(set(total_identifiers))
     sequence_data = fetch_sequences(total_identifiers)
