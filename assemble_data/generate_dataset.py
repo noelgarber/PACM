@@ -20,7 +20,7 @@ def fetch_accessions(dataset_name = "hsapiens_gene_ensembl"):
     '''
 
     # Connect to BioMart server
-    print("Connecting to Biomart accessions database...")
+    print("Connecting to Ensembl Biomart accessions database...")
     server = BiomartServer("http://www.ensembl.org/biomart")
     dataset = server.datasets[dataset_name]
 
@@ -132,6 +132,14 @@ def generate_dataset(accession_dataset_name = "hsapiens_gene_ensembl", protein_f
 
 if __name__ == "__main__":
     data_df = generate_dataset()
-    save_folder = input("Success! Enter the folder to save the data to:  ")
-    save_path = os.path.join(save_folder, "dataset.csv")
-    data_df.to_csv(save_path)
+
+    saved = False
+    while not saved:
+        try:
+            save_folder = input("Success! Enter the folder to save the data to:  ")
+            save_path = os.path.join(save_folder, "dataset.csv")
+            data_df.to_csv(save_path)
+            saved = True
+        except Exception as e:
+            print(f"Error while saving: {e}")
+            print("Retrying...")
