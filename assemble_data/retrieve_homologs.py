@@ -35,7 +35,8 @@ def get_homolog_ids(homologene_data, reference_taxid = 9606, target_taxids = (37
         target_taxids (list|tuple):        taxonomic identifiers for the target species set
 
     Returns:
-        homologs (pd.DataFrame):         dataframe with retrieved homologs
+        homologs (dict):                   dictionary of hid --> hid_matches, which is a dict of protein_id --> matches,
+                                           which is a dict of target_protein_id --> (reference gene, target gene)
     '''
 
     reference_df = homologene_data[homologene_data["taxid"].eq(reference_taxid)]
@@ -113,7 +114,8 @@ def retrieve_homologs(homologene_data_path, reference_taxid = 9606, target_taxid
         target_taxids (list|tuple): taxonomic identifiers for the target species set
 
     Returns:
-        homologs (pd.DataFrame):    dataframe with retrieved homologs
+        homologs (pd.DataFrame):    dictionary of hid --> hid_matches, which is a dict of protein_id --> matches,
+                                    which is a dict of target_protein_id --> (reference gene, target gene)
         sequence_data (dict):       dictionary of NCBI protein identifiers --> protein sequences
     '''
 
