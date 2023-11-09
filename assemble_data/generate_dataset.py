@@ -5,6 +5,7 @@ import pandas as pd
 import os
 from biomart import BiomartServer
 from io import StringIO
+from Bio import SeqIO
 from assemble_data.retrieve_homologs import retrieve_homologs
 
 def fetch_accessions(dataset_name = "hsapiens_gene_ensembl"):
@@ -29,7 +30,7 @@ def fetch_accessions(dataset_name = "hsapiens_gene_ensembl"):
     print("Requesting Ensembl and NCBI accessions...")
     response = dataset.search({"attributes": attributes})
 
-    print("\tReceived! Parsing data...")
+    print("\tStreaming data...")
     response_tsv = StringIO(response.text)
     accessions_df = pd.read_csv(response_tsv, header=None, sep="\t")
     accessions_df.columns = attributes
@@ -39,7 +40,7 @@ def fetch_accessions(dataset_name = "hsapiens_gene_ensembl"):
     print("Requesting UniProt accessions...")
     uniprot_response = dataset.search({"attributes": uniprot_attributes})
 
-    print("\tReceived! Parsing data...")
+    print("\tStreaming data...")
     uniprot_tsv = StringIO(uniprot_response.text)
     uniprot_df = pd.read_csv(uniprot_tsv, header=None, sep="\t")
     uniprot_df.columns = uniprot_attributes
@@ -62,44 +63,28 @@ def fetch_accessions(dataset_name = "hsapiens_gene_ensembl"):
 
     return accessions_df
 
-def fetch_seqs(dataset_name = "hsapiens_gene_ensembl"):
+def load_seqs(fasta_path, id_delimiter = " ", ensp_idx = 0):
     '''
-    Sequence retrieval function
+    Loads protein sequences from an Ensembl FASTA file
 
     Args:
-        dataset_name (str): name of the BioMart dataset containing the sequences to be requested
+        fasta_path (str):   path to Ensembl FASTA file with protein sequences, such as the one available over FTP
+        id_delimiter (str): delimiter between ID elements in record.id when parsing FASTA file
+        ensp_idx (int):     index of ENSP number in delimited ID list for a given record
 
     Returns:
         sequence_data (dict): dictionary of Ensembl protein ID --> protein sequence
     '''
 
-    # Connect to BioMart server
-    print("Connecting to Biomart sequence database...")
-    server = BiomartServer("http://www.ensembl.org/biomart")
-    dataset = server.datasets[dataset_name]
-
-    # Build the query
-    attributes = ["ensembl_peptide_id", "peptide"]
-    print("Requesting sequences...")
-    response = dataset.search({"attributes": attributes})
-
-    print("\tParsing data...")
-    response_tsv = StringIO(response.text)
-    print("\tMaking dataframe...")
-    response_df = pd.read_csv(response_tsv, header=None, sep="\t")
-    response_df.columns = ["sequence", "ensembl_peptide_id"]
-    seqs = response_df["sequence"].to_list()
-    ids = response_df["ensembl_peptide_id"].to_list()
-    print("\tConverting to dictionary...")
-    sequence_data = {id: seq for id, seq in zip(ids, seqs)}
-    random_key = list(sequence_data.keys())[0]
-    print("sequence_data sample entry:", random_key, "-->", sequence_data.get(random_key))
-
-    print("Done! Sequences were successfully retrieved.")
+    sequence_data = {}
+    for record in SeqIO.parse(fasta_path, "fasta"):
+        split_ids = record.id.split(id_delimiter)
+        ensembl_protein_id = split_ids[ensp_idx]
+        sequence_data[ensembl_protein_id] = str(record.seq)
 
     return sequence_data
 
-def generate_dataset(accession_dataset_name = "hsapiens_gene_ensembl", sequence_dataset_name = "hsapiens_gene_ensembl",
+def generate_dataset(accession_dataset_name = "hsapiens_gene_ensembl", protein_fasta_path = None,
                      retrieve_matching_homologs = True, homologene_path = None, reference_taxid = 9606,
                      target_taxids = (10090, 10116, 7955, 6239, 7227, 4932, 4896, 3702)):
     '''
@@ -121,14 +106,20 @@ def generate_dataset(accession_dataset_name = "hsapiens_gene_ensembl", sequence_
     data_df = fetch_accessions(accession_dataset_name)
 
     # Assign sequences to these proteins
-    sequence_data = fetch_seqs(sequence_dataset_name)
+    if protein_fasta_path is None:
+        protein_fasta_path = input("Enter the path to Ensembl protein sequences (FASTA):  ")
+    sequence_data = load_seqs(protein_fasta_path)
+
     ensembl_ids = data_df["ensembl_peptide_id"].to_list()
     seqs = [sequence_data.get(ensembl_id) for ensembl_id in ensembl_ids]
     data_df["sequence"] = seqs
 
     # Assign homolog accessions and sequences
     if retrieve_matching_homologs:
+        if not homologene_path:
+            homologene_path = input("Enter the path to homologene.data (available from NCBI FTP):  ")
         homologs, sequence_data = retrieve_homologs(homologene_path, reference_taxid, target_taxids)
+
         for i, reference_ensembl_id in enumerate(ensembl_ids):
             matches_by_taxid = homologs.get(reference_ensembl_id)
             if matches_by_taxid is not None:
