@@ -97,8 +97,12 @@ def fetch_sequences(accession_ids):
                 time.sleep(1)
 
         print(f"Parsing received sequences...")
-        for record in SeqIO.parse(StringIO(fasta_data), "fasta"):
-            sequence_data[record.id] = str(record.seq)
+        records = [record for record in SeqIO.parse(StringIO(fasta_data), "fasta")]
+
+        print(f"Assigning {len(records)} records to sequence_data dictionary...")
+        for record in records:
+            ensembl_protein_id = record.id
+            sequence_data[ensembl_protein_id] = str(record.seq)
 
     print(f"Done! Generated dictionary of {len(list(sequence_data.keys()))} accessions with their sequences.")
 
