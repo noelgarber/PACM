@@ -82,17 +82,21 @@ def fetch_sequences(accession_ids, batch_size = 100):
     for start in range(0, len(accession_ids), batch_size):
         end = min(len(accession_ids), start + batch_size)
         print(f"Fetching records {start + 1} to {end}...")
-        try:
-            ids_subset = ','.join(accession_ids[start:end])
-            handle = Entrez.efetch(db="protein", id=ids_subset, rettype="fasta", retmode="text")
-            fasta_data = handle.read()
-            handle.close()
-            for record in SeqIO.parse(StringIO(fasta_data), "fasta"):
-                sequence_data[record.id] = record.seq
-            time.sleep(0.2)
-        except Exception as e:
-            print(f"Error fetching records {start + 1} to {end}: {e}")
-            break
+
+        done_chunk = False
+        while not done_chunk:
+            try:
+                ids_subset = ','.join(accession_ids[start:end])
+                handle = Entrez.efetch(db="protein", id=ids_subset, rettype="fasta", retmode="text")
+                fasta_data = handle.read()
+                handle.close()
+                for record in SeqIO.parse(StringIO(fasta_data), "fasta"):
+                    sequence_data[record.id] = record.seq
+                done_chunk = True
+                time.sleep(0.2)
+            except Exception as e:
+                print(f"Error fetching records {start + 1} to {end}: {e} | retrying...")
+                done_chunk = False
 
     return sequence_data
 
