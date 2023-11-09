@@ -5,7 +5,6 @@ import pandas as pd
 import os
 from biomart import BiomartServer
 from io import StringIO
-from Bio import SeqIO
 
 def fetch_accessions(dataset_name = "hsapiens_gene_ensembl"):
     '''
@@ -30,20 +29,26 @@ def fetch_accessions(dataset_name = "hsapiens_gene_ensembl"):
     response = dataset.search({"attributes": attributes})
 
     print("\tReceived! Parsing data...")
-    lines = response.text.split("\n")
-    rows = [row.split("\t") for row in lines if row]
-    accessions_df = pd.DataFrame(rows, columns=attributes)
+    response_tsv = StringIO(response.text)
+    accessions_df = pd.read_csv(response_tsv, header=None, sep="\t")
+    accessions_df.columns = attributes
 
     # Get the Uniprot accession numbers separately (requesting with NCBI accessions results in an error)
     uniprot_attributes = ["ensembl_peptide_id", "uniprotswissprot", "uniprotsptrembl"]
     print("Requesting UniProt accessions...")
     uniprot_response = dataset.search({"attributes": uniprot_attributes})
-    uniprot_lines = uniprot_response.text.split("\n")
 
     print("\tReceived! Parsing data...")
-    uniprot_rows = [row.split("\t") for row in uniprot_lines if row]
-    uniprot_dict = {row[0]: row[1] for row in uniprot_rows if row}
-    trembl_dict = {row[0]: row[2] for row in uniprot_rows if row}
+    uniprot_tsv = StringIO(uniprot_response.text)
+    uniprot_df = pd.read_csv(uniprot_tsv, header=None, sep="\t")
+    uniprot_df.columns = uniprot_attributes
+
+    ensembl_ids = uniprot_df["ensembl_peptide_id"].to_list()
+    uniprot_ids = uniprot_df["uniprotswissprot"].to_list()
+    trembl_ids = uniprot_df["uniprotsptrembl"].to_list()
+
+    uniprot_dict = {ensembl_id: uniprot_id for ensembl_id, uniprot_id in zip(ensembl_ids, uniprot_ids)}
+    trembl_dict = {ensembl_id: trembl_id for ensembl_id, trembl_id in zip(ensembl_ids, trembl_ids)}
 
     # Merge data
     print("Merging data...")
@@ -78,13 +83,13 @@ def fetch_seqs(dataset_name = "hsapiens_gene_ensembl"):
     response = dataset.search({"attributes": attributes})
 
     print("\tParsing data...")
-    lines = response.text.split("\n")
-    rows = [line.split("\t") for line in lines if line]
-    first_row = rows[0]
-    if first_row[0][0:4] == "ENSP":
-        sequence_data = {row[0]: row[1] for row in rows}
-    else:
-        sequence_data = {row[1]: row[0] for row in rows}
+    response_tsv = StringIO(response.text)
+    print("\tMaking dataframe...")
+    response_df = pd.read_csv(response_tsv, header=None, sep="\t")
+    response_df.columns = ["sequence", "ensembl_peptide_id"]
+    print("\tConverting to dictionary...")
+    sequence_data = {id: seq for id, seq in response_df.iterrows()}
+
     print("Done! Sequences were successfully retrieved.")
 
     return sequence_data
