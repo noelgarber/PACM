@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import os
+import pickle
 from biomart import BiomartServer
 from io import StringIO
 from Bio import SeqIO
@@ -103,7 +104,21 @@ def generate_dataset(accession_dataset_name = "hsapiens_gene_ensembl", protein_f
     '''
 
     # Get accession numbers for all host proteins
-    data_df = fetch_accessions(accession_dataset_name)
+    accessions_path = os.path.join(os.getcwd(), "accessions_df.pkl")
+    if os.path.isfile(accessions_path):
+        discard = input("Discard existing accessions_df and request again? (y/N)  ")
+        discard = discard == "N" or discard == "n"
+        if discard:
+            data_df = fetch_accessions(accession_dataset_name)
+            with open(accessions_path, "wb") as f:
+                pickle.dump(data_df, f)
+        else:
+            with open(accessions_path, "rb") as f:
+                data_df = pickle.load(f)
+    else:
+        data_df = fetch_accessions(accession_dataset_name)
+        with open(accessions_path, "wb") as f:
+            pickle.dump(data_df, f)
 
     # Assign sequences to these proteins
     if protein_fasta_path is None:
@@ -120,19 +135,41 @@ def generate_dataset(accession_dataset_name = "hsapiens_gene_ensembl", protein_f
             homologene_path = input("Enter the path to homologene.data (available from NCBI FTP):  ")
         homologs = get_homologs(homologene_path, reference_taxid, target_taxids)
 
-        for i, reference_ensembl_id in enumerate(ensembl_ids):
-            matches_by_taxid = homologs.get(reference_ensembl_id)
-            if matches_by_taxid is not None:
-                for taxid, matches in matches_by_taxid.items():
-                    for j, match in enumerate(matches):
+        refseq_peptide_ids = data_df["refseq_peptide"].to_list()
+        refseq_predicted_ids = data_df["refseq_peptide_predicted"].to_list()
+        entries_count = len(refseq_peptide_ids)
+
+        for i, (refseq_peptide_id, refseq_predicted_id) in enumerate(zip(refseq_peptide_ids, refseq_predicted_ids)):
+            print(f"Looking up homologs for row {i} of {entries_count}")
+            refseq_peptide_matches = homologs.get(refseq_peptide_id)
+            refseq_predicted_matches = homologs.get(refseq_predicted_id)
+
+            if refseq_peptide_matches is not None:
+                print(f"\tHomologs found for {refseq_peptide_id} in species: {list(refseq_peptide_matches.keys())}")
+                for taxid, matching_target_tuples in refseq_peptide_matches.items():
+                    for j, match_tuple in matching_target_tuples:
                         col_name = f"{taxid}_homolog_{j}"
-                        data_df.at[i, col_name] = match[0]
-                        data_df.at[i, col_name + "_sequence"] = match[1]
+                        data_df.at[i, col_name] = match_tuple[0]
+                        data_df.at[i, col_name + "_sequence"] = match_tuple[1]
+
+            if refseq_predicted_matches is not None:
+                print(f"\tHomologs found for {refseq_predicted_id} in species: {list(refseq_predicted_matches.keys())}")
+                for taxid, matching_target_tuples in refseq_predicted_matches.items():
+                    for j, match_tuple in matching_target_tuples:
+                        col_name = f"{taxid}_homolog_{j}"
+                        data_df.at[i, col_name] = match_tuple[0]
+                        data_df.at[i, col_name + "_sequence"] = match_tuple[1]
 
     return data_df
 
 if __name__ == "__main__":
-    data_df = generate_dataset()
+    default_fasta_path = os.path.join(os.getcwd(), "Homo_sapiens.GRCh38.pep.all.fa")
+    fasta_path = default_fasta_path if os.path.isfile(default_fasta_path) else None
+
+    homologene_default_path = os.path.join(os.getcwd(), "homologene.data")
+    homologene_path = homologene_default_path if os.path.isfile(homologene_default_path) else None
+
+    data_df = generate_dataset(protein_fasta_path=fasta_path, homologene_path=homologene_path)
 
     saved = False
     while not saved:
