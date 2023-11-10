@@ -34,7 +34,7 @@ def read_homologene(homologene_data_path):
     handle.close()
 
     print("Parsing records...")
-    records = [record for record in SeqIO.read(StringIO(fasta_data), "fasta")]
+    records = [record for record in SeqIO.parse(StringIO(fasta_data), "fasta")]
     print("\tSample record: ")
     print(f"\t\tID: {record[0].id}")
     print(f"\t\tSeq: {record[0].seq}")
