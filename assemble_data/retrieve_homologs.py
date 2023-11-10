@@ -36,8 +36,8 @@ def read_homologene(homologene_data_path):
     print("Parsing records...")
     records = [record for record in SeqIO.parse(StringIO(fasta_data), "fasta")]
     print("\tSample record: ")
-    print(f"\t\tID: {record[0].id}")
-    print(f"\t\tSeq: {record[0].seq}")
+    print(f"\t\tID: {records[0].id}")
+    print(f"\t\tSeq: {records[0].seq}")
 
     print("Applying seqs to homologene dataframe...")
     lookup_dict = {record.id: str(record.seq) for record in records}
