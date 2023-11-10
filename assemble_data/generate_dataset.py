@@ -64,27 +64,6 @@ def fetch_accessions(dataset_name = "hsapiens_gene_ensembl", biomart_url = "http
 
     return accessions_df
 
-def load_seqs(fasta_path, id_delimiter = " ", ensp_idx = 0):
-    '''
-    Loads protein sequences from an Ensembl FASTA file
-
-    Args:
-        fasta_path (str):   path to Ensembl FASTA file with protein sequences, such as the one available over FTP
-        id_delimiter (str): delimiter between ID elements in record.id when parsing FASTA file
-        ensp_idx (int):     index of ENSP number in delimited ID list for a given record
-
-    Returns:
-        sequence_data (dict): dictionary of Ensembl protein ID --> protein sequence
-    '''
-
-    sequence_data = {}
-    for record in SeqIO.parse(fasta_path, "fasta"):
-        split_ids = record.id.split(id_delimiter)
-        ensembl_protein_id = split_ids[ensp_idx]
-        sequence_data[ensembl_protein_id] = str(record.seq)
-
-    return sequence_data
-
 def generate_dataset(accession_dataset_name = "hsapiens_gene_ensembl", protein_fasta_path = None,
                      retrieve_matching_homologs = True, homologene_path = None, reference_taxid = 9606,
                      target_taxids = (10090, 10116, 7955, 6239, 7227, 4932, 4896, 3702)):
@@ -103,7 +82,7 @@ def generate_dataset(accession_dataset_name = "hsapiens_gene_ensembl", protein_f
         data_df (pd.DataFrame): dataframe with the accessions and protein sequence data
     '''
 
-    # Get accession numbers for all host proteins
+    # Fetch or load accession numbers for all host proteins
     accessions_path = os.path.join(os.getcwd(), "accessions_df.pkl")
     if os.path.isfile(accessions_path):
         discard = input("Discard existing accessions_df and request again? (y/N)  ")
@@ -120,13 +99,17 @@ def generate_dataset(accession_dataset_name = "hsapiens_gene_ensembl", protein_f
         with open(accessions_path, "wb") as f:
             pickle.dump(data_df, f)
 
-    # Assign sequences to these proteins
+    # Parse Ensembl protein sequence FASTA into a lookup dictionary of ID to protein sequence
     if protein_fasta_path is None:
         protein_fasta_path = input("Enter the path to Ensembl protein sequences (FASTA):  ")
-    sequence_data = load_seqs(protein_fasta_path)
+    records = [record for record in SeqIO.parse(protein_fasta_path, "fasta")]
+    ensembl_base_keys = [record.id.split(".")[0] for record in records]
+    ensembl_base_values = [str(record.seq) for record in records]
+    ensembl_sequence_dict = {key:value for key, value in zip(ensembl_base_keys, ensembl_base_values)}
 
+    # Apply sequences to corresponding IDs in the dataframe
     ensembl_ids = data_df["ensembl_peptide_id"].to_list()
-    seqs = [sequence_data.get(ensembl_id) for ensembl_id in ensembl_ids]
+    seqs = [ensembl_sequence_dict.get(ensembl_id) for ensembl_id in ensembl_ids]
     data_df["sequence"] = seqs
 
     # Assign homolog accessions and sequences
@@ -163,10 +146,10 @@ def generate_dataset(accession_dataset_name = "hsapiens_gene_ensembl", protein_f
     return data_df
 
 if __name__ == "__main__":
-    default_fasta_path = os.path.join(os.getcwd(), "Homo_sapiens.GRCh38.pep.all.fa")
+    default_fasta_path = os.path.join(os.getcwd(), "default_source_data/Homo_sapiens.GRCh38.pep.all.fa")
     fasta_path = default_fasta_path if os.path.isfile(default_fasta_path) else None
 
-    homologene_default_path = os.path.join(os.getcwd(), "homologene.data")
+    homologene_default_path = os.path.join(os.getcwd(), "default_source_data/homologene.data")
     homologene_path = homologene_default_path if os.path.isfile(homologene_default_path) else None
 
     data_df = generate_dataset(protein_fasta_path=fasta_path, homologene_path=homologene_path)
