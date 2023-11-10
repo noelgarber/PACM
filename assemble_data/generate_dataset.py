@@ -6,9 +6,9 @@ import os
 from biomart import BiomartServer
 from io import StringIO
 from Bio import SeqIO
-from assemble_data.retrieve_homologs import retrieve_homologs
+from assemble_data.retrieve_homologs import get_homologs
 
-def fetch_accessions(dataset_name = "hsapiens_gene_ensembl"):
+def fetch_accessions(dataset_name = "hsapiens_gene_ensembl", biomart_url = "http://useast.ensembl.org/biomart"):
     '''
     Accession retrieval function
 
@@ -21,7 +21,7 @@ def fetch_accessions(dataset_name = "hsapiens_gene_ensembl"):
 
     # Connect to BioMart server
     print("Connecting to Ensembl Biomart accessions database...")
-    server = BiomartServer("http://www.ensembl.org/biomart")
+    server = BiomartServer(biomart_url)
     dataset = server.datasets[dataset_name]
 
     # Get the Ensembl and NCBI accession numbers
@@ -118,7 +118,7 @@ def generate_dataset(accession_dataset_name = "hsapiens_gene_ensembl", protein_f
     if retrieve_matching_homologs:
         if not homologene_path:
             homologene_path = input("Enter the path to homologene.data (available from NCBI FTP):  ")
-        homologs, sequence_data = retrieve_homologs(homologene_path, reference_taxid, target_taxids)
+        homologs = get_homologs(homologene_path, reference_taxid, target_taxids)
 
         for i, reference_ensembl_id in enumerate(ensembl_ids):
             matches_by_taxid = homologs.get(reference_ensembl_id)
@@ -126,8 +126,8 @@ def generate_dataset(accession_dataset_name = "hsapiens_gene_ensembl", protein_f
                 for taxid, matches in matches_by_taxid.items():
                     for j, match in enumerate(matches):
                         col_name = f"{taxid}_homolog_{j}"
-                        data_df.at[i, col_name] = match
-                        data_df.at[i, col_name + "_sequence"] = sequence_data.get(match)
+                        data_df.at[i, col_name] = match[0]
+                        data_df.at[i, col_name + "_sequence"] = match[1]
 
     return data_df
 

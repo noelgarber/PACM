@@ -11,39 +11,61 @@ Entrez.email = "ngarber93@gmail.com"
 
 def read_homologene(homologene_data_path):
     '''
-    Loads homologene.data (from the NCBI FTP site) as a pandas dataframe
+    Loads homologene.data (from the NCBI FTP site) and retrieve matching sequences
 
     Args:
         homologene_data_path (str): local path to homologene.data
 
     Returns:
-        homologene_data (pd.DataFrame): homologene data in a dataframe
+        homologene_df (pd.DataFrame): homologene data in a dataframe
     '''
 
-    homologene_data = pd.read_csv(homologene_data_path, header=None, sep="\t")
+    # Parse the HomoloGene entries
+    print("Loading homologene.data...")
+    homologene_df = pd.read_csv(homologene_data_path, header=None, sep="\t")
     columns = ["hid", "taxid", "gene_id", "gene_name", "protein_gi", "protein_accession"]
-    homologene_data.columns = columns
-    return homologene_data
+    homologene_df.columns = columns
 
-def get_homolog_ids(homologene_data, reference_taxid = 9606, target_taxids = (3702,)):
+    # Fetch matching protein sequences
+    print("Requesting sequences from Entrez...")
+    accessions = homologene_df["protein_accession"].to_list()
+    handle = Entrez.efetch(db="protein", id=accessions, rettype="fasta", retmode="text")
+    fasta_data = handle.read()
+    handle.close()
+
+    print("Parsing records...")
+    records = [record for record in SeqIO.read(StringIO(fasta_data), "fasta")]
+    print("\tSample record: ")
+    print(f"\t\tID: {record[0].id}")
+    print(f"\t\tSeq: {record[0].seq}")
+
+    print("Applying seqs to homologene dataframe...")
+    lookup_dict = {record.id: str(record.seq) for record in records}
+    seqs = [lookup_dict.get(accession) for accession in accessions]
+    homologene_df["sequence"] = seqs
+
+    return homologene_df
+
+def get_homologs(homologene_data_path, reference_taxid = 9606, target_taxids = (3702,)):
     '''
-    Retrieves homolog IDs matching target TaxIDs and the reference TaxID
+    Retrieves homolog IDs matching target TaxIDs and the reference TaxID and sorts into a dictionary of dictionaries
 
     Args:
-        homologene_data_df (pd.DataFrame): df containing data from the homologene.data file available over NCBI FTP
-        reference_taxid (int):             taxonomic identifier for the reference species (e.g. human = 9606)
-        target_taxids (list|tuple):        taxonomic identifiers for the target species set
+        homologene_data_path (str):  path to homologene.data (available from NCBI FTP)
+        reference_taxid (int):       taxonomic identifier for the reference species (e.g. human = 9606)
+        target_taxids (list|tuple):  taxonomic identifiers for the target species set
 
     Returns:
-        homologs (dict):                   dictionary of reference_protein_id --> homolog_taxid --> matching_ids
+        homologs (dict):                   dictionary of reference_id --> homolog_taxid --> matching_tuples of (id, seq)
     '''
 
-    reference_df = homologene_data[homologene_data["taxid"].eq(reference_taxid)]
+    homologene_df = read_homologene(homologene_data_path)
+    reference_df = homologene_df[homologene_df["taxid"].eq(reference_taxid)]
 
     # Retrieve target species dataframes
     target_dfs = {}
     for target_taxid in target_taxids:
-        target_df = homologene_data[homologene_data["taxid"].eq(target_taxid)]
+        target_df = homologene_df[homologene_df["taxid"].eq(target_taxid)]
         target_dfs[target_taxid] = target_df
 
     # Construct a non-redundant homolog dictionary
@@ -59,82 +81,15 @@ def get_homolog_ids(homologene_data, reference_taxid = 9606, target_taxids = (37
             for target_taxid, target_df in target_dfs.items():
                 filtered_target_df = target_df[target_df["hid"].eq(reference_protein_hid)]
                 matching_target_ids = filtered_target_df["protein_accession"].to_list()
-                target_matches[target_taxid] = matching_target_ids
+                matching_target_seqs = filtered_target_df["sequence"].to_list()
+                matching_target_tuples = []
+                for id, seq in zip(matching_target_ids, matching_target_seqs):
+                    matching_target_tuples.append((id, seq))
+                target_matches[target_taxid] = matching_target_tuples
 
         homologs[reference_protein_id] = target_matches
 
     return homologs
-
-def fetch_sequences(accession_ids):
-    '''
-    Fetches protein sequences for a list of accession ids in batches from Entrez
-
-    Args:
-        accession_ids (list|tuple): NCBI protein accession IDs
-
-    Returns:
-        sequence_data (dict):       dictionary of NCBI protein identifiers --> protein sequences
-    '''
-
-    accession_ids = list(set(accession_ids))
-    joined_accessions = ",".join(accession_ids)
-    sequence_data = {}
-
-    chunk_size = 50000
-    chunks = [accession_ids[i:i+chunk_size] for i in range(0, len(accession_ids), chunk_size)]
-
-    for i, subset_ids in enumerate(chunks):
-        print(f"Fetching sequences for accessions list chunk #{i+1} (n={len(subset_ids)})...")
-        done = False
-        while not done:
-            try:
-                handle = Entrez.efetch(db="protein", id=joined_accessions, rettype="fasta", retmode="text")
-                fasta_data = handle.read()
-                handle.close()
-                done = True
-            except Exception as e:
-                print(f"\tError during sequence request ({e}); retrying in 1 second")
-                time.sleep(1)
-
-        print(f"Parsing received sequences...")
-        records = [record for record in SeqIO.parse(StringIO(fasta_data), "fasta")]
-
-        print(f"Assigning {len(records)} records to sequence_data dictionary...")
-        for record in records:
-            ensembl_protein_id = record.id
-            sequence_data[ensembl_protein_id] = str(record.seq)
-
-    print(f"Done! Generated dictionary of {len(list(sequence_data.keys()))} accessions with their sequences.")
-
-    return sequence_data
-
-def retrieve_homologs(homologene_data_path, reference_taxid = 9606, target_taxids = (3702,)):
-    '''
-
-    Args:
-        homologene_data_path (str): path to homologene.data file available over NCBI FTP
-        reference_taxid (int):      taxonomic identifier for the reference species (e.g. human = 9606)
-        target_taxids (list|tuple): taxonomic identifiers for the target species set
-
-    Returns:
-        homologs (dict):            dictionary of hid --> hid_matches, which is a dict of taxid --> protein_ids
-        sequence_data (dict):       dictionary of NCBI protein identifiers --> protein sequences
-    '''
-
-    homologene_data = read_homologene(homologene_data_path)
-    homologs = get_homolog_ids(homologene_data, reference_taxid, target_taxids)
-
-    total_identifiers = []
-    for reference_protein_id, target_matches in homologs.items():
-        total_identifiers.append(reference_protein_id)
-        for target_protein_ids in target_matches.values():
-            for target_protein_id in target_protein_ids:
-                total_identifiers.append(target_protein_id)
-
-    total_identifiers = list(set(total_identifiers))
-    sequence_data = fetch_sequences(total_identifiers)
-
-    return homologs, sequence_data
 
 if __name__ == "__main__":
     homologene_data_path = input("Enter path to homologene.data:  ")
@@ -148,7 +103,7 @@ if __name__ == "__main__":
         else:
             break
 
-    homologs, sequence_data = retrieve_homologs(homologene_data_path, reference_taxid, target_taxids)
+    homologs = get_homologs(homologene_data_path, reference_taxid, target_taxids)
 
     saved = False
     while not saved:
