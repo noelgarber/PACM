@@ -67,24 +67,28 @@ def get_homologs(homologene_data_path, reference_taxid = 9606, target_taxids = (
 
     # Construct a non-redundant homolog dictionary
     reference_protein_ids = reference_df["protein_accession"].to_list()
+    reference_count = len(reference_protein_ids)
+    print("Generating homologs dictionary...")
     homologs = {}
-    for reference_protein_id in reference_protein_ids:
+    for i, reference_protein_id in enumerate(reference_protein_ids):
+        print(f"Assigning host protein #{i} of {reference_count}")
         reference_entries_df = reference_df[reference_df["protein_accession"].eq(reference_protein_id)]
         reference_protein_hids = reference_entries_df["hid"].to_list()
 
-        target_matches = {}
+        matches_by_taxid = {}
 
-        for reference_protein_hid in reference_protein_hids:
-            for target_taxid, target_df in target_dfs.items():
-                filtered_target_df = target_df[target_df["hid"].eq(reference_protein_hid)]
-                matching_target_ids = filtered_target_df["protein_accession"].to_list()
-                matching_target_seqs = filtered_target_df["sequence"].to_list()
-                matching_target_tuples = []
-                for id, seq in zip(matching_target_ids, matching_target_seqs):
-                    matching_target_tuples.append((id, seq))
-                target_matches[target_taxid] = matching_target_tuples
+        for target_taxid, target_df in target_dfs.items():
+            filtered_target_df = target_df[target_df["hid"].isin(reference_protein_hids)]
+            matching_target_ids = filtered_target_df["protein_accession"].to_list()
+            matching_target_seqs = filtered_target_df["sequence"].to_list()
 
-        homologs[reference_protein_id] = target_matches
+            matching_target_tuples = []
+            for matching_target_id, sequence in zip(matching_target_ids, matching_target_seqs):
+                matching_target_tuples.append((matching_target_id, sequence))
+            matches_by_taxid[target_taxid] = matching_target_tuples
+
+        reference_base_id = reference_protein_id.split(".")[0]
+        homologs[reference_base_id] = matches_by_taxid
 
     return homologs
 
