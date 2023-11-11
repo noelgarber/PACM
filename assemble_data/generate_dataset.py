@@ -64,9 +64,8 @@ def fetch_accessions(dataset_name = "hsapiens_gene_ensembl", biomart_url = "http
 
     return accessions_df
 
-def generate_dataset(accession_dataset_name = "hsapiens_gene_ensembl", protein_fasta_path = None,
-                     retrieve_matching_homologs = True, homologene_path = None, reference_taxid = 9606,
-                     target_taxids = (10090, 10116, 7955, 6239, 7227, 4932, 4896, 3702)):
+def generate_dataset(protein_fasta_path = None, retrieve_matching_homologs = True, homologene_path = None,
+                     reference_taxid = 9606, target_taxids = (3702,), accession_dataset_name = "hsapiens_gene_ensembl"):
     '''
     Main function that generates the dataset
 
@@ -130,7 +129,7 @@ def generate_dataset(accession_dataset_name = "hsapiens_gene_ensembl", protein_f
             if refseq_peptide_matches is not None:
                 print(f"\tHomologs found for {refseq_peptide_id} in species: {list(refseq_peptide_matches.keys())}")
                 for taxid, matching_target_tuples in refseq_peptide_matches.items():
-                    for j, match_tuple in matching_target_tuples:
+                    for j, match_tuple in enumerate(matching_target_tuples):
                         col_name = f"{taxid}_homolog_{j}"
                         data_df.at[i, col_name] = match_tuple[0]
                         data_df.at[i, col_name + "_sequence"] = match_tuple[1]
@@ -149,10 +148,13 @@ if __name__ == "__main__":
     default_fasta_path = os.path.join(os.getcwd(), "default_source_data/Homo_sapiens.GRCh38.pep.all.fa")
     fasta_path = default_fasta_path if os.path.isfile(default_fasta_path) else None
 
+    retrieve_matching_homologs = True
     homologene_default_path = os.path.join(os.getcwd(), "default_source_data/homologene.data")
     homologene_path = homologene_default_path if os.path.isfile(homologene_default_path) else None
 
-    data_df = generate_dataset(protein_fasta_path=fasta_path, homologene_path=homologene_path)
+    reference_taxid = 9606 # human
+    target_taxids = (10090, 10116, 7955, 6239, 7227, 4932, 4896, 3702)
+    data_df = generate_dataset(fasta_path, retrieve_matching_homologs, homologene_path, reference_taxid, target_taxids)
 
     saved = False
     while not saved:
