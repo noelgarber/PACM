@@ -118,11 +118,7 @@ def generate_dataset(protein_fasta_path = None, retrieve_matching_homologs = Tru
             homologene_path = input("Enter the path to homologene.data (available from NCBI FTP):  ")
         homologs = get_homologs(homologene_path, reference_taxid, target_taxids)
 
-        # Save homologs dict
-        homologene_parent_path = homologene_path.rsplit("/",1)[0]
-        with open(homologene_parent_path, "wb") as f:
-            pickle.dump(homologs, f)
-
+        # Extract IDs to find sequences for
         refseq_peptide_ids = data_df["refseq_peptide"].to_list()
         refseq_predicted_ids = data_df["refseq_peptide_predicted"].to_list()
         entries_count = len(refseq_peptide_ids)
