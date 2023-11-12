@@ -9,12 +9,15 @@ from io import StringIO
 from Bio import Entrez, SeqIO
 Entrez.email = "ngarber93@gmail.com"
 
-def read_homologene(homologene_data_path):
+def read_homologene(homologene_data_path, get_sequences = True, seq_chunk_size = 5000):
     '''
     Loads homologene.data (from the NCBI FTP site) and retrieve matching sequences
 
     Args:
         homologene_data_path (str): local path to homologene.data
+        get_sequences (bool):       whether to request sequences from Entrez
+        seq_chunk_size (bool):      maximum number of sequences to request at once;
+                                    setting this above 10000 can cause data to be truncated
 
     Returns:
         homologene_df (pd.DataFrame): homologene data in a dataframe
@@ -27,19 +30,26 @@ def read_homologene(homologene_data_path):
     homologene_df.columns = columns
 
     # Fetch matching protein sequences
-    print("Requesting sequences from Entrez...")
-    accessions = homologene_df["protein_accession"].to_list()
-    handle = Entrez.efetch(db="protein", id=accessions, rettype="fasta", retmode="text")
-    fasta_data = handle.read()
-    handle.close()
+    if get_sequences:
+        accessions = homologene_df["protein_accession"].to_list()
+        chunks = [accessions[i:i+seq_chunk_size] for i in range(0, len(accessions), seq_chunk_size)]
 
-    print("Parsing records...")
-    records = [record for record in SeqIO.parse(StringIO(fasta_data), "fasta")]
+        records = []
+        for i, chunk in enumerate(chunks):
+            print(f"Requesting sequences from Entrez for chunk #{i+1}...")
+            handle = Entrez.efetch(db="protein", id=chunk, rettype="fasta", retmode="text")
+            fasta_data = handle.read()
+            handle.close()
 
-    print("Applying seqs to homologene dataframe...")
-    lookup_dict = {record.id: str(record.seq) for record in records}
-    seqs = [lookup_dict.get(accession) for accession in accessions]
-    homologene_df["sequence"] = seqs
+            print("\tReceived; parsing records...")
+            chunk_records = [record for record in SeqIO.parse(StringIO(fasta_data), "fasta")]
+            records.extend(chunk_records)
+
+        print("Applying seqs to homologene dataframe...")
+        lookup_dict = {record.id: str(record.seq) for record in records}
+        seqs = [lookup_dict.get(accession) for accession in accessions]
+
+        homologene_df["sequence"] = seqs
 
     return homologene_df
 
@@ -85,6 +95,8 @@ def get_homologs(homologene_data_path, reference_taxid = 9606, target_taxids = (
             matching_target_tuples = []
             for matching_target_id, sequence in zip(matching_target_ids, matching_target_seqs):
                 matching_target_tuples.append((matching_target_id, sequence))
+                if sequence is None:
+                    print(f"Caution: matching target ID {matching_target_id} has no associated sequence!")
             matches_by_taxid[target_taxid] = matching_target_tuples
 
         reference_base_id = reference_protein_id.split(".")[0]
