@@ -165,7 +165,7 @@ if __name__ == "__main__":
             if save_folder == "":
                 save_folder = os.getcwd()
                 save_folder = save_folder.rsplit("/",1)[0]
-            save_path = os.path.join(save_folder, "dataset.csv")
+            save_path = os.path.join(save_folder, "proteome_dataset.csv")
             data_df.to_csv(save_path)
             saved = True
         except Exception as e:
