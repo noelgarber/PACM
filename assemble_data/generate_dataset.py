@@ -162,7 +162,7 @@ if __name__ == "__main__":
     while not saved:
         try:
             save_folder = input("Success! Enter the folder for saving data (or leave blank to use current directory:  ")
-            if save_folder == "": 
+            if save_folder == "":
                 save_folder = os.getcwd()
                 save_folder = save_folder.rsplit("/",1)[0]
             save_path = os.path.join(save_folder, "dataset.csv")
