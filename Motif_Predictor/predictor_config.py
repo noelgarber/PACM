@@ -19,19 +19,24 @@ core_start (int):                the index where the 'core' of a motif begins, f
 core_end (int):                  the index where the 'core' of a motif ends, for topology checking
 '''
 
-predictor_params = {"protein_seqs_path": "/home/user/example_folder/Biomart_NR_110.csv",
+predictor_params = {"protein_seqs_path": "/home/user/Documents/GitHub/PACM/proteome_dataset.csv",
+                    "scored_output_path": "/home/user/Documents/GitHub/PACM/proteome_dataset_scored.csv",
+                    "seq_col": "sequence",
                     "motif_length": 15,
-                    "use_weighted": True,
+                    "pickled_weights_path": "/home/user/example_folder/Matrix_Data/conditional_weights_tuple.pkl",
                     "convert_phospho": True,
                     "use_specificity_weighted": True,
                     "return_count": 3,
                     "compare_classical_method": True,
                     "enforced_position_rules": {7: np.array(["F","Y"]),
                                                 9: np.array(["D","E","S","T"])},
-                    "conditional_matrices_path": "/home/user/example_folder/conditional_matrices.pkl",
-                    "specificity_matrix_path": "/home/user/example_folder/specificity_matrix.pkl",
-                    "scored_output_path": "/home/user/example_folder/biomart_scored_data.csv",
+                    "conditional_matrices_path": "/home/user/example_folder/Matrix_Data/conditional_matrices.pkl",
+                    "specificity_matrix_path": "/home/user/example_folder/Matrix_Data/weighted_specificity_matrix.pkl",
+                    "leading_glycines": 6,
+                    "trailing_glycines": 2,
+                    "replace_selenocysteine": True,
                     "check_topology": True,
                     "uniprot_refresh_time": 1,
                     "core_start": 6,
-                    "core_end": 12}
+                    "core_end": 12,
+                    "chunk_size": 1000}
