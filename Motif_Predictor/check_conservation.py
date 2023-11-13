@@ -19,7 +19,7 @@ from PACM_General_Functions import CharacAA, NumInput, FilenameSubdir, use_defau
 # Vectorization is not possible for this procedure; suppress Pandas performance warnings arising from fragmentatiom
 warnings.simplefilter(action = "ignore", category = pd.errors.PerformanceWarning)
 
-def check_pairwise_homology(motif_sequence, target_sequence, open_gap_penalty = None, extend_gap_penalty = None):
+def motif_pairwise_homology(motif_sequence, target_sequence, open_gap_penalty = None, extend_gap_penalty = None):
 	'''
 	Finds the best-matching homologous motif in a target sequence for a given linear motif
 
@@ -126,7 +126,7 @@ def homology_analyzer(slim_input_df, parameters_dict):
 		#Perform pairwise BLAST alignment
 		if has_homolog: 
 			#Perform source-target SLiM alignment with pairwise2 to obtain homolog SLiM sequence and sequence identity
-			homolog_slim, slim_align_identical, slim_align_identity_ratio = check_pairwise_homology(motif_sequence = slim_seq, target_sequence = target_homolog_seq)
+			homolog_slim, slim_align_identical, slim_align_identity_ratio = motif_pairwise_homology(motif_sequence = slim_seq, target_sequence = target_homolog_seq)
 			
 			#Perform or retieve source-target whole protein sequence identity for comparison
 			if homolog_request_method == "REST": 
