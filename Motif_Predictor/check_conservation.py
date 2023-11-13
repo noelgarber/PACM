@@ -61,7 +61,7 @@ def motif_pairwise_homology(motif_sequence, target_sequence, open_gap_penalty = 
 	align_identical = motif_alignments_xs[0][2]
 	align_identity_ratio = align_identical / len(motif_sequence)
 
-	return homolog_motif_xs, align_identical, align_identity_ratio
+	return (homolog_motif_xs, align_identical, align_identity_ratio)
 
 def parent_pairwise_homology(sequence_A, sequence_B):
 	'''
@@ -80,7 +80,89 @@ def parent_pairwise_homology(sequence_A, sequence_B):
 	protein_align_identical = protein_alignments_xx[0][2]
 	protein_identity_ratio = protein_align_identical / len(sequence_A)
 
-	return protein_align_identical, protein_identity_ratio
+	return (protein_align_identical, protein_identity_ratio)
+
+def evaluate_homologs(data_df, motif_seq_cols, parent_seq_col, homolog_seq_cols):
+	'''
+	Main function to evaluate homologs in a dataframe for homology with the motif of interest
+
+	Args:
+		data_df (pd.DataFrame):  dataframe containing motif, parent, and homolog seqs
+		motif_seq_cols (list):   col names holding predicted motifs from parental protein sequences
+		parent_seq_col (str):    col name for parental seqs
+		homolog_seq_cols (list): col names with homolog protein sequences to be searched
+
+	Returns:
+		data_df (pd.DataFrame):  dataframe with added motif homology columns
+	'''
+
+	cols = list(data_df.columns)
+	parent_seqs = data_df[parent_seq_col].to_list()
+
+	motif_col_count = len(motif_seq_cols)
+	for i, motif_seq_col in enumerate(motif_seq_cols):
+		print(f"Evaluating homologs for {motif_seq_col} ({i+1} of {motif_col_count})...")
+		motif_seqs = data_df[motif_seq_col].to_list()
+
+		homolog_col_count = len(homolog_seq_cols)
+		for j, homolog_seq_col in enumerate(homolog_seq_cols):
+			# Get the col prefix not including "_seq"
+			col_prefix = homolog_seq_col.rsplit("_",1)[0]
+			print(f"\tEvaluating homolog {col_prefix} ({j+1} of {homolog_col_count})")
+			col_idx = data_df.columns.get_loc(homolog_seq_col)
+
+			# Evaluate motif homologies
+			homolog_seqs = data_df[homolog_seq_col].to_list()
+			zipped_seqs = zip(motif_seqs, homolog_seqs)
+			motif_homology_tuples = []
+			with tqdm(total=len(motif_seqs), desc="Processing pairwise motif homologies") as pbar:
+				for motif, target in zipped_seqs:
+					motif_homology_tuple = motif_pairwise_homology(motif, target)
+					motif_homology_tuples.append(motif_homology_tuple)
+					pbar.update()
+				pbar.close()
+
+			homolog_motif_seqs = [motif_homology_tuple[0] for motif_homology_tuple in motif_homology_tuples]
+			homolog_motif_identities = [motif_homology_tuple[1] for motif_homology_tuple in motif_homology_tuples]
+			homolog_motif_ratios = [motif_homology_tuple[2] for motif_homology_tuple in motif_homology_tuples]
+
+			# Assign motif homologies to dataframe
+			data_df[col_prefix+"_matching_motif"] = homolog_motif_seqs
+			data_df[col_prefix+"_motif_identical_residues"] = homolog_motif_identities
+			data_df[col_prefix+"_motif_identity_ratios"] = homolog_motif_ratios
+
+			# Evaluate parental sequence homologies
+			zipped_parental_seqs = zip(parent_seqs, homolog_seqs)
+			parent_tuples = []
+			with tqdm(total=len(parent_seqs), desc="Processing pairwise parental sequence homologies") as pbar:
+				for parent, homolog in zipped_parental_seqs:
+					parent_homology_tuple = parent_pairwise_homology(parent, homolog)
+					parent_tuples.append(parent_homology_tuple)
+					pbar.update()
+				pbar.close()
+
+			homolog_parental_identities = [parent_tuple[0] for parent_tuple in parent_tuples]
+			homolog_parental_ratios = [parent_tuple[1] for parent_tuple in parent_tuples]
+
+			# Assign parental homologies to dataframe
+			data_df[col_prefix+"_parent_identical_residues"] = homolog_parental_identities
+			data_df[col_prefix+"_parent_identity_ratios"] = homolog_parental_ratios
+
+			# Reorder cols
+			preceding_cols = cols[0:col_idx+1]
+			new_cols = [col_prefix+"_matching_motif",
+						col_prefix+"_motif_identical_residues",
+						col_prefix+"_motif_identity_ratios",
+						col_prefix+"_parent_identical_residues",
+						col_prefix+"_parent_identity_ratios"]
+			following_cols = cols[col_idx+1:]
+			reordered_cols = preceding_cols + new_cols + following_cols
+			data_df = data_df[reordered_cols]
+
+	return data_df
+
+
+
 
 
 
