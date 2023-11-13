@@ -27,6 +27,7 @@ Old*
 /Motif_Predictor/Private/*
 .githooks
 *config_local.py
+dataset.csv
 
 #Ignore PyCharm idea files
 *.idea
