@@ -65,7 +65,8 @@ def fetch_accessions(dataset_name = "hsapiens_gene_ensembl", biomart_url = "http
     return accessions_df
 
 def generate_dataset(protein_fasta_path = None, retrieve_matching_homologs = True, homologene_path = None,
-                     reference_taxid = 9606, target_taxids = (3702,), accession_dataset_name = "hsapiens_gene_ensembl"):
+                     reference_taxid = 9606, target_taxids = (3702,), accession_dataset_name = "hsapiens_gene_ensembl",
+                     homologs = None):
     '''
     Main function that generates the dataset
 
@@ -76,6 +77,7 @@ def generate_dataset(protein_fasta_path = None, retrieve_matching_homologs = Tru
         homologene_data_path (str):        path to homologene.data file available over NCBI FTP
         reference_taxid (int):             taxonomic identifier for the reference species (e.g. human = 9606)
         target_taxids (list|tuple):        taxonomic identifiers for the target species set
+        homologs (dict):                   optional, but may be given if pre-obtained for performance improvement
 
     Returns:
         data_df (pd.DataFrame): dataframe with the accessions and protein sequence data
@@ -114,9 +116,10 @@ def generate_dataset(protein_fasta_path = None, retrieve_matching_homologs = Tru
     # Assign homolog accessions and sequences
     if retrieve_matching_homologs:
         # Load homologs dict
-        if not homologene_path:
-            homologene_path = input("Enter the path to homologene.data (available from NCBI FTP):  ")
-        homologs = get_homologs(homologene_path, reference_taxid, target_taxids)
+        if homologs is None:
+            if not homologene_path:
+                homologene_path = input("Enter the path to homologene.data (available from NCBI FTP):  ")
+            homologs = get_homologs(homologene_path, reference_taxid, target_taxids)
 
         # Extract IDs to find sequences for
         refseq_peptide_ids = data_df["refseq_peptide"].to_list()
@@ -156,18 +159,35 @@ if __name__ == "__main__":
 
     reference_taxid = 9606 # human
     target_taxids = (10090, 10116, 7955, 6239, 7227, 4932, 4896, 3702)
-    data_df = generate_dataset(fasta_path, retrieve_matching_homologs, homologene_path, reference_taxid, target_taxids)
+    homologs = get_homologs(homologene_path, reference_taxid, target_taxids)
 
-    saved = False
-    while not saved:
-        try:
-            save_folder = input("Success! Enter the folder for saving data (or leave blank to use current directory:  ")
-            if save_folder == "":
-                save_folder = os.getcwd()
-                save_folder = save_folder.rsplit("/",1)[0]
-            save_path = os.path.join(save_folder, "proteome_dataset.csv")
-            data_df.to_csv(save_path)
-            saved = True
-        except Exception as e:
-            print(f"Error while saving: {e}")
-            print("Retrying...")
+    divide_dataset = True
+    if divide_dataset:
+        for target_taxid in target_taxids:
+            divided_data_df = generate_dataset(fasta_path, retrieve_matching_homologs, homologene_path, reference_taxid,
+                                               (target_taxid,), homologs = homologs)
+            saved = False
+            while not saved:
+                try:
+                    save_folder = os.getcwd().rsplit("/", 1)[0]
+                    save_path = os.path.join(save_folder, f"proteome_dataset_{target_taxid}_homologs.csv")
+                    divided_data_df.to_csv(save_path)
+                    saved = True
+                except Exception as e:
+                    print(f"Error while saving: {e}")
+                    print("Retrying...")
+            del divided_data_df
+    else:
+        data_df = generate_dataset(fasta_path, retrieve_matching_homologs, homologene_path,
+                                   reference_taxid, target_taxids, homologs = homologs)
+        saved = False
+        while not saved:
+            try:
+                save_folder = os.getcwd().rsplit("/", 1)[0]
+                save_path = os.path.join(save_folder, "proteome_dataset.csv")
+                data_df.to_csv(save_path)
+                saved = True
+            except Exception as e:
+                print(f"Error while saving: {e}")
+                print("Retrying...")
+        del data_df
