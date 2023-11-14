@@ -194,7 +194,7 @@ def retrieve_matches(input_df, reference_taxid, target_taxids, homologene_path =
 
 def generate_dataset(protein_fasta_path = None, retrieve_matching_homologs = True, homologene_path = None,
                      reference_taxid = 9606, target_taxids = (3702,), separate_target_taxids = True,
-                     accession_dataset_name = "hsapiens_gene_ensembl", verbose = True):
+                     accession_dataset_name = "hsapiens_gene_ensembl", save_folder = None, verbose = True):
     '''
     Main function that generates the dataset
 
@@ -207,12 +207,11 @@ def generate_dataset(protein_fasta_path = None, retrieve_matching_homologs = Tru
         reference_taxid (int):             taxonomic identifier for the reference species (e.g. human = 9606)
         target_taxids (list|tuple):        taxonomic identifiers for the target species set
         separate_target_taxids (bool):     whether to generate separate dataframes for each taxid or leave together
+        save_folder (str):                 folder to save dataframes into, as CSVs
         verbose (bool):                    whether to print progress information
-
-    Returns:
-        df_dict (dict):                    dict of separated dataframes if separate_target_taxids was set to True
-        data_df (pd.DataFrame):            dataframe with the accessions, protein sequences, and homolog data if given
     '''
+
+    save_folder = os.getcwd().rsplit("/",1)[0]
 
     # Generate main dataframe with host accessions and sequences
     data_df = generate_base_dataset(protein_fasta_path, accession_dataset_name)
@@ -221,15 +220,18 @@ def generate_dataset(protein_fasta_path = None, retrieve_matching_homologs = Tru
     if retrieve_matching_homologs:
         homologs = get_homologs(homologene_path, reference_taxid, target_taxids)
         if separate_target_taxids:
-            df_dict = {}
             for target_taxid in target_taxids:
                 subset_data_df = retrieve_matches(data_df, reference_taxid, (target_taxid,),
                                                   homologs = homologs, verbose = verbose)
-                df_dict[target_taxid] = subset_data_df
-            return df_dict
+                save_path = os.path.join(save_folder, f"proteome_dataset_{target_taxid}_homologs.csv")
+                subset_data_df.to_csv(save_path)
         else:
             data_df = retrieve_matches(data_df, reference_taxid, target_taxids, homologene_path, homologs, verbose)
-            return data_df
+            save_path = os.path.join(save_folder, f"proteome_dataset_all_homologs.csv")
+            data_df.to_csv(save_path)
+    else:
+        save_path = os.path.join(save_folder, f"proteome_dataset.csv")
+        data_df.to_csv(save_path)
 
 if __name__ == "__main__":
     default_fasta_path = os.path.join(os.getcwd(), "default_source_data/Homo_sapiens.GRCh38.pep.all.fa")
@@ -245,26 +247,5 @@ if __name__ == "__main__":
     target_taxids = (10090, 10116, 7955, 6239, 7227, 4932, 4896, 3702)
 
     accession_dataset_name = "hsapiens_gene_ensembl"
-    result = generate_dataset(fasta_path, retrieve_matching_homologs, homologene_path, reference_taxid, target_taxids,
-                              separate_target_taxids, accession_dataset_name, verbose=True)
-
-    save_folder = os.getcwd().rsplit("/", 1)[0]
-    if separate_target_taxids:
-        for target_taxid, df in result.items():
-            saved = False
-            while not saved:
-                try:
-                    save_path = os.path.join(save_folder, f"proteome_dataset_{target_taxid}_homologs.csv")
-                    divided_data_df.to_csv(save_path)
-                    saved = True
-                except Exception as e:
-                    print(f"Error while saving: {e}", "\nRetrying...")
-    else:
-        saved = False
-        while not saved:
-            try:
-                save_path = os.path.join(save_folder, f"proteome_dataset_all_homologs.csv")
-                divided_data_df.to_csv(save_path)
-                saved = True
-            except Exception as e:
-                print(f"Error while saving: {e}", "\nRetrying...")
+    generate_dataset(fasta_path, retrieve_matching_homologs, homologene_path, reference_taxid, target_taxids,
+                     separate_target_taxids, accession_dataset_name, verbose=True)
