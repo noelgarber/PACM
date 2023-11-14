@@ -141,16 +141,14 @@ def retrieve_matches(input_df, reference_taxid, target_taxids, homologene_path =
     homolog_id_cols = {}
     homolog_seq_cols = {}
 
+    print(f"Looking up homologs for taxids {target_taxids} for {len(refseq_peptide_ids)} host protein IDs...")
     for i, (refseq_peptide_id, refseq_predicted_id) in enumerate(zip(refseq_peptide_ids, refseq_predicted_ids)):
-        if verbose:
-            print(f"Looking up homologs for row {i} of {entries_count}")
         refseq_peptide_matches = homologs.get(refseq_peptide_id)
         refseq_predicted_matches = homologs.get(refseq_predicted_id)
 
         if refseq_peptide_matches is not None:
-            if verbose:
-                print(f"\tHomologs found for {refseq_peptide_id} in species: {list(refseq_peptide_matches.keys())}")
-            for taxid, matching_target_tuples in refseq_peptide_matches.items():
+            for taxid in target_taxids:
+                matching_target_tuples = refseq_peptide_matches.get(taxid)
                 tuple_indices = np.arange(len(matching_target_tuples))
                 for j, match_tuple in zip(tuple_indices, matching_target_tuples):
                     col_name = f"{taxid}_homolog_{j}"
@@ -165,9 +163,8 @@ def retrieve_matches(input_df, reference_taxid, target_taxids, homologene_path =
                     homolog_seq_cols[col_name + "_sequence"][i] = match_tuple[1]
 
         if refseq_predicted_matches is not None:
-            if verbose:
-                print(f"\tHomologs found for {refseq_predicted_id} in species: {list(refseq_predicted_matches.keys())}")
-            for taxid, matching_target_tuples in refseq_predicted_matches.items():
+            for taxid in target_taxids:
+                matching_target_tuples = refseq_predicted_matches.get(taxid)
                 base_index = len(refseq_peptide_matches[taxid]) if refseq_peptide_matches is not None else 0
                 tuple_indices = np.arange(base_index, len(matching_target_tuples) + base_index)
                 for j, match_tuple in zip(tuple_indices, matching_target_tuples):
