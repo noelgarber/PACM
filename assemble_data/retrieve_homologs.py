@@ -81,7 +81,7 @@ def get_homologs(homologene_data_path, reference_taxid = 9606, target_taxids = (
     print("Generating homologs dictionary...")
     homologs = {}
     for i, reference_protein_id in enumerate(reference_protein_ids):
-        print(f"Assigning host protein #{i} of {reference_count}")
+        # print(f"Assigning host protein #{i} of {reference_count}")
         reference_entries_df = reference_df[reference_df["protein_accession"].eq(reference_protein_id)]
         reference_protein_hids = reference_entries_df["hid"].to_list()
 
