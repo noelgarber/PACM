@@ -218,8 +218,9 @@ def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
     '''
 
     # Get protein sequences to score
-    protein_seqs_list = df_chunk["Sequence"].to_list()
-    df_chunk_scored = df_chunk.copy()
+    seq_col = predictor_params["seq_col"]
+    protein_seqs_list = df_chunk[seq_col].to_list()
+    df_chunk_scored = df_chunk
 
     # Load ConditionalMatrices object to be used in scoring
     conditional_matrices_path = predictor_params["conditional_matrices_path"]
