@@ -10,6 +10,8 @@ import time
 import requests
 import scipy.stats as stats
 import warnings
+import multiprocessing
+from functools import partial
 from tqdm import tqdm
 from biomart import BiomartServer
 from Bio import pairwise2
@@ -19,13 +21,12 @@ from PACM_General_Functions import CharacAA, NumInput, FilenameSubdir, use_defau
 # Vectorization is not possible for this procedure; suppress Pandas performance warnings arising from fragmentatiom
 warnings.simplefilter(action = "ignore", category = pd.errors.PerformanceWarning)
 
-def motif_pairwise_homology(motif_sequence, target_sequence, open_gap_penalty = None, extend_gap_penalty = None):
+def motif_pairwise_homology(seq_pair, open_gap_penalty = None, extend_gap_penalty = None):
 	'''
 	Finds the best-matching homologous motif in a target sequence for a given linear motif
 
 	Args:
-		motif_sequence (str):                short linear motif sequence
-		target_sequence (str): 				 longer sequence to search for a matching homologous motif
+		seq_pair (tuple|list): 				 tuple of (short linear motif sequence, longer sequence to be searched)
 		open_gap_penalty (None|int|float):   open gap penalty; setting to None sets it to the negative of motif length
 		extend_gap_penalty (None|int|float): extend gap penalty; setting to None sets it to the negative of motif length
 
@@ -34,6 +35,8 @@ def motif_pairwise_homology(motif_sequence, target_sequence, open_gap_penalty = 
 		align_identical (int):       number of identical residues
 		align_identity_ratio (int):  percentage identity
 	'''
+
+	motif_sequence, target_sequence = seq_pair
 
 	if not isinstance(motif_sequence, str) or not isinstance(target_sequence, str):
 		return ("",0,0.0)
@@ -68,20 +71,27 @@ def motif_pairwise_homology(motif_sequence, target_sequence, open_gap_penalty = 
 
 	return (homolog_motif_xs, align_identical, align_identity_ratio)
 
-def parent_pairwise_homology(sequence_A, sequence_B):
+def parent_pairwise_homology(seq_pair):
 	'''
 	Checks parental sequence homology
 
 	Args:
-		sequence_A (str): protein sequence from which the original motif is derived
-		sequence_B (str): protein sequence of the homolog
+		seq_pair (tuple|list): pair of source and target parental sequences to check homology for
 
 	Returns:
 		protein_align_identical (int):  number of identical residues
 		protein_identity_ratio (float): ratio of identical residues within the motif frame
 	'''
 
+	sequence_A, sequence_B = seq_pair
+
+	if not isinstance(sequence_A, str) or not isinstance(sequence_B, str):
+		return (0,0.0)
+
 	protein_alignments_xx = pairwise2.align.globalxx(sequence_A, sequence_B)
+	if len(protein_alignments_xx) == 0:
+		return (0,0.0)
+
 	protein_align_identical = protein_alignments_xx[0][2]
 	protein_identity_ratio = protein_align_identical / len(sequence_A)
 
@@ -118,13 +128,17 @@ def evaluate_homologs(data_df, motif_seq_cols, parent_seq_col, homolog_seq_cols)
 
 			# Evaluate motif homologies
 			homolog_seqs = data_df[homolog_seq_col].to_list()
-			zipped_seqs = zip(motif_seqs, homolog_seqs)
 			motif_homology_tuples = []
+			motif_pairwise_partial = partial(motif_pairwise_homology, open_gap_penalty=None, extend_gap_penalty=None)
+			zipped_seqs = zip(motif_seqs, homolog_seqs)
+			seq_pairs = [(motif, target) for motif, target in zipped_seqs]
 			with tqdm(total=len(motif_seqs), desc="Processing pairwise motif homologies") as pbar:
-				for motif, target in zipped_seqs:
-					motif_homology_tuple = motif_pairwise_homology(motif, target)
-					motif_homology_tuples.append(motif_homology_tuple)
+				pool = multiprocessing.pool.Pool()
+				for result in pool.imap_unordered(motif_pairwise_partial, seq_pairs):
+					motif_homology_tuples.append(result)
 					pbar.update()
+				pool.join()
+				pool.close()
 				pbar.close()
 
 			# Assign motif homologies to dataframe
@@ -142,12 +156,15 @@ def evaluate_homologs(data_df, motif_seq_cols, parent_seq_col, homolog_seq_cols)
 
 			# Evaluate parental sequence homologies
 			zipped_parental_seqs = zip(parent_seqs, homolog_seqs)
+			parent_seq_pairs = [(sequence_A, sequence_B) for sequence_A, sequence_B in zipped_parental_seqs]
 			parent_tuples = []
 			with tqdm(total=len(parent_seqs), desc="Processing pairwise parental sequence homologies") as pbar:
-				for parent, homolog in zipped_parental_seqs:
-					parent_homology_tuple = parent_pairwise_homology(parent, homolog)
-					parent_tuples.append(parent_homology_tuple)
+				pool = multiprocessing.pool.Pool()
+				for result in pool.imap_unordered(parent_pairwise_homology, parent_seq_pairs):
+					parent_tuples.append(result)
 					pbar.update()
+				pool.join()
+				pool.close()
 				pbar.close()
 
 			homolog_parental_identities = [parent_tuple[0] for parent_tuple in parent_tuples]
