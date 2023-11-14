@@ -35,6 +35,9 @@ def motif_pairwise_homology(motif_sequence, target_sequence, open_gap_penalty = 
 		align_identity_ratio (int):  percentage identity
 	'''
 
+	if not isinstance(motif_sequence, str) or not isinstance(target_sequence, str):
+		return ("",0,0.0)
+
 	if open_gap_penalty is None:
 		open_gap_penalty = -1 * len(motif_sequence)
 	if extend_gap_penalty is None:
@@ -43,6 +46,8 @@ def motif_pairwise_homology(motif_sequence, target_sequence, open_gap_penalty = 
 	motif_alignments_xs = pairwise2.align.globalxs(motif_sequence, target_sequence, open_gap_penalty,
 												   extend_gap_penalty, penalize_end_gaps = False)
 
+	if len(motif_alignments_xs) == 0:
+		return ("",0,0.0)
 	seqA = motif_alignments_xs[0][0]
 	seqB = motif_alignments_xs[0][1]
 
