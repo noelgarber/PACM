@@ -122,14 +122,18 @@ def evaluate_homologs(data_df, motif_seq_cols, parent_seq_col, homolog_seq_cols)
 					pbar.update()
 				pbar.close()
 
-			homolog_motif_seqs = [motif_homology_tuple[0] for motif_homology_tuple in motif_homology_tuples]
-			homolog_motif_identities = [motif_homology_tuple[1] for motif_homology_tuple in motif_homology_tuples]
-			homolog_motif_ratios = [motif_homology_tuple[2] for motif_homology_tuple in motif_homology_tuples]
-
 			# Assign motif homologies to dataframe
+			homolog_motif_seqs = [motif_homology_tuple[0] for motif_homology_tuple in motif_homology_tuples]
 			data_df[col_prefix+"_matching_motif"] = homolog_motif_seqs
+			del homolog_motif_seqs
+
+			homolog_motif_identities = [motif_homology_tuple[1] for motif_homology_tuple in motif_homology_tuples]
 			data_df[col_prefix+"_motif_identical_residues"] = homolog_motif_identities
+			del homolog_motif_identities
+
+			homolog_motif_ratios = [motif_homology_tuple[2] for motif_homology_tuple in motif_homology_tuples]
 			data_df[col_prefix+"_motif_identity_ratios"] = homolog_motif_ratios
+			del homolog_motif_ratios
 
 			# Evaluate parental sequence homologies
 			zipped_parental_seqs = zip(parent_seqs, homolog_seqs)
@@ -159,6 +163,8 @@ def evaluate_homologs(data_df, motif_seq_cols, parent_seq_col, homolog_seq_cols)
 			reordered_cols = preceding_cols + new_cols + following_cols
 			data_df = data_df[reordered_cols]
 
+		del motif_seqs
+
 	return data_df
 
 
@@ -167,6 +173,7 @@ def evaluate_homologs(data_df, motif_seq_cols, parent_seq_col, homolog_seq_cols)
 
 
 # TODO Sort the rest of this legacy code below
+'''
 def homology_analyzer(slim_input_df, parameters_dict): 
 	slim_identities = []
 	protein_identities = []
@@ -470,3 +477,4 @@ data_df.to_csv(FilenameSubdir("Output", "SLiM_conservation_results.csv"))
 print("Saved! Path: Output/SLiM_conservation_results.csv")
 print("-----")
 
+'''
