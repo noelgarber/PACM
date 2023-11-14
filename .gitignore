@@ -27,7 +27,7 @@ Old*
 /Motif_Predictor/Private/*
 .githooks
 *config_local.py
-proteome_dataset.csv
+*proteome_dataset*.csv
 
 #Ignore PyCharm idea files
 *.idea
