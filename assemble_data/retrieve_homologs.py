@@ -66,6 +66,17 @@ def get_homologs(homologene_data_path, reference_taxid = 9606, target_taxids = (
         homologs (dict):                   dictionary of reference_id --> homolog_taxid --> matching_tuples of (id, seq)
     '''
 
+    # Check if this task has already been done
+    pickled_homologs_path = os.path.join(os.getcwd(), "homologs.pkl")
+    if os.path.isfile(pickled_homologs_path):
+        use_pickled_homologs = input("Pickled homologs dict was found; use it? (Y/n)  ")
+        use_pickled_homologs = use_pickled_homologs == "Y" or use_pickled_homologs == "y"
+        if use_pickled_homologs:
+            with open(pickled_homologs_path, "rb") as f:
+                homologs = pickle.load(f)
+            return homologs
+
+    # Read homologene and get sequences
     homologene_df = read_homologene(homologene_data_path)
     reference_df = homologene_df[homologene_df["taxid"].eq(reference_taxid)]
 
@@ -77,7 +88,6 @@ def get_homologs(homologene_data_path, reference_taxid = 9606, target_taxids = (
 
     # Construct a non-redundant homolog dictionary
     reference_protein_ids = reference_df["protein_accession"].to_list()
-    reference_count = len(reference_protein_ids)
     print("Generating homologs dictionary...")
     homologs = {}
     for i, reference_protein_id in enumerate(reference_protein_ids):
@@ -101,6 +111,9 @@ def get_homologs(homologene_data_path, reference_taxid = 9606, target_taxids = (
 
         reference_base_id = reference_protein_id.split(".")[0]
         homologs[reference_base_id] = matches_by_taxid
+
+    with open(pickled_homologs_path, "wb") as f:
+        pickle.dump(homologs, f)
 
     return homologs
 
