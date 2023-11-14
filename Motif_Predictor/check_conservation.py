@@ -134,11 +134,14 @@ def evaluate_homologs(data_df, motif_seq_cols, parent_seq_col, homolog_seq_cols)
 			seq_pairs = [(motif, target) for motif, target in zipped_seqs]
 			with tqdm(total=len(motif_seqs), desc="Processing pairwise motif homologies") as pbar:
 				pool = multiprocessing.pool.Pool()
+
 				for result in pool.imap_unordered(motif_pairwise_partial, seq_pairs):
 					motif_homology_tuples.append(result)
 					pbar.update()
-				pool.join()
+
 				pool.close()
+				pool.join()
+
 				pbar.close()
 
 			# Assign motif homologies to dataframe
@@ -160,11 +163,14 @@ def evaluate_homologs(data_df, motif_seq_cols, parent_seq_col, homolog_seq_cols)
 			parent_tuples = []
 			with tqdm(total=len(parent_seqs), desc="Processing pairwise parental sequence homologies") as pbar:
 				pool = multiprocessing.pool.Pool()
+
 				for result in pool.imap_unordered(parent_pairwise_homology, parent_seq_pairs):
 					parent_tuples.append(result)
 					pbar.update()
-				pool.join()
+
 				pool.close()
+				pool.join()
+
 				pbar.close()
 
 			homolog_parental_identities = [parent_tuple[0] for parent_tuple in parent_tuples]
