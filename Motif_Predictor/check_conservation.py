@@ -71,6 +71,24 @@ def motif_pairwise_homology(seq_pair, open_gap_penalty = None, extend_gap_penalt
 
 	return (homolog_motif_xs, align_identical, align_identity_ratio)
 
+def motif_pairwise_chunk(seq_list):
+	'''
+	Simple parallelizable version of motif_pairwise_homology that accepts lists of (motif, target) sequence pairs
+
+	Args:
+		seq_list (list): list of tuples of (motif sequence, target homolog sequence)
+
+	Returns:
+		results (list): list of results
+	'''
+
+	results = []
+	for seq_pair in seq_list:
+		result = motif_pairwise_homology(seq_pair)
+		results.append(result)
+
+	return results
+
 def parent_pairwise_homology(seq_pair):
 	'''
 	Checks parental sequence homology
@@ -96,6 +114,24 @@ def parent_pairwise_homology(seq_pair):
 	protein_identity_ratio = protein_align_identical / len(sequence_A)
 
 	return (protein_align_identical, protein_identity_ratio)
+
+def parent_pairwise_chunk(seq_pair_list):
+	'''
+	Simple parallelizable chunking of parent_pairwise_homology
+
+	Args:
+		seq_pair_list (list): list of pairs of parent sequences from host and target species
+
+	Returns:
+		results (list): list of results for each seq pair
+	'''
+
+	results = []
+	for seq_pair in seq_pair_list:
+		result = parent_pairwise_homology(seq_pair)
+		results.append(result)
+
+	return results
 
 def evaluate_homologs(data_df, motif_seq_cols, parent_seq_col, homolog_seq_cols):
 	'''
@@ -129,14 +165,15 @@ def evaluate_homologs(data_df, motif_seq_cols, parent_seq_col, homolog_seq_cols)
 			# Evaluate motif homologies
 			homolog_seqs = data_df[homolog_seq_col].to_list()
 			motif_homology_tuples = []
-			motif_pairwise_partial = partial(motif_pairwise_homology, open_gap_penalty=None, extend_gap_penalty=None)
 			zipped_seqs = zip(motif_seqs, homolog_seqs)
 			seq_pairs = [(motif, target) for motif, target in zipped_seqs]
-			with tqdm(total=len(motif_seqs), desc="Processing pairwise motif homologies") as pbar:
+			chunk_size = 1000
+			seq_pairs_chunks = [seq_pairs[i:i+chunk_size] for i in range(0, len(seq_pairs), chunk_size)]
+			with tqdm(total=len(seq_pairs_chunks), desc="Processing pairwise motif homologies") as pbar:
 				pool = multiprocessing.pool.Pool()
 
-				for result in pool.imap_unordered(motif_pairwise_partial, seq_pairs):
-					motif_homology_tuples.append(result)
+				for chunk_results in pool.imap_unordered(motif_pairwise_chunk, seq_pairs_chunks):
+					motif_homology_tuples.extend(chunk_results)
 					pbar.update()
 
 				pool.close()
@@ -160,12 +197,14 @@ def evaluate_homologs(data_df, motif_seq_cols, parent_seq_col, homolog_seq_cols)
 			# Evaluate parental sequence homologies
 			zipped_parental_seqs = zip(parent_seqs, homolog_seqs)
 			parent_seq_pairs = [(sequence_A, sequence_B) for sequence_A, sequence_B in zipped_parental_seqs]
+			chunk_size = 1000
+			parent_pairs_chunks = [parent_seq_pairs[i:i+chunk_size] for i in range(0,len(parent_seq_pairs),chunk_size)]
 			parent_tuples = []
-			with tqdm(total=len(parent_seqs), desc="Processing pairwise parental sequence homologies") as pbar:
+			with tqdm(total=len(parent_pairs_chunks), desc="Processing pairwise parental sequence homologies") as pbar:
 				pool = multiprocessing.pool.Pool()
 
-				for result in pool.imap_unordered(parent_pairwise_homology, parent_seq_pairs):
-					parent_tuples.append(result)
+				for results in pool.imap_unordered(parent_pairwise_chunk, parent_pairs_chunks):
+					parent_tuples.extend(results)
 					pbar.update()
 
 				pool.close()
