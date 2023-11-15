@@ -147,12 +147,12 @@ def evaluate_homologs(data_df, motif_seq_cols, parent_seq_col, homolog_seq_cols)
 		data_df (pd.DataFrame):  dataframe with added motif homology columns
 	'''
 
-	parent_seqs = data_df[parent_seq_col].to_list()
+	parent_seqs = data_df.pop(parent_seq_col)
 
 	motif_col_count = len(motif_seq_cols)
 	for i, motif_seq_col in enumerate(motif_seq_cols):
 		print(f"Evaluating homologs for {motif_seq_col} ({i+1} of {motif_col_count})...")
-		motif_seqs = data_df[motif_seq_col].to_list()
+		motif_seqs = data_df[motif_seq_col].copy()
 
 		homolog_col_count = len(homolog_seq_cols)
 		for j, homolog_seq_col in enumerate(homolog_seq_cols):
@@ -162,19 +162,20 @@ def evaluate_homologs(data_df, motif_seq_cols, parent_seq_col, homolog_seq_cols)
 			col_idx = data_df.columns.get_loc(homolog_seq_col)
 			new_cols_df = pd.DataFrame()
 
-			# Evaluate motif homologies
-			homolog_seqs = data_df[homolog_seq_col].to_list()
-			motif_homology_tuples = []
-			zipped_seqs = zip(motif_seqs, homolog_seqs)
-			seq_pairs = [(motif, target) for motif, target in zipped_seqs]
+			# Full homolog sequences are only necessary during evaluation, so we pop them out for better memory savings
+			homolog_seqs = data_df.pop(homolog_seq_col)
+
+			# Get pairs of sequences to be evaluated
+			seq_pairs = [(motif, target) for motif, target in zip(motif_seqs, homolog_seqs)]
 			chunk_size = 1000
 			seq_pairs_chunks = [seq_pairs[i:i+chunk_size] for i in range(0, len(seq_pairs), chunk_size)]
 			del seq_pairs # no longer necessary
 
+			motif_homology_tuples = []
 			with tqdm(total=len(seq_pairs_chunks), desc="Processing pairwise motif homologies") as pbar:
 				pool = multiprocessing.pool.Pool()
 
-				for chunk_results in pool.imap(motif_pairwise_chunk, seq_pairs_chunks):
+				for chunk_results in pool.map(motif_pairwise_chunk, seq_pairs_chunks):
 					motif_homology_tuples.extend(chunk_results)
 					pbar.update()
 
@@ -192,19 +193,17 @@ def evaluate_homologs(data_df, motif_seq_cols, parent_seq_col, homolog_seq_cols)
 			del motif_homology_tuples # no longer necessary
 
 			# Evaluate parental sequence homologies
-			zipped_parental_seqs = zip(parent_seqs, homolog_seqs)
-			parent_seq_pairs = [(sequence_A, sequence_B) for sequence_A, sequence_B in zipped_parental_seqs]
-			del homolog_seqs # no longer necessary
-
+			parent_seq_pairs = [(host_seq, target_seq) for host_seq, target_seq in zip(parent_seqs, homolog_seqs)]
 			chunk_size = 1000
 			parent_pairs_chunks = [parent_seq_pairs[i:i+chunk_size] for i in range(0,len(parent_seq_pairs),chunk_size)]
-			del parent_seq_pairs # no longer necessary
+			del homolog_seqs
+			del parent_seq_pairs
 
 			parent_tuples = []
 			with tqdm(total=len(parent_pairs_chunks), desc="Processing pairwise parental sequence homologies") as pbar:
 				pool = multiprocessing.pool.Pool()
 
-				for results in pool.imap(parent_pairwise_chunk, parent_pairs_chunks):
+				for results in pool.map(parent_pairwise_chunk, parent_pairs_chunks):
 					parent_tuples.extend(results)
 					pbar.update()
 
@@ -212,6 +211,8 @@ def evaluate_homologs(data_df, motif_seq_cols, parent_seq_col, homolog_seq_cols)
 				pool.join()
 
 				pbar.close()
+
+			del parent_pairs_chunks # no longer necessary
 
 			# Assign parental homologies to new cols dataframe
 			new_cols_df[col_prefix+"_parent_identicals"] = [parent_tuple[0] for parent_tuple in parent_tuples]
@@ -221,7 +222,7 @@ def evaluate_homologs(data_df, motif_seq_cols, parent_seq_col, homolog_seq_cols)
 			# Merge into dataframe
 			original_cols = list(data_df.columns)
 			new_cols = list(new_cols_df.columns)
-			reordered_cols = original_cols[0:col_idx+1] + new_cols + original_cols[col_idx+1:]
+			reordered_cols = original_cols[0:col_idx] + new_cols + original_cols[col_idx:]
 			data_df = pd.concat([data_df, new_cols_df], axis=1)
 			data_df = data_df[reordered_cols]
 			del new_cols_df
