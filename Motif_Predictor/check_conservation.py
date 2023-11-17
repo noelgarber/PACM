@@ -104,6 +104,8 @@ def evaluate_homologs(data_df, motif_seq_cols, homolog_seq_cols):
 		data_df (pd.DataFrame):  dataframe with added motif homology columns
 	'''
 
+	homolog_motif_cols = []
+
 	motif_col_count = len(motif_seq_cols)
 	for i, motif_seq_col in enumerate(motif_seq_cols):
 		print(f"Evaluating homologs for {motif_seq_col} ({i+1} of {motif_col_count})...")
@@ -138,6 +140,7 @@ def evaluate_homologs(data_df, motif_seq_cols, homolog_seq_cols):
 
 			# Assign motif homologies to new cols dataframe
 			new_cols_df[col_prefix+"_matching_motif"] = [motif_homolog[0] for motif_homolog in motif_homology_tuples]
+			homolog_motif_cols.append(col_prefix+"_matching_motif")
 			new_cols_df[col_prefix+"_motif_similarity"] = [motif_homolog[1] for motif_homolog in motif_homology_tuples]
 			new_cols_df[col_prefix+"_motif_identity"] = [motif_homolog[2] for motif_homolog in motif_homology_tuples]
 			del motif_homology_tuples # no longer necessary
@@ -153,7 +156,7 @@ def evaluate_homologs(data_df, motif_seq_cols, homolog_seq_cols):
 	# Delete unnecessary whole homolog sequences
 	data_df.drop(homolog_seq_cols, axis=1)
 
-	return data_df
+	return data_df, homolog_motif_cols
 
 
 

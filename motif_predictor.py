@@ -6,6 +6,7 @@ import sys
 from Motif_Predictor.score_protein_motifs import score_proteins
 from Motif_Predictor.specificity_score_assigner import apply_specificity_scores
 from Motif_Predictor.check_conservation import evaluate_homologs
+from Motif_Predictor.score_homolog_motifs import score_homolog_motifs
 from Motif_Predictor.motif_topology_predictor import predict_topology
 try:
     from Motif_Predictor.predictor_config_local import predictor_params
@@ -74,7 +75,16 @@ def main(predictor_params = predictor_params):
             del chunk_df
 
             # Evaluate motif homology
-            df_with_homologs = evaluate_homologs(df_with_homologs, all_motif_cols, homolog_seq_cols)
+            df_with_homologs, homolog_motif_cols = evaluate_homologs(df_with_homologs, all_motif_cols, homolog_seq_cols)
+
+            # Score homologous motifs
+            homolog_results = score_homolog_motifs(df_with_homologs, homolog_motif_cols, predictor_params)
+            df_with_homologs, novel_motif_cols, _, classical_motif_cols, _ = homolog_results
+            all_motif_cols = novel_motif_cols.copy()
+            all_motif_cols.extend(classical_motif_cols)
+
+            # Apply bait specificity scoring to homologous motifs
+            df_with_homologs = apply_specificity_scores(df_with_homologs, all_motif_cols, predictor_params)
 
             # Recombine dataframes
             for homolog_seq_col in homolog_seq_cols:
