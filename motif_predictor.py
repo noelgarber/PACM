@@ -59,7 +59,6 @@ def main(predictor_params = predictor_params):
         protein_seqs_df = apply_specificity_scores(protein_seqs_df, all_motif_cols, predictor_params)
 
         # Get homolog seq col names
-        parent_seq_col = predictor_params["seq_col"]
         homolog_seq_cols = []
         for col in protein_seqs_df.columns:
             if "homolog" in col and "seq" in col:
