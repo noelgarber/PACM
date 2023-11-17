@@ -114,8 +114,8 @@ def evaluate_homologs(data_df, motif_seq_cols, homolog_seq_cols):
 		homolog_col_count = len(homolog_seq_cols)
 		for j, homolog_seq_col in enumerate(homolog_seq_cols):
 			# Get the col prefix not including "_seq"
-			col_prefix = homolog_seq_col.rsplit("_",1)[0] + f"_vs_Motif_#{i}"
-			print(f"\tEvaluating homolog {col_prefix} ({j+1} of {homolog_col_count}) for motif #{i}...")
+			col_prefix = homolog_seq_col.rsplit("_",1)[0] + "_vs_" + motif_seq_col
+			print(f"\tEvaluating homolog {col_prefix} ({j+1} of {homolog_col_count})...")
 			col_idx = data_df.columns.get_loc(homolog_seq_col)
 			new_cols_df = pd.DataFrame()
 
