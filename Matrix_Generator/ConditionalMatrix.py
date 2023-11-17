@@ -771,7 +771,8 @@ class ConditionalMatrices:
         print(f"Saved unweighted matrices, weighted matrices, and output report to {parent_folder}")
 
     def score_peptides(self, sequences_2d, actual_truths, signal_values = None, objective_type = "accuracy",
-                       slice_scores_subsets = None, use_weighted = False, precision_recall_path = None):
+                       slice_scores_subsets = None, use_weighted = False, precision_recall_path = None,
+                       coefficients_path = None):
         '''
         Vectorized function to score amino acid sequences based on the dictionary of context-aware weighted matrices
 
@@ -786,6 +787,7 @@ class ConditionalMatrices:
                                                         1-6, 7-13, & 14-15
             use_weighted (bool):                        whether to use conditional_matrices.stacked_weighted_matrices
             precision_recall_path (str):                desired file path for saving the precision/recall graph
+            coefficients_path (str):                    path to save score standardization coefficients to for later use
 
         Returns:
             result (ScoredPeptideResult):               signal, suboptimal, and forbidden score values in 1D and 2D
@@ -868,6 +870,6 @@ class ConditionalMatrices:
 
         result = ScoredPeptideResult(sequences_2d, slice_scores_subsets, positive_scores_2d, suboptimal_scores_2d,
                                      forbidden_scores_2d, actual_truths, signal_values, objective_type,
-                                     fig_path = precision_recall_path)
+                                     fig_path = precision_recall_path, coefficients_path = coefficients_path)
 
         return result

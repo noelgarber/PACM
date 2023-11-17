@@ -2,6 +2,8 @@
 
 import numpy as np
 import pandas as pd
+import os
+import pickle
 from functools import partial
 from sklearn.metrics import precision_recall_curve, matthews_corrcoef
 from sklearn.linear_model import LinearRegression
@@ -154,7 +156,7 @@ class ScoredPeptideResult:
     def __init__(self, seqs_2d, slice_scores_subsets,
                  positive_scores_2d, suboptimal_scores_2d, forbidden_scores_2d, actual_truths = None,
                  signal_values = None, objective_type = "accuracy", predefined_weights = None, fig_path = None,
-                 make_df = True):
+                 make_df = True, coefficients_path = None):
         '''
         Initialization function to generate the score values and assign them to self
 
@@ -172,6 +174,7 @@ class ScoredPeptideResult:
                                                suboptimal_score_weight, forbidden_score_weight)
             fig_path (str):                    desired file name, as full path, to save precision/recall graph
             make_df (bool):                    whether to generate a dataframe containing scores
+            coefficients_path (str):           path to save standardization coefficients to; required by motif predictor
         '''
 
         # Check validity of slice_scores_subsets
@@ -199,22 +202,24 @@ class ScoredPeptideResult:
         self.forbidden_scores = forbidden_scores_2d.sum(axis=1)
 
         # Apply and assess score weightings, and assign them to a dataframe
-        self.process_weights(actual_truths, signal_values, objective_type, predefined_weights, fig_path)
+        self.process_weights(actual_truths, signal_values, objective_type, predefined_weights,
+                             fig_path, coefficients_path)
         if make_df:
             self.generate_scored_df()
 
     def process_weights(self, actual_truths = None, signal_values = None, objective_type = "accuracy",
-                        predefined_weights = None, fig_path = None):
+                        predefined_weights = None, fig_path = None, coefficients_path = None):
         '''
         Parent function to either optimize weights or apply predefined weights (or all ones if not given)
 
         Args:
-            actual_truths (np.ndarray):        array of actual binary calls for each peptide
-            signal_values (np.ndarray):        array of binding signal values for peptides against protein bait(s)
-            objective_type (str):              defines the objective function as `accuracy`, `f1`, or `r2`
-            predefined_weights (tuple):        tuple of (positive_score_weights, suboptimal_score_weights,
-                                               forbidden_score_weights, type_weights)
-            fig_path (str):                    path to save the precision/recall/accuracy plot to
+            actual_truths (np.ndarray):   array of actual binary calls for each peptide
+            signal_values (np.ndarray):   array of binding signal values for peptides against protein bait(s)
+            objective_type (str):         defines the objective function as `accuracy`, `f1`, or `r2`
+            predefined_weights (tuple):   tuple of (positive_score_weights, suboptimal_score_weights,
+                                          forbidden_score_weights, type_weights)
+            fig_path (str):               path to save the precision/recall/accuracy plot to
+            coefficients_path (str):      path to save the standardization coefficients to; required by motif predictor
 
         Returns:
             None
@@ -222,7 +227,7 @@ class ScoredPeptideResult:
 
         if actual_truths is not None and predefined_weights is None:
             # Optimize weights for combining sets of scores
-            self.optimize_weights(actual_truths, signal_values, objective_type, fig_path)
+            self.optimize_weights(actual_truths, signal_values, objective_type, fig_path, coefficients_path)
             self.evaluate_weighted_scores(actual_truths)
         elif predefined_weights is not None:
             # Apply predefined weights and assess them
@@ -236,7 +241,8 @@ class ScoredPeptideResult:
             positive_weight, suboptimal_weight, forbidden_weight = np.ones(3, dtype=float)
             self.apply_weights(position_weights, positive_weight, suboptimal_weight, forbidden_weight)
 
-    def optimize_weights(self, actual_truths, signal_values = None, objective_type = "accuracy", fig_path = None):
+    def optimize_weights(self, actual_truths, signal_values = None, objective_type = "accuracy", fig_path = None,
+                         coefficients_path = None):
         '''
         Function that applies random search optimization to find ideal position and score weights to maximize f1-score
 
@@ -245,6 +251,7 @@ class ScoredPeptideResult:
             signal_values (np.ndarray):  array of binding signal values for peptides against protein bait(s)
             objective_type (str):        defines the objective function as `accuracy`, `f1`, or `r2`
             fig_path (str):              path to save the precision/recall/accuracy plot to
+            coefficients_path (str):     path to save the standardization coefficients to; required by motif predictor
 
         Returns:
             None
@@ -276,9 +283,21 @@ class ScoredPeptideResult:
 
         # Get total scores
         self.weighted_scores = np.multiply(combined_2d, combined_weights).sum(axis=1)
-        self.standardized_weighted_scores = self.weighted_scores - self.weighted_scores.min()
-        self.standardized_weighted_scores = self.standardized_weighted_scores / self.standardized_weighted_scores.max()
+
+        coefficient_a = self.weighted_scores.min()
+        self.standardized_weighted_scores = self.weighted_scores - coefficient_a
+
+        coefficient_b = self.standardized_weighted_scores.max()
+        self.standardized_weighted_scores = self.standardized_weighted_scores / coefficient_b
+
         print(f"Done! objective function output = {best_objective_output}", "\n---")
+
+        # Save standardization coefficients
+        standardization_coefficients = (coefficient_a, coefficient_b)
+        coefficients_path = os.getcwd().rsplit("/")[0] if coefficients_path is None else coefficients_path
+        coefficients_path = os.path.join(coefficients_path, "standardization_coefficients.pkl")
+        with open(coefficients_path, "wb") as f:
+            pickle.dump(standardization_coefficients, f)
 
         # Plot precisions and recalls for different thresholds
         precisions, recalls, thresholds = precision_recall_curve(actual_truths, self.standardized_weighted_scores)

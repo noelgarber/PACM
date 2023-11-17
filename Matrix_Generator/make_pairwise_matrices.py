@@ -14,7 +14,8 @@ except:
 
 def apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets = None, actual_truths = None,
                        signal_values = None, objective_type = "accuracy", seq_col = None, convert_phospho = True,
-                       add_residue_cols = False, in_place = False, sequences_2d = None, precision_recall_path = None):
+                       add_residue_cols = False, in_place = False, sequences_2d = None, precision_recall_path = None,
+                       coefficients_path = None):
     '''
     Function to apply the score_seqs() function to all sequences in the source df and add residue cols for sorting
 
@@ -32,6 +33,7 @@ def apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets = No
         sequences_2d (np.ndarray):                  unravelled peptide sequences; optionally provide this upfront for
                                                     performance improvement in loops
         precision_recall_path (str):                output file path for saving the precision/recall graph
+        coefficients_path (str):                    output file path for saving score standardization coefficients into
 
     Returns:
         result (ScoredPeptideResult):               result object containing signal, suboptimal, and forbidden scores
@@ -48,8 +50,9 @@ def apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets = No
         
     # Score the input data; the result is an instance of ScoredPeptideResult
     weights_exist = True if matrix_params.get("position_weights") is not None else False
-    scored_result = conditional_matrices.score_peptides(sequences_2d, actual_truths, signal_values, objective_type,
-                                                        slice_scores_subsets, weights_exist, precision_recall_path)
+    scored_result = conditional_matrices.score_peptides(sequences_2d, actual_truths, signal_values,
+                                                        objective_type, slice_scores_subsets, weights_exist,
+                                                        precision_recall_path, coefficients_path)
 
     # Construct the output dataframe
     output_df = input_df if in_place else input_df.copy()
@@ -136,9 +139,10 @@ def main(input_df, general_params = general_params, data_params = data_params, m
 
         precision_recall_path = os.path.join(output_folder, "precision_recall_graph.pdf")
         scored_result, output_df = apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets,
-                                                      actual_truths, mean_signal_values, objective_mode, seq_col, convert_phospho,
-                                                      add_residue_cols = True, in_place = False,
-                                                      precision_recall_path = precision_recall_path)
+                                                      actual_truths, mean_signal_values, objective_mode,
+                                                      seq_col, convert_phospho, add_residue_cols = True,
+                                                      in_place = False, precision_recall_path = precision_recall_path,
+                                                      coefficients_path = output_folder)
 
         # Cache the data
         with open(cached_path, "wb") as f:
