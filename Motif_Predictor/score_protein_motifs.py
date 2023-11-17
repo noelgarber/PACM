@@ -19,7 +19,8 @@ except:
 if predictor_params["compare_classical_method"]:
     from Motif_Predictor.classical_method import classical_method
 
-def score_sliced_protein(sequences_2d, conditional_matrices, weights_tuple = None, return_count = 3):
+def score_sliced_protein(sequences_2d, conditional_matrices, weights_tuple = None, return_count = 3,
+                         standardization_coefficients = None):
     '''
     Vectorized function to score amino acid sequences based on the dictionary of context-aware weighted matrices
 
@@ -27,6 +28,8 @@ def score_sliced_protein(sequences_2d, conditional_matrices, weights_tuple = Non
         sequences_2d (np.ndarray):                  unravelled peptide sequences to score
         conditional_matrices (ConditionalMatrices): conditional weighted matrices for scoring peptides
         weights_tuple (tuple):                      (positives_weights, suboptimals_weights, forbiddens_weights)
+        return_count (int):                         number of motifs to return
+        standardization_coefficients (tuple)        tuple of coefficients from the model for standardizing score values
 
     Returns:
         output_motifs (list):                       list of motifs as strings
@@ -128,6 +131,14 @@ def score_sliced_protein(sequences_2d, conditional_matrices, weights_tuple = Non
             output_motifs.append("")
             output_scores.append(np.nan)
 
+    # Standardization of the scores
+    if isinstance(standardization_coefficients, tuple) or isinstance(standardization_coefficients, list):
+        coefficient_a, coefficient_b = standardization_coefficients
+        output_scores = np.array(output_scores)
+        output_scores = output_scores - coefficient_a
+        output_scores = output_scores / coefficient_b
+        output_scores = list(output_scores)
+
     return output_motifs, output_scores
 
 def scan_protein_seq(protein_seq, conditional_matrices, weights_tuple, predictor_params = predictor_params):
@@ -194,7 +205,11 @@ def scan_protein_seq(protein_seq, conditional_matrices, weights_tuple, predictor
 
         # Calculate motif scores
         if len(cleaned_sliced_2d) > 0:
-            motifs, scores = score_sliced_protein(cleaned_sliced_2d, conditional_matrices, weights_tuple, return_count)
+            standardization_coefficients_path = predictor_params["standardization_coefficients_path"]
+            with open(standardization_coefficients_path, "rb") as f:
+                standardization_coefficients = pickle.load(f)
+            motifs, scores = score_sliced_protein(cleaned_sliced_2d, conditional_matrices, weights_tuple, return_count,
+                                                  standardization_coefficients)
         else:
             motifs = ["" for i in np.arange(return_count)]
             scores = [np.nan for i in np.arange(return_count)]
