@@ -15,61 +15,63 @@ from functools import partial
 from tqdm import tqdm
 from biomart import BiomartServer
 from Bio import pairwise2
+from Bio.Align import substitution_matrices
 from PACM_General_Vars import index_aa_dict
 from PACM_General_Functions import CharacAA, NumInput, FilenameSubdir, use_default, dict_inputter, ListInputter
 
 # Vectorization is not possible for this procedure; suppress Pandas performance warnings arising from fragmentatiom
 warnings.simplefilter(action = "ignore", category = pd.errors.PerformanceWarning)
 
-def motif_pairwise_homology(seq_pair, open_gap_penalty = None, extend_gap_penalty = None):
+blosum62 = substitution_matrices.load("BLOSUM62")
+
+def motif_similarity(motif_seq, target_seq):
 	'''
-	Finds the best-matching homologous motif in a target sequence for a given linear motif
+	Finds the gap-less segment of a target sequence that is most similar to a short motif sequence
 
 	Args:
-		seq_pair (tuple|list): 				 tuple of (short linear motif sequence, longer sequence to be searched)
-		open_gap_penalty (None|int|float):   open gap penalty; setting to None sets it to the negative of motif length
-		extend_gap_penalty (None|int|float): extend gap penalty; setting to None sets it to the negative of motif length
+		motif_seq (str):  short linear motif to check against target sequence
+		target_seq (str): target homolog sequence
 
 	Returns:
-		homolog_motif_xs (str):      homologous motif sequence found in target sequence
-		align_identical (int):       number of identical residues
-		align_identity_ratio (int):  percentage identity
+		best_motif (str): best matching motif
+		best_score (int): BLOSUM62 similarity score
 	'''
 
-	motif_sequence, target_sequence = seq_pair
-
-	if not isinstance(motif_sequence, str) or not isinstance(target_sequence, str):
+	motif_length = len(motif_seq)
+	if motif_length == 0:
 		return ("",0,0.0)
 
-	if open_gap_penalty is None:
-		open_gap_penalty = -1 * len(motif_sequence)
-	if extend_gap_penalty is None:
-		extend_gap_penalty = -1 * len(motif_sequence)
+	motif_seq = np.array(list(motif_seq))
+	target_seq = np.array(list(target_seq))
 
-	motif_alignments_xs = pairwise2.align.globalxs(motif_sequence, target_sequence, open_gap_penalty,
-												   extend_gap_penalty, penalize_end_gaps = False)
+	slice_indices = np.arange(len(target_seq) - motif_length + 1)[:, np.newaxis] + np.arange(motif_length)
+	sliced_target_2d = target_seq[slice_indices]
 
-	if len(motif_alignments_xs) == 0:
-		return ("",0,0.0)
-	seqA = motif_alignments_xs[0][0]
-	seqB = motif_alignments_xs[0][1]
+	scores_2d = np.zeros(shape=sliced_target_2d.shape)
+	for i, motif_aa in enumerate(motif_seq):
+		col_residues = sliced_target_2d[:,i]
+		unique_residues_col = np.unique(col_residues)
+		col_scores = np.zeros(shape=col_residues.shape)
+		for target_aa in unique_residues_col:
+			matrix_value = blosum62.get((motif_aa, target_aa))
+			mask = np.char.equal(col_residues, target_aa)
+			col_scores[mask] = matrix_value
+		scores_2d[:,i] = col_scores
 
-	# Extract homologous motif sequence
-	alignment_start = 0
-	for k, char in enumerate(seqA):
-		if char != "-":
-			alignment_start = k
-			break
-	homolog_motif_xs = seqB[alignment_start : alignment_start + len(motif_sequence)]
+	scores = scores_2d.sum(axis=1)
+	best_score_idx = np.argmax(scores)
+	best_score = scores[best_score_idx]
 
-	if homolog_motif_xs == "":
-		homolog_motif_xs = "None found in homolog"
+	best_motif_arr = sliced_target_2d[best_score_idx]
+	best_motif = "".join(best_motif_arr)
 
-	# Extract the number of identical residues (equal to alignment score for this method)
-	align_identical = motif_alignments_xs[0][2]
-	align_identity_ratio = align_identical / len(motif_sequence)
+	identity_mask = np.char.equal(motif_seq, best_motif_arr)
+	best_identity_ratio = identity_mask.mean()
 
-	return (homolog_motif_xs, align_identical, align_identity_ratio)
+	motif = "".join(motif_seq)
+	print(f"Match for motif {motif} found: {best_motif} (score={best_score}, identity={best_identity_ratio*100:.2f}%)")
+
+	return (best_motif, best_score, best_identity_ratio)
 
 def motif_pairwise_chunk(seq_list):
 	'''
@@ -84,70 +86,26 @@ def motif_pairwise_chunk(seq_list):
 
 	results = []
 	for seq_pair in seq_list:
-		result = motif_pairwise_homology(seq_pair)
+		if isinstance(seq_pair[0], str) and isinstance(seq_pair[1], str):
+			result = motif_similarity(seq_pair[0], seq_pair[1])
+		else:
+			result = ("",0,0.0)
 		results.append(result)
 
 	return results
 
-def parent_pairwise_homology(seq_pair):
-	'''
-	Checks parental sequence homology
-
-	Args:
-		seq_pair (tuple|list): pair of source and target parental sequences to check homology for
-
-	Returns:
-		protein_align_identical (int):  number of identical residues
-		protein_identity_ratio (float): ratio of identical residues within the motif frame
-	'''
-
-	sequence_A, sequence_B = seq_pair
-
-	if not isinstance(sequence_A, str) or not isinstance(sequence_B, str):
-		return (0,0.0)
-
-	protein_alignments_xx = pairwise2.align.globalxx(sequence_A, sequence_B)
-	if len(protein_alignments_xx) == 0:
-		return (0,0.0)
-
-	protein_align_identical = protein_alignments_xx[0][2]
-	protein_identity_ratio = protein_align_identical / len(sequence_A)
-
-	return (protein_align_identical, protein_identity_ratio)
-
-def parent_pairwise_chunk(seq_pair_list):
-	'''
-	Simple parallelizable chunking of parent_pairwise_homology
-
-	Args:
-		seq_pair_list (list): list of pairs of parent sequences from host and target species
-
-	Returns:
-		results (list): list of results for each seq pair
-	'''
-
-	results = []
-	for seq_pair in seq_pair_list:
-		result = parent_pairwise_homology(seq_pair)
-		results.append(result)
-
-	return results
-
-def evaluate_homologs(data_df, motif_seq_cols, parent_seq_col, homolog_seq_cols):
+def evaluate_homologs(data_df, motif_seq_cols, homolog_seq_cols):
 	'''
 	Main function to evaluate homologs in a dataframe for homology with the motif of interest
 
 	Args:
 		data_df (pd.DataFrame):  dataframe containing motif, parent, and homolog seqs
 		motif_seq_cols (list):   col names holding predicted motifs from parental protein sequences
-		parent_seq_col (str):    col name for parental seqs
 		homolog_seq_cols (list): col names with homolog protein sequences to be searched
 
 	Returns:
 		data_df (pd.DataFrame):  dataframe with added motif homology columns
 	'''
-
-	parent_seqs = data_df.pop(parent_seq_col)
 
 	motif_col_count = len(motif_seq_cols)
 	for i, motif_seq_col in enumerate(motif_seq_cols):
@@ -167,7 +125,7 @@ def evaluate_homologs(data_df, motif_seq_cols, parent_seq_col, homolog_seq_cols)
 
 			# Get pairs of sequences to be evaluated
 			seq_pairs = [(motif, target) for motif, target in zip(motif_seqs, homolog_seqs)]
-			chunk_size = 1000
+			chunk_size = 100
 			seq_pairs_chunks = [seq_pairs[i:i+chunk_size] for i in range(0, len(seq_pairs), chunk_size)]
 			del seq_pairs # no longer necessary
 
@@ -188,36 +146,9 @@ def evaluate_homologs(data_df, motif_seq_cols, parent_seq_col, homolog_seq_cols)
 
 			# Assign motif homologies to new cols dataframe
 			new_cols_df[col_prefix+"_matching_motif"] = [motif_homolog[0] for motif_homolog in motif_homology_tuples]
-			new_cols_df[col_prefix+"_motif_identicals"] = [motif_homolog[1] for motif_homolog in motif_homology_tuples]
+			new_cols_df[col_prefix+"_motif_similarity"] = [motif_homolog[1] for motif_homolog in motif_homology_tuples]
 			new_cols_df[col_prefix+"_motif_identity"] = [motif_homolog[2] for motif_homolog in motif_homology_tuples]
 			del motif_homology_tuples # no longer necessary
-
-			# Evaluate parental sequence homologies
-			parent_seq_pairs = [(host_seq, target_seq) for host_seq, target_seq in zip(parent_seqs, homolog_seqs)]
-			chunk_size = 1000
-			parent_pairs_chunks = [parent_seq_pairs[i:i+chunk_size] for i in range(0,len(parent_seq_pairs),chunk_size)]
-			del homolog_seqs
-			del parent_seq_pairs
-
-			parent_tuples = []
-			with tqdm(total=len(parent_pairs_chunks), desc="Processing pairwise parental sequence homologies") as pbar:
-				pool = multiprocessing.pool.Pool()
-
-				for results in pool.map(parent_pairwise_chunk, parent_pairs_chunks):
-					parent_tuples.extend(results)
-					pbar.update()
-
-				pool.close()
-				pool.join()
-
-				pbar.close()
-
-			del parent_pairs_chunks # no longer necessary
-
-			# Assign parental homologies to new cols dataframe
-			new_cols_df[col_prefix+"_parent_identicals"] = [parent_tuple[0] for parent_tuple in parent_tuples]
-			new_cols_df[col_prefix+"_parent_identity"] = [parent_tuple[1] for parent_tuple in parent_tuples]
-			del parent_tuples # no longer necessary
 
 			# Merge into dataframe
 			original_cols = list(data_df.columns)
