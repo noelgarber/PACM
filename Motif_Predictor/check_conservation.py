@@ -68,9 +68,6 @@ def motif_similarity(motif_seq, target_seq):
 	identity_mask = np.char.equal(motif_seq, best_motif_arr)
 	best_identity_ratio = identity_mask.mean()
 
-	motif = "".join(motif_seq)
-	print(f"Match for motif {motif} found: {best_motif} (score={best_score}, identity={best_identity_ratio*100:.2f}%)")
-
 	return (best_motif, best_score, best_identity_ratio)
 
 def motif_pairwise_chunk(seq_list):
@@ -115,32 +112,27 @@ def evaluate_homologs(data_df, motif_seq_cols, homolog_seq_cols):
 		homolog_col_count = len(homolog_seq_cols)
 		for j, homolog_seq_col in enumerate(homolog_seq_cols):
 			# Get the col prefix not including "_seq"
-			col_prefix = homolog_seq_col.rsplit("_",1)[0]
-			print(f"\tEvaluating homolog {col_prefix} ({j+1} of {homolog_col_count})")
+			col_prefix = homolog_seq_col.rsplit("_",1)[0] + f"_vs_Motif_#{i}"
+			print(f"\tEvaluating homolog {col_prefix} ({j+1} of {homolog_col_count}) for motif #{i}...")
 			col_idx = data_df.columns.get_loc(homolog_seq_col)
 			new_cols_df = pd.DataFrame()
 
 			# Full homolog sequences are only necessary during evaluation, so we pop them out for better memory savings
-			homolog_seqs = data_df.pop(homolog_seq_col)
+			homolog_seqs = data_df[homolog_seq_col]
 
 			# Get pairs of sequences to be evaluated
 			seq_pairs = [(motif, target) for motif, target in zip(motif_seqs, homolog_seqs)]
-			chunk_size = 100
+			chunk_size = 1000
 			seq_pairs_chunks = [seq_pairs[i:i+chunk_size] for i in range(0, len(seq_pairs), chunk_size)]
 			del seq_pairs # no longer necessary
 
+			# Parallel processing of motif homologies
 			motif_homology_tuples = []
-			with tqdm(total=len(seq_pairs_chunks), desc="Processing pairwise motif homologies") as pbar:
-				pool = multiprocessing.pool.Pool()
-
-				for chunk_results in pool.map(motif_pairwise_chunk, seq_pairs_chunks):
-					motif_homology_tuples.extend(chunk_results)
-					pbar.update()
-
-				pool.close()
-				pool.join()
-
-				pbar.close()
+			pool = multiprocessing.pool.Pool()
+			for chunk_results in pool.map(motif_pairwise_chunk, seq_pairs_chunks):
+				motif_homology_tuples.extend(chunk_results)
+			pool.close()
+			pool.join()
 
 			del seq_pairs_chunks # no longer necessary
 
@@ -158,7 +150,8 @@ def evaluate_homologs(data_df, motif_seq_cols, homolog_seq_cols):
 			data_df = data_df[reordered_cols]
 			del new_cols_df
 
-		del motif_seqs # no longer necessary
+	# Delete unnecessary whole homolog sequences
+	data_df.drop(homolog_seq_cols, axis=1)
 
 	return data_df
 
