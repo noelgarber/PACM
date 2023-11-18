@@ -147,11 +147,21 @@ def score_homolog_motifs(data_df, homolog_motif_cols, predictor_params):
     for homolog_motif_col in homolog_motif_cols:
         cols = list(data_df.columns)
         motifs = data_df[homolog_motif_col].to_list()
-        motifs_2d = [list(motif) for motif in motifs]
-        motifs_2d = np.array(motifs_2d)
 
-        scores = score_motifs(motifs_2d, conditional_matrices, weights_tuple, standardization_coefficients)
-        data_df[homolog_motif_col + "_model_score"] = scores
+        valid_motifs = []
+        valid_motif_indices = []
+        for i, motif in enumerate(motifs):
+            if isinstance(motif, str):
+                if len(motif) > 0:
+                    valid_motifs.append(motif)
+                    valid_motif_indices.append(i)
+
+        valid_motifs_2d = np.array([list(motif) for motif in valid_motifs])
+        valid_scores = score_motifs(valid_motifs_2d, conditional_matrices, weights_tuple, standardization_coefficients)
+
+        all_scores = np.zeros(shape=len(motifs), dtype=float)
+        all_scores[valid_motif_indices] = valid_scores
+        data_df[homolog_motif_col + "_model_score"] = all_scores
 
         col_idx = data_df.columns.get_loc(homolog_motif_col)
         cols.insert(col_idx+1, homolog_motif_col + "_model_score")

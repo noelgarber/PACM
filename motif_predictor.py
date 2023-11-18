@@ -78,13 +78,10 @@ def main(predictor_params = predictor_params):
             df_with_homologs, homolog_motif_cols = evaluate_homologs(df_with_homologs, all_motif_cols, homolog_seq_cols)
 
             # Score homologous motifs
-            homolog_results = score_homolog_motifs(df_with_homologs, homolog_motif_cols, predictor_params)
-            df_with_homologs, novel_motif_cols, _, classical_motif_cols, _ = homolog_results
-            all_motif_cols = novel_motif_cols.copy()
-            all_motif_cols.extend(classical_motif_cols)
+            df_with_homologs = score_homolog_motifs(df_with_homologs, homolog_motif_cols, predictor_params)
 
             # Apply bait specificity scoring to homologous motifs
-            df_with_homologs = apply_specificity_scores(df_with_homologs, all_motif_cols, predictor_params)
+            df_with_homologs = apply_specificity_scores(df_with_homologs, homolog_motif_cols, predictor_params)
 
             # Recombine dataframes
             for homolog_seq_col in homolog_seq_cols:

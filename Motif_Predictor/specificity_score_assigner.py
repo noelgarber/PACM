@@ -3,7 +3,6 @@
 import numpy as np
 import pandas as pd
 import pickle
-from general_utils.general_utils import unravel_seqs
 from Motif_Predictor.predictor_config import predictor_params
 
 def apply_specificity_scores(protein_seqs_df, motif_cols, predictor_params=predictor_params):
@@ -35,9 +34,14 @@ def apply_specificity_scores(protein_seqs_df, motif_cols, predictor_params=predi
 
         # Score the non-blank motif sequences
         motif_seqs = protein_seqs_df[motif_col].to_numpy()
-        not_blank = motif_seqs != ""
+        not_nan = protein_seqs_df[motif_col].notna().to_numpy()
+        not_blank = protein_seqs_df[motif_col].ne("").to_numpy()
+        not_blank = np.logical_and(not_nan, not_blank)
         valid_motifs = motif_seqs[not_blank]
-        valid_motifs_2d = unravel_seqs(valid_motifs, motif_length, convert_phospho)
+        try:
+            valid_motifs_2d = np.array([list(motif) for motif in valid_motifs])
+        except Exception as e:
+            print(e)
         valid_specificity_scores = specificity_matrix.score_motifs(valid_motifs_2d, use_specificity_weighted)
 
         # Apply the specificity score values to rows where there are non-blank motifs present
