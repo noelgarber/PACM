@@ -4,10 +4,8 @@ import numpy as np
 import pandas as pd
 import pickle
 import multiprocessing
-from tqdm import trange
 from functools import partial
 from Matrix_Generator.ConditionalMatrix import ConditionalMatrices
-from general_utils.general_utils import finite_sorted_indices, add_number_suffix
 
 # Import the user-specified params, either from a local version or the git-linked version
 try:
@@ -15,16 +13,12 @@ try:
 except:
     from Motif_Predictor.predictor_config import predictor_params
 
-# If selected, import a parallel method for comparison
-if predictor_params["compare_classical_method"]:
-    from Motif_Predictor.classical_method import classical_method
-
-def score_motifs(sequences_2d, conditional_matrices, weights_tuple = None, standardization_coefficients = None):
+def score_motifs(seqs_2d, conditional_matrices, weights_tuple = None, standardization_coefficients = None):
     '''
     Vectorized function to score homolog motif seqs based on the dictionary of context-aware weighted matrices
 
     Args:
-        sequences_2d (np.ndarray):                  motif sequences to score
+        seqs_2d (np.ndarray):                       motif sequences to score
         conditional_matrices (ConditionalMatrices): conditional weighted matrices for scoring peptides
         weights_tuple (tuple):                      (positives_weights, suboptimals_weights, forbiddens_weights)
         standardization_coefficients (tuple)        tuple of coefficients from the model for standardizing score values
@@ -33,23 +27,23 @@ def score_motifs(sequences_2d, conditional_matrices, weights_tuple = None, stand
         total_scores (list):                       list of matching scores for each motif
     '''
 
-    motif_length = sequences_2d.shape[1]
+    motif_length = seqs_2d.shape[1]
 
     # Get row indices for unique residues
-    unique_residues = np.unique(sequences_2d)
+    unique_residues = np.unique(seqs_2d)
     unique_residue_indices = conditional_matrices.index.get_indexer_for(unique_residues)
     if (unique_residue_indices == -1).any():
         failed_residues = unique_residues[unique_residue_indices == -1]
         raise Exception(f"residues not found by matrix indexer: {failed_residues}")
 
     # Get the matrix row indices for all the residues
-    aa_row_indices_2d = np.ones(shape=sequences_2d.shape, dtype=int) * -1
+    aa_row_indices_2d = np.ones(shape=seqs_2d.shape, dtype=int) * -1
     for unique_residue, row_index in zip(unique_residues, unique_residue_indices):
-        aa_row_indices_2d[sequences_2d == unique_residue] = row_index
+        aa_row_indices_2d[seqs_2d == unique_residue] = row_index
 
     # Define residues flanking either side of the residues of interest; for out-of-bounds cases, use opposite side
-    flanking_left_2d = np.concatenate((sequences_2d[:, 0:1], sequences_2d[:, 0:-1]), axis=1)
-    flanking_right_2d = np.concatenate((sequences_2d[:, 1:], sequences_2d[:, -1:]), axis=1)
+    flanking_left_2d = np.concatenate((seqs_2d[:, 0:1], seqs_2d[:, 0:-1]), axis=1)
+    flanking_right_2d = np.concatenate((seqs_2d[:, 1:], seqs_2d[:, -1:]), axis=1)
 
     # Get integer-encoded chemical classes for each residue
     left_encoded_classes_2d = np.zeros(flanking_left_2d.shape, dtype=int)
@@ -72,10 +66,10 @@ def score_motifs(sequences_2d, conditional_matrices, weights_tuple = None, stand
 
     # Tile the column indices into a matching array serving as the 3rd dimension
     column_indices = np.arange(motif_length)
-    column_indices_tiled = np.tile(column_indices, len(sequences_2d))
+    column_indices_tiled = np.tile(column_indices, len(seqs_2d))
 
     # Define dimensions for 3D matrix indexing
-    shape_2d = sequences_2d.shape
+    shape_2d = seqs_2d.shape
     left_dim1 = left_encoded_matrix_refs_flattened
     right_dim1 = right_encoded_matrix_refs_flattened
     dim2 = aa_row_indices_flattened
@@ -110,12 +104,42 @@ def score_motifs(sequences_2d, conditional_matrices, weights_tuple = None, stand
     # Standardization of the scores
     if isinstance(standardization_coefficients, tuple) or isinstance(standardization_coefficients, list):
         coefficient_a, coefficient_b = standardization_coefficients
-        total_scores = np.array(total_scores)
         total_scores = total_scores - coefficient_a
         total_scores = total_scores / coefficient_b
-        total_scores = list(total_scores)
 
     return total_scores
+
+def score_motifs_parallel(seqs_2d, conditional_matrices, weights_tuple = None, standardization_coefficients = None,
+                          chunk_size = 10000):
+    '''
+    Parallelized function for scoring sequences using a ConditionalMatrices object
+
+        seqs_2d (np.ndarray):                       motif sequences to score
+        conditional_matrices (ConditionalMatrices): conditional weighted matrices for scoring peptides
+        weights_tuple (tuple):                      (positives_weights, suboptimals_weights, forbiddens_weights)
+        standardization_coefficients (tuple)        tuple of coefficients from the model for standardizing score values
+        chunk_size (int):                           number of sequences per parallel processing chunk
+
+    Returns:
+        total_scores (list):                        list of matching scores for each motif
+    '''
+
+    partial_function = partial(score_motifs, conditional_matrices = conditional_matrices, weights_tuple = weights_tuple,
+                               standardization_coefficients = standardization_coefficients)
+
+    chunks = [seqs_2d[i:i+chunk_size] for i in range(0, len(seqs_2d), chunk_size)]
+
+    chunk_scores = []
+
+    pool = multiprocessing.Pool()
+    for scores in pool.map(partial_function, chunks):
+        chunk_scores.append(scores)
+    pool.close()
+    pool.join()
+
+    scores = np.concatenate(chunk_scores)
+
+    return scores
 
 def score_homolog_motifs(data_df, homolog_motif_cols, predictor_params):
     '''
@@ -157,7 +181,8 @@ def score_homolog_motifs(data_df, homolog_motif_cols, predictor_params):
                     valid_motif_indices.append(i)
 
         valid_motifs_2d = np.array([list(motif) for motif in valid_motifs])
-        valid_scores = score_motifs(valid_motifs_2d, conditional_matrices, weights_tuple, standardization_coefficients)
+        valid_scores = score_motifs_parallel(valid_motifs_2d, conditional_matrices, weights_tuple,
+                                             standardization_coefficients)
 
         all_scores = np.zeros(shape=len(motifs), dtype=float)
         all_scores[valid_motif_indices] = valid_scores
