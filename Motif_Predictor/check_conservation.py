@@ -11,10 +11,6 @@ import requests
 import scipy.stats as stats
 import warnings
 import multiprocessing
-from functools import partial
-from tqdm import tqdm
-from biomart import BiomartServer
-from Bio import pairwise2
 from Bio.Align import substitution_matrices
 from PACM_General_Vars import index_aa_dict
 from PACM_General_Functions import CharacAA, NumInput, FilenameSubdir, use_default, dict_inputter, ListInputter
@@ -24,51 +20,64 @@ warnings.simplefilter(action = "ignore", category = pd.errors.PerformanceWarning
 
 blosum62 = substitution_matrices.load("BLOSUM62")
 
-def motif_similarity(motif_seq, target_seq):
+def motif_similarity(seqs_tuple):
 	'''
 	Finds the gap-less segment of a target sequence that is most similar to a short motif sequence
 
 	Args:
-		motif_seq (str):  short linear motif to check against target sequence
-		target_seq (str): target homolog sequence
+		seqs_tuple (tuple): tuple of (motif_seqs, target_seqs)
 
 	Returns:
 		best_motif (str): best matching motif
 		best_score (int): BLOSUM62 similarity score
 	'''
 
-	motif_length = len(motif_seq)
-	if motif_length == 0:
-		return ("",0,0.0)
+	motif_seqs, target_seqs = seqs_tuple
 
-	motif_seq = np.array(list(motif_seq))
-	target_seq = np.array(list(target_seq))
+	homologous_motifs = []
+	homologous_similarity_scores = []
+	homologous_identity_ratios = []
 
-	slice_indices = np.arange(len(target_seq) - motif_length + 1)[:, np.newaxis] + np.arange(motif_length)
-	sliced_target_2d = target_seq[slice_indices]
+	for motif_seq, target_seq in zip(motif_seqs, target_seqs):
+		motif_length = len(motif_seq)
+		if motif_length == 0:
+			homologous_motifs.append("")
+			homologous_similarity_scores.append(0.0)
+			homologous_identity_ratios.append(0.0)
+			continue
 
-	scores_2d = np.zeros(shape=sliced_target_2d.shape)
-	for i, motif_aa in enumerate(motif_seq):
-		col_residues = sliced_target_2d[:,i]
-		unique_residues_col = np.unique(col_residues)
-		col_scores = np.zeros(shape=col_residues.shape)
-		for target_aa in unique_residues_col:
-			matrix_value = blosum62.get((motif_aa, target_aa))
-			mask = np.char.equal(col_residues, target_aa)
-			col_scores[mask] = matrix_value
-		scores_2d[:,i] = col_scores
+		motif_seq = np.array(list(motif_seq))
+		target_seq = np.array(list(target_seq))
 
-	scores = scores_2d.sum(axis=1)
-	best_score_idx = np.argmax(scores)
-	best_score = scores[best_score_idx]
+		slice_indices = np.arange(len(target_seq) - motif_length + 1)[:, np.newaxis] + np.arange(motif_length)
+		sliced_target_2d = target_seq[slice_indices]
 
-	best_motif_arr = sliced_target_2d[best_score_idx]
-	best_motif = "".join(best_motif_arr)
+		scores_2d = np.zeros(shape=sliced_target_2d.shape)
+		for i, motif_aa in enumerate(motif_seq):
+			col_residues = sliced_target_2d[:,i]
+			unique_residues_col = np.unique(col_residues)
+			col_scores = np.zeros(shape=col_residues.shape)
+			for target_aa in unique_residues_col:
+				matrix_value = blosum62.get((motif_aa, target_aa))
+				mask = np.char.equal(col_residues, target_aa)
+				col_scores[mask] = matrix_value
+			scores_2d[:,i] = col_scores
 
-	identity_mask = np.char.equal(motif_seq, best_motif_arr)
-	best_identity_ratio = identity_mask.mean()
+		scores = scores_2d.sum(axis=1)
+		best_score_idx = np.argmax(scores)
+		best_score = scores[best_score_idx]
 
-	return (best_motif, best_score, best_identity_ratio)
+		best_motif_arr = sliced_target_2d[best_score_idx]
+		best_motif = "".join(best_motif_arr)
+
+		identity_mask = np.char.equal(motif_seq, best_motif_arr)
+		best_identity_ratio = identity_mask.mean()
+
+		homologous_motifs.append(best_motif)
+		homologous_similarity_scores.append(best_score)
+		homologous_identity_ratios.append(best_identity_ratio)
+
+	return (homologous_motifs, homologous_similarity_scores, homologous_identity_ratios)
 
 def motif_pairwise_chunk(seq_list):
 	'''
@@ -83,10 +92,7 @@ def motif_pairwise_chunk(seq_list):
 
 	results = []
 	for seq_pair in seq_list:
-		if isinstance(seq_pair[0], str) and isinstance(seq_pair[1], str):
-			result = motif_similarity(seq_pair[0], seq_pair[1])
-		else:
-			result = ("",0,0.0)
+		result = motif_similarity(seq_pair[0], seq_pair[1])
 		results.append(result)
 
 	return results
@@ -105,56 +111,93 @@ def evaluate_homologs(data_df, motif_seq_cols, homolog_seq_cols):
 	'''
 
 	homolog_motif_cols = []
-
 	motif_col_count = len(motif_seq_cols)
-	for i, motif_seq_col in enumerate(motif_seq_cols):
+
+	ordered_cols = list(data_df.columns)
+
+	# Iterate over motif seq cols in reversed order to ensure that results will be inserted correctly
+	for i, motif_seq_col in enumerate(reversed(motif_seq_cols)):
 		print(f"Evaluating homologs for {motif_seq_col} ({i+1} of {motif_col_count})...")
 		motif_seqs = data_df[motif_seq_col].copy()
+		not_blank_motif = np.logical_and(motif_seqs.ne("").to_numpy(), motif_seqs.notna().to_numpy())
 
 		homolog_col_count = len(homolog_seq_cols)
 		for j, homolog_seq_col in enumerate(homolog_seq_cols):
 			# Get the col prefix not including "_seq"
 			col_prefix = homolog_seq_col.rsplit("_",1)[0] + "_vs_" + motif_seq_col
 			print(f"\tEvaluating homolog {col_prefix} ({j+1} of {homolog_col_count})...")
+			t0 = time.time()
 			col_idx = data_df.columns.get_loc(homolog_seq_col)
-			new_cols_df = pd.DataFrame()
 
-			# Full homolog sequences are only necessary during evaluation, so we pop them out for better memory savings
+			# Get homolog seqs and find valid motif/homolog pairs
 			homolog_seqs = data_df[homolog_seq_col]
+			not_blank_homolog = np.logical_and(homolog_seqs.ne("").to_numpy(), homolog_seqs.notna().to_numpy())
+			both_valid = np.logical_and(not_blank_motif, not_blank_homolog)
+			valid_motif_seqs = motif_seqs.loc[both_valid]
+			valid_homolog_seqs = homolog_seqs.loc[both_valid]
 
 			# Get pairs of sequences to be evaluated
-			seq_pairs = [(motif, target) for motif, target in zip(motif_seqs, homolog_seqs)]
+			valid_seq_count = len(valid_motif_seqs)
 			chunk_size = 1000
-			seq_pairs_chunks = [seq_pairs[i:i+chunk_size] for i in range(0, len(seq_pairs), chunk_size)]
-			del seq_pairs # no longer necessary
+			t1 = time.time()
+			print(f"\t\tPreparation: {t1 - t0} seconds")
 
-			# Parallel processing of motif homologies
-			motif_homology_tuples = []
-			pool = multiprocessing.pool.Pool()
-			for chunk_results in pool.map(motif_pairwise_chunk, seq_pairs_chunks):
-				motif_homology_tuples.extend(chunk_results)
-			pool.close()
-			pool.join()
+			# Process motif homologies
+			if valid_seq_count < chunk_size * 2:
+				seqs_tuple_chunks = []
+				for i in range(0, valid_seq_count, chunk_size):
+					seqs_tuple = (valid_motif_seqs[i:i+chunk_size], valid_homolog_seqs[i:i+chunk_size])
+					seqs_tuple_chunks.append(seqs_tuple)
+				del valid_motif_seqs, valid_homolog_seqs
 
-			del seq_pairs_chunks # no longer necessary
+				homologous_motifs = []
+				homologous_similarities = []
+				homologous_identities = []
 
-			# Assign motif homologies to new cols dataframe
-			new_cols_df[col_prefix+"_matching_motif"] = [motif_homolog[0] for motif_homolog in motif_homology_tuples]
-			homolog_motif_cols.append(col_prefix+"_matching_motif")
-			new_cols_df[col_prefix+"_motif_similarity"] = [motif_homolog[1] for motif_homolog in motif_homology_tuples]
-			new_cols_df[col_prefix+"_motif_identity"] = [motif_homolog[2] for motif_homolog in motif_homology_tuples]
-			del motif_homology_tuples # no longer necessary
+				pool = multiprocessing.pool.Pool()
+				for chunk_results in pool.imap(motif_similarity, seqs_tuple_chunks):
+					chunk_homologous_motifs, chunk_homologous_similarities, chunk_homologous_identities = chunk_results
+					homologous_motifs.extend(chunk_homologous_motifs)
+					homologous_similarities.extend(chunk_homologous_similarities)
+					homologous_identities.extend(chunk_homologous_identities)
+				pool.close()
+				pool.join()
+				del seqs_tuple_chunks
 
-			# Merge into dataframe
-			original_cols = list(data_df.columns)
-			new_cols = list(new_cols_df.columns)
-			reordered_cols = original_cols[0:col_idx] + new_cols + original_cols[col_idx:]
-			data_df = pd.concat([data_df, new_cols_df], axis=1)
-			data_df = data_df[reordered_cols]
-			del new_cols_df
+			else:
+				# For small sets, parallelization is not worth the overhead
+				seqs_tuple = (valid_motif_seqs, valid_homolog_seqs)
+				result = motif_similarity(seqs_tuple)
+				homologous_motifs, homologous_similarities, homologous_identities = result
+				del seqs_tuple
 
-	# Delete unnecessary whole homolog sequences
+			t2 = time.time()
+			print(f"\t\tMotif homology: {t2-t1} seconds")
+
+			# Assign results to dataframe
+			motif_len = len(motif_seqs[0])
+			expanded_homologous_motifs = np.full(shape=len(data_df), fill_value="", dtype="<U"+str(motif_len))
+			expanded_homologous_motifs[both_valid] = homologous_motifs
+			data_df[col_prefix + "_matching_motif"] = expanded_homologous_motifs
+
+			expanded_homologous_similarities = np.full(shape=len(data_df), fill_value=0, dtype=float)
+			expanded_homologous_similarities[both_valid] = homologous_similarities
+			data_df[col_prefix + "_motif_similarity"] = expanded_homologous_similarities
+
+			expanded_homologous_identities = np.full(shape=len(data_df), fill_value=0, dtype=float)
+			expanded_homologous_identities[both_valid] = homologous_identities
+			data_df[col_prefix + "_motif_identity"] = expanded_homologous_identities
+
+			t3 = time.time()
+			print(f"\t\tAssignment to new_cols_df: {t3-t2} seconds")
+
+			# Insert cols in correct order for later reordering, and omit homolog seq col, which is no longer needed
+			new_cols = [col_prefix+"_matching_motif", col_prefix+"_motif_similarity", col_prefix+"_motif_identity"]
+			ordered_cols = ordered_cols[0:col_idx] + new_cols + ordered_cols[col_idx+1:]
+
+	# Delete unnecessary whole homolog sequences and reorder the dataframe
 	data_df.drop(homolog_seq_cols, axis=1)
+	data_df = data_df[ordered_cols]
 
 	return data_df, homolog_motif_cols
 
