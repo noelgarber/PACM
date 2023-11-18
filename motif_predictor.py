@@ -2,7 +2,6 @@
 
 import numpy as np
 import pandas as pd
-import sys
 from Motif_Predictor.score_protein_motifs import score_proteins
 from Motif_Predictor.specificity_score_assigner import apply_specificity_scores
 from Motif_Predictor.check_conservation import evaluate_homologs
