@@ -2,142 +2,8 @@
 
 import numpy as np
 import pandas as pd
-import requests
-import time
+from assemble_data.parse_uniprot_topology import get_topological_domains
 from Motif_Predictor.predictor_config import predictor_params
-
-def list_localizations(comments_dict):
-    # Helper function that returns localizations as a piped string from a dict of comments
-
-    locs = ""
-    for comment_dict in comments_dict:
-        comment_type = comment_dict.get("commentType")
-        if comment_type == "SUBCELLULAR LOCATION":
-            locations_list_dicts = comment_dict.get("subcellularLocations")
-            for location_info_dict in locations_list_dicts:
-                location_dict = location_info_dict.get("location")
-                location = location_dict.get("value")
-                locs = locs + location + " | "
-
-    return locs
-
-def protein_type_assigner(dict_of_features):
-    '''
-    Function that returns combined protein type; must be passed in a loop when multiple TMDs could be present
-
-    Args:
-        dict_of_features (dict): dictionary of features
-
-    Returns:
-        combined_protein_type (str): one of "Transmembrane", "Intermembrane", "Transmembrane/Intermembrane", or ""
-    '''
-
-    combined_protein_type = ""
-    if dict_of_features is not None:
-        for feature_dict in dict_of_features:
-            feature_type = feature_dict.get("type")
-            if feature_type in ["Transmembrane", "Intramembrane"]:
-                if combined_protein_type == "":
-                    combined_protein_type = feature_type # Sets protein type to either Transmembrane or Intramembrane
-                elif combined_protein_type == "Transmembrane" and feature_type == "Intramembrane":
-                    combined_protein_type = "Transmembrane/Intramembrane"
-                elif combined_protein_type == "Intramembrane" and feature_type == "Transmembrane":
-                    combined_protein_type = "Transmembrane/Intramembrane"
-
-    return combined_protein_type
-
-def motif_topo_assigner(motif_start_position, motif_end_position, features_dict, output_index, output_col, output_df,
-                        verbose = False):
-    '''
-    Function that assigns motif topology calls into the dataframe for a given motif based on its start and end positions
-
-    Args:
-        motif_start_position (int): motif start point in protein sequence
-        motif_end_position (int):   motif end point in protein sequence
-        features_dict (dict):       dictionary of features
-        output_index (int):         destination row index
-        output_col (str):           destination column name
-        output_df (pd.DataFrame):   destination dataframe
-        verbose (bool):             whether to display verbose messages
-
-    Returns:
-        None; operation is performed in-place
-    '''
-
-    if features_dict is not None:
-        for feature_dict in features_dict:
-            feature_type = feature_dict.get("type")
-
-            if feature_type in ["Transmembrane", "Intramembrane", "Topological domain"]:
-                feature_start = feature_dict.get("location").get("start").get("value")
-                feature_end = feature_dict.get("location").get("end").get("value")
-
-                if feature_start is not None and feature_end is not None:
-                    feature_positions = np.arange((feature_start - 1), (feature_end + 1) + 1)
-                    feature_description = feature_dict.get("description")
-
-                    if motif_start_position in feature_positions and motif_end_position in feature_positions:
-                        print("Motif is in feature of type", feature_type) if verbose else None
-                        if feature_type == "Topological domain":
-                            output_df.at[output_index, output_col] = feature_description
-                            print(output_col, "set to", feature_description) if verbose else None
-                        elif feature_type == "Transmembrane":
-                            output_df.at[output_index, output_col] = "TMD"
-                            print(output_col, "set to TMD") if verbose else None
-                        elif feature_type == "Intramembrane":
-                            output_df.at[output_index, output_col] = "IMD"
-                            print(output_col, "set to IMD") if verbose else None
-
-def response_to_df(index, resp, motif_cols, dataframe, predictor_params = predictor_params):
-    '''
-    Function that requests UniProt REST data and uses it to assign topological information to the motif of interest
-
-    Args:
-        index (int):              current row index in dataframe
-        resp (requests.Response): server response
-        motif_cols (list):        list of columns holding motif sequences
-        dataframe (pd.DataFrame): main dataframe
-        predictor_params (dict):  dictionary of user-defined parameters for the motif prediction workflow
-
-    Returns:
-        None; operation is performed in-place
-    '''
-
-    if resp.ok:
-        response_json = resp.json() # creates a dict of dicts
-
-        comments_list_dicts = response_json.get("comments")
-        if comments_list_dicts is not None:
-            localizations = list_localizations(comments_list_dicts)
-            dataframe.at[index, "UniProt_Localization"] = localizations
-
-        # Assign the type of protein (Transmembrane, Intramembrane, both, or neither)
-        features_list_dicts = response_json.get("features")
-        protein_type = protein_type_assigner(features_list_dicts)
-        dataframe.at[index, "Type"] = protein_type
-
-        uniprot_sequence = response_json.get("sequence").get("value")
-
-        core_start = predictor_params["core_start"]
-        core_end = predictor_params["core_end"]
-
-        for motif_col in motif_cols:
-            motif_seq = dataframe.at[index, motif_col]
-            motif_seq_core = motif_seq[core_start:core_end+1]
-            motif_length = len(motif_seq_core)
-
-            # Check if the SLiM exists in the uniprot sequence for testing topology and assign motif location info
-            motif_found = motif_seq_core in uniprot_sequence
-            output_col = motif_col + "_Topology"
-            if motif_found:
-                motif_start = uniprot_sequence.index(motif_seq_core)
-                motif_end = motif_start + motif_length
-                motif_topo_assigner(motif_start, motif_end, features_list_dicts, index, output_col, dataframe)
-            else:
-                dataframe.at[index, output_col] = "Motif not found"
-
-    else:
-        print(f"Error {resp.status_code} at row {index} while requesting topology information from Uniprot")
 
 def predict_topology(data_df, motif_cols, predictor_params = predictor_params):
     '''
@@ -152,23 +18,76 @@ def predict_topology(data_df, motif_cols, predictor_params = predictor_params):
         data_df (pd.DataFrame):   data_df with topology columns added
     '''
 
-    protein_count = len(data_df)
+    uniprot_path = predictor_params["uniprot_path"]
+    topology_trim_begin = predictor_params["topology_trim_begin"]
+    topology_trim_end = predictor_params["topology_trim_end"]
 
-    # Assign Uniprot IDs to Ensembl proteins
-    data_df = assign_uniprot(data_df, predictor_params)
+    topological_domains, sequences = get_topological_domains(path = uniprot_path)
 
-    # Loop through the dataframe to apply the function
-    for i in np.arange(protein_count):
-        uniprot_id = data_df.at[i, "Uniprot_ID"]
+    for motif_col in motif_cols:
+        for i in np.arange(len(data_df)):
+            motif_seq = data_df.at[i, motif_col]
+            uniprot_swissprot_id = data_df.at[i, "uniprot"]
+            if uniprot_swissprot_id:
+                # Retrieve topological domains
+                current_topological_domains = topological_domains.get[uniprot_swissprot_id]
+                if current_topological_domains is None:
+                    print(f"\tCould not find topological domains for {uniprot_swissprot_id}")
+                    continue
+                else:
+                    print(f"\tFound topological domains for {uniprot_swissprot_id}")
 
-        if uniprot_id != "None" and uniprot_id != "":
-            query_url = "https://rest.uniprot.org/uniprotkb/" + uniprot_id
-            response = requests.get(query_url)
-            response_to_df(i, response, motif_cols, data_df)
+                # Retrieve sequence matching topological domain begin/end indices
+                sequence = sequences.get[uniprot_swissprot_id]
+                if sequence is None:
+                    print(f"\tCould not find matching sequence for {uniprot_swissprot_id}; skipping...")
+                    continue
 
-    # Save results
-    output_path = predictor_params["protein_seqs_path"][:-4] + "_with_Topology.csv"
-    data_df.to_csv(output_path)
-    print(f"Saved topology results to {output_path}")
+                # Find the corresponding index of the motif in the protein sequence
+                motif_len = len(motif_seq)
+                trimmed_motif_seq = motif_seq[topology_trim_begin : motif_len - topology_trim_end]
+                trimmed_begin = sequence.find(trimmed_motif_seq)
+                trimmed_end = trimmed_begin + len(trimmed_motif_seq)
+                if motif_idx == -1:
+                    print(f"\t\tFailed to find trimmed motif ({trimmed_motif_seq}) in sequence}")
+                    continue
+
+                # Determine which topological domain the motif exists within
+                cell_empty = True
+                for domain_tuple in current_topological_domains:
+                    topology_domain_type_col = f"{motif_col}_topology_domain_type"
+                    topology_domain_description_col = f"{motif_col}_topology_domain_description"
+
+                    topological_domain_type, description, begin_position, end_position = domain_tuple
+                    begin_idx = begin_position - 1
+                    end_idx = end_position - 1
+
+                    motif_within = trimmed_begin >= begin_idx and trimmed_end <= end_idx
+                    head_within = trimmed_begin >= begin_idx and trimmed_begin <= end_idx and trimmed_end > end_idx
+                    tail_within = trimmed_begin < begin_idx and trimmed_end > begin_idx and trimmed_end <= end_idx
+                    middle_within = trimmed_begin < begin_idx and trimmed_end > end_idx
+
+                    if motif_within:
+                        # Motif is fully within current topological domain
+                        data_df.at[i, topology_domain_type_col] = topological_domain_type
+                        data_df.at[i, topology_domain_description_col] = description
+                        break
+
+                    elif head_within or tail_within or middle_within:
+                        # First part of motif is within current topological domain
+                        if cell_empty:
+                            data_df.at[i, topology_domain_type_col] = topological_domain_type
+                            data_df.at[i, topology_domain_description_col] = description
+                            cell_empty = False
+
+                        else:
+                            # Append to existing info when motif spans more than one topological domain
+                            domain_type_existing = data_df.at[i, topology_domain_type_col]
+                            description_existing = data_df.at[i, topology_domain_description_col]
+                            concatenated_types = f"{domain_type_existing};{topological_domain_type}"
+                            concatenated_descriptions = f"{description_existing};{description}"
+                            data_df.at[i, topology_domain_type_col] = concatenated_types
+                            data_df.at[i, topology_domain_description_col] = concatenated_descriptions
+                            cell_empty = False
 
     return data_df
