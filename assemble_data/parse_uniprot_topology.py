@@ -46,22 +46,19 @@ def load_uniprot(path = None):
 
     return data
 
-def get_topological_domains(data = None, path = None):
+def get_topological_domains(path = None):
     '''
     Function that parses the dictionary-of-dictionaries into topological domain and sequence dictionaries
 
     Args:
-        data (dict): dictionary of results
         path (str):  path to either the XML file or a pickled version of it as a dictionary of dictionaries (pickled)
-
 
     Returns:
         topological_domains (dict): dictionary of accession --> topological features list
         sequences (dict):           dictionary of accession --> sequence
     '''
 
-    if data is None:
-        data = load_uniprot(path)
+    data = load_uniprot(path)
 
     topological_domains = {}
     sequences = {}
@@ -79,11 +76,14 @@ def get_topological_domains(data = None, path = None):
                 topological_feature_tuple = (feature_type, begin, end)
                 topological_features.append(topological_feature_tuple)
 
-        # Parse sequence and assign data to accessions
-        sequence = entry["sequence"]["#text"]
-        accessions = entry["accession"]
-        for accession in accessions:
-            sequences[accession] = sequence
-            topological_domains[accession] = topological_features
+        # Parse sequence and assign data to accessions only if topological domains are listed (saves memory)
+        if len(topological_features) > 0:
+            sequence = entry["sequence"]["#text"]
+            accessions = entry["accession"]
+            for accession in accessions:
+                sequences[accession] = sequence
+                topological_domains[accession] = topological_features
+
+    del data
 
     return topological_domains, sequences
