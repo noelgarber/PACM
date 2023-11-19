@@ -28,6 +28,8 @@ Old*
 .githooks
 *config_local.py
 *proteome_dataset*.csv
+*uniprot_sprot*
+*.xsd
 
 #Ignore PyCharm idea files
 *.idea
