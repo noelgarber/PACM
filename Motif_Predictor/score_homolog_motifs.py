@@ -13,7 +13,8 @@ try:
 except:
     from Motif_Predictor.predictor_config import predictor_params
 
-def score_motifs(seqs_2d, conditional_matrices, weights_tuple = None, standardization_coefficients = None):
+def score_motifs(seqs_2d, conditional_matrices, weights_tuple = None, standardization_coefficients = None,
+                 filters = None, selenocysteine_substitute = "C", gap_substitute = "G"):
     '''
     Vectorized function to score homolog motif seqs based on the dictionary of context-aware weighted matrices
 
@@ -22,10 +23,18 @@ def score_motifs(seqs_2d, conditional_matrices, weights_tuple = None, standardiz
         conditional_matrices (ConditionalMatrices): conditional weighted matrices for scoring peptides
         weights_tuple (tuple):                      (positives_weights, suboptimals_weights, forbiddens_weights)
         standardization_coefficients (tuple)        tuple of coefficients from the model for standardizing score values
+        filters (dict):                             dict of position index --> permitted residues
+        selenocysteine_substitute (str):            letter to substitute for selenocysteine (U) when U is not in model
+        gap_substitute (str):                       the letter to treat gaps ("X") as; default is no side chain, i.e. G
 
     Returns:
         total_scores (list):                       list of matching scores for each motif
     '''
+
+    if isinstance(selenocysteine_substitute, str):
+        seqs_2d[seqs_2d == "U"] = selenocysteine_substitute
+    if isinstance(gap_substitute, str):
+        seqs_2d[seqs_2d == "X"] = gap_substitute
 
     motif_length = seqs_2d.shape[1]
 
@@ -107,10 +116,18 @@ def score_motifs(seqs_2d, conditional_matrices, weights_tuple = None, standardiz
         total_scores = total_scores - coefficient_a
         total_scores = total_scores / coefficient_b
 
+    # Apply filters
+    if isinstance(filters, dict):
+        for i, allowed_residues in filters.items():
+            seqs_pass = np.full(shape=seqs_2d.shape[0], fill_value=False, dtype=bool)
+            for allowed_aa in allowed_residues:
+                seqs_pass = np.logical_or(seqs_pass, np.char.equal(seqs_2d[:,i], allowed_aa))
+            total_scores[~seqs_pass] = 0
+
     return total_scores
 
 def score_motifs_parallel(seqs_2d, conditional_matrices, weights_tuple = None, standardization_coefficients = None,
-                          chunk_size = 10000):
+                          chunk_size = 10000, filters = None, selenocysteine_substitute = "C", gap_substitute = "G"):
     '''
     Parallelized function for scoring sequences using a ConditionalMatrices object
 
@@ -119,13 +136,17 @@ def score_motifs_parallel(seqs_2d, conditional_matrices, weights_tuple = None, s
         weights_tuple (tuple):                      (positives_weights, suboptimals_weights, forbiddens_weights)
         standardization_coefficients (tuple)        tuple of coefficients from the model for standardizing score values
         chunk_size (int):                           number of sequences per parallel processing chunk
+        filters (dict):                             dict of position index --> permitted residues
+        selenocysteine_substitute (str):            letter to substitute for selenocysteine (U) when U is not in model
+        gap_substitute (str):                       the letter to treat gaps ("X") as; default is no side chain, i.e. G
 
     Returns:
         total_scores (list):                        list of matching scores for each motif
     '''
 
     partial_function = partial(score_motifs, conditional_matrices = conditional_matrices, weights_tuple = weights_tuple,
-                               standardization_coefficients = standardization_coefficients)
+                               standardization_coefficients = standardization_coefficients, filters = filters,
+                               selenocysteine_substitute = selenocysteine_substitute, gap_substitute = gap_substitute)
 
     chunks = [seqs_2d[i:i+chunk_size] for i in range(0, len(seqs_2d), chunk_size)]
 
@@ -168,6 +189,9 @@ def score_homolog_motifs(data_df, homolog_motif_cols, predictor_params):
         conditional_matrices = pickle.load(f)
 
     # Score each column of homolog motifs
+    filters = predictor_params["enforced_position_rules"]
+    selenocysteine_substitute = predictor_params["selenocysteine_substitute"]
+    gap_substitute = predictor_params["gap_substitute"]
     for homolog_motif_col in homolog_motif_cols:
         cols = list(data_df.columns)
         motifs = data_df[homolog_motif_col].to_list()
@@ -182,7 +206,9 @@ def score_homolog_motifs(data_df, homolog_motif_cols, predictor_params):
 
         valid_motifs_2d = np.array([list(motif) for motif in valid_motifs])
         valid_scores = score_motifs_parallel(valid_motifs_2d, conditional_matrices, weights_tuple,
-                                             standardization_coefficients)
+                                             standardization_coefficients, filters = filters,
+                                             selenocysteine_substitute = selenocysteine_substitute,
+                                             gap_substitute = gap_substitute)
 
         all_scores = np.zeros(shape=len(motifs), dtype=float)
         all_scores[valid_motif_indices] = valid_scores
