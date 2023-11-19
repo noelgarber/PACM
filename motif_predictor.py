@@ -58,6 +58,9 @@ def main(predictor_params = predictor_params):
                 if "homolog" in col and "seq" in col:
                     homolog_seq_cols.append(col)
 
+            # Get topology for predicted motifs
+            chunk_df = predict_topology(chunk_df, all_motif_cols, predictor_params)
+
             # Separate dataframe by whether entries have any homologs and motifs to score
             contains_homolog = np.full(shape=len(chunk_df), fill_value=False, dtype=bool)
             for homolog_seq_col in homolog_seq_cols:
@@ -88,13 +91,6 @@ def main(predictor_params = predictor_params):
             chunk_df = pd.concat([df_with_homologs, df_without_homologs], axis=0)
             del df_with_homologs, df_without_homologs
             chunk_dfs.append(chunk_df)
-
-            # Get topology for predicted motifs
-            '''
-            chunk_df = predict_topology(chunk_df, all_motif_cols, predictor_params)
-            topology_path = predictor_params["protein_seqs_path"][:-4] + "_with_Topology.csv"
-            print(f"Saved scored motifs with topology information to {topology_path}")
-            '''
 
         protein_seqs_df = pd.concat(chunk_dfs, axis=0)
 
