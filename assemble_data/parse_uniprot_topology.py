@@ -71,9 +71,10 @@ def get_topological_domains(path = None):
         for feature in features:
             feature_type = feature["@type"]
             if "topo" in feature_type or "transmem" in feature_type or "intramem" in feature_type:
+                description = feature["@description"]
                 begin = feature["location"]["begin"]["@position"]
                 end = feature["location"]["end"]["@position"]
-                topological_feature_tuple = (feature_type, begin, end)
+                topological_feature_tuple = (feature_type, description, begin, end)
                 topological_features.append(topological_feature_tuple)
 
         # Parse sequence and assign data to accessions only if topological domains are listed (saves memory)
