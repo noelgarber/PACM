@@ -11,6 +11,7 @@ import requests
 import scipy.stats as stats
 import warnings
 import multiprocessing
+from tqdm import trange
 from Bio.Align import substitution_matrices
 from PACM_General_Vars import index_aa_dict
 from PACM_General_Functions import CharacAA, NumInput, FilenameSubdir, use_default, dict_inputter, ListInputter
@@ -25,14 +26,13 @@ def motif_similarity(seqs_tuple):
 	Finds the gap-less segment of a target sequence that is most similar to a short motif sequence
 
 	Args:
-		seqs_tuple (tuple): tuple of (motif_seqs, target_seqs)
+		seqs_tuple (list): tuple of (motif_seqs, target_seqs, col_names)
 
 	Returns:
-		best_motif (str): best matching motif
-		best_score (int): BLOSUM62 similarity score
+
 	'''
 
-	motif_seqs, target_seqs = seqs_tuple
+	motif_seqs, target_seqs, col_names, accession_col_idx = seqs_tuple
 
 	homologous_motifs = []
 	homologous_similarity_scores = []
@@ -40,7 +40,7 @@ def motif_similarity(seqs_tuple):
 
 	for motif_seq, target_seq in zip(motif_seqs, target_seqs):
 		motif_length = len(motif_seq)
-		if motif_length == 0:
+		if motif_length == 0 or len(target_seq) == 0:
 			homologous_motifs.append("")
 			homologous_similarity_scores.append(0.0)
 			homologous_identity_ratios.append(0.0)
@@ -77,132 +77,68 @@ def motif_similarity(seqs_tuple):
 		homologous_similarity_scores.append(best_score)
 		homologous_identity_ratios.append(best_identity_ratio)
 
-	return (homologous_motifs, homologous_similarity_scores, homologous_identity_ratios)
-
-def motif_pairwise_chunk(seq_list):
-	'''
-	Simple parallelizable version of motif_pairwise_homology that accepts lists of (motif, target) sequence pairs
-
-	Args:
-		seq_list (list): list of tuples of (motif sequence, target homolog sequence)
-
-	Returns:
-		results (list): list of results
-	'''
-
-	results = []
-	for seq_pair in seq_list:
-		result = motif_similarity(seq_pair[0], seq_pair[1])
-		results.append(result)
-
-	return results
+	return (homologous_motifs, homologous_similarity_scores, homologous_identity_ratios, col_names, accession_col_idx)
 
 def evaluate_homologs(data_df, motif_seq_cols, homolog_seq_cols):
 	'''
 	Main function to evaluate homologs in a dataframe for homology with the motif of interest
 
 	Args:
-		data_df (pd.DataFrame):  dataframe containing motif, parent, and homolog seqs
-		motif_seq_cols (list):   col names holding predicted motifs from parental protein sequences
-		homolog_seq_cols (list): col names with homolog protein sequences to be searched
+		data_df (pd.DataFrame):    dataframe containing motif, parent, and homolog seqs
+		motif_seq_cols (list):     col names holding predicted motifs from parental protein sequences
+		homolog_seq_cols (list):   col names with homolog protein sequences to be searched
 
 	Returns:
-		data_df (pd.DataFrame):  dataframe with added motif homology columns
+		data_df (pd.DataFrame):    dataframe with added motif homology columns
+		homolog_motif_cols (list): list of column names containing homologous motif sequences
 	'''
 
+	print("Preparing homolog and motif seqs for similarity analysis...")
 	homolog_motif_cols = []
-	motif_col_count = len(motif_seq_cols)
+	seqs_tuples = []
+	for homolog_seq_col in homolog_seq_cols:
+		col_idx = data_df.columns.get_loc(homolog_seq_col)
+		homolog_seqs = data_df.pop(homolog_seq_col).fillna("").to_list()
+		current_insertion_point = col_idx
+		for i, motif_seq_col in enumerate(motif_seq_cols):
+			motif_seqs = data_df[motif_seq_col].fillna("").to_list()
+			col_prefix = homolog_seq_col.rsplit("_", 1)[0] + "_vs_" + motif_seq_col
+			cols = [col_prefix + "_matching_motif", col_prefix + "_motif_similarity", col_prefix + "_motif_identity"]
+			seqs_tuples.append((motif_seqs, homolog_seqs, cols, current_insertion_point))
+			homolog_motif_cols.append(col_prefix + "_matching_motif")
+			current_insertion_point += 3
 
-	ordered_cols = list(data_df.columns)
+	new_cols_names = []
+	new_cols_data = []
+	with trange(len(seqs_tuples), desc="Evaluating motif homolog similarities by column pair...") as pbar:
+		pool = multiprocessing.Pool()
+		for result in pool.imap(motif_similarity, seqs_tuples):
+			homologous_motifs, homologous_similarities, homologous_identities, col_names, insertion_idx = result
 
-	# Iterate over motif seq cols in reversed order to ensure that results will be inserted correctly
-	for i, motif_seq_col in enumerate(reversed(motif_seq_cols)):
-		print(f"Evaluating homologs for {motif_seq_col} ({i+1} of {motif_col_count})...")
-		motif_seqs = data_df[motif_seq_col].copy()
-		not_blank_motif = np.logical_and(motif_seqs.ne("").to_numpy(), motif_seqs.notna().to_numpy())
+			new_cols_names.extend(col_names)
+			new_cols_data.extend([homologous_motifs, homologous_similarities, homologous_identities])
 
-		homolog_col_count = len(homolog_seq_cols)
-		for j, homolog_seq_col in enumerate(homolog_seq_cols):
-			# Get the col prefix not including "_seq"
-			col_prefix = homolog_seq_col.rsplit("_",1)[0] + "_vs_" + motif_seq_col
-			print(f"\tEvaluating homolog {col_prefix} ({j+1} of {homolog_col_count})...")
-			t0 = time.time()
-			col_idx = data_df.columns.get_loc(homolog_seq_col)
+			pbar.update()
 
-			# Get homolog seqs and find valid motif/homolog pairs
-			homolog_seqs = data_df[homolog_seq_col]
-			not_blank_homolog = np.logical_and(homolog_seqs.ne("").to_numpy(), homolog_seqs.notna().to_numpy())
-			both_valid = np.logical_and(not_blank_motif, not_blank_homolog)
-			valid_motif_seqs = motif_seqs.loc[both_valid]
-			valid_homolog_seqs = homolog_seqs.loc[both_valid]
+	pool.close()
+	pool.join()
 
-			# Get pairs of sequences to be evaluated
-			valid_seq_count = len(valid_motif_seqs)
-			chunk_size = 1000
-			t1 = time.time()
-			print(f"\t\tPreparation: {t1 - t0} seconds")
+	homologous_motifs_df = pd.DataFrame(dict(zip(new_cols_names, new_cols_data)))
+	data_df = pd.concat([data_df, homologous_motifs_df], axis=1)
 
-			# Process motif homologies
-			if valid_seq_count < chunk_size * 2:
-				seqs_tuple_chunks = []
-				for i in range(0, valid_seq_count, chunk_size):
-					seqs_tuple = (valid_motif_seqs[i:i+chunk_size], valid_homolog_seqs[i:i+chunk_size])
-					seqs_tuple_chunks.append(seqs_tuple)
-				del valid_motif_seqs, valid_homolog_seqs
+	cols = list(data_df.columns)
+	homolog_accession_cols = [homolog_seq_col.rsplit("_",1)[0] for homolog_seq_col in homolog_seq_cols]
+	reordered_cols = [col for col in cols if "homolog" not in col]
+	for homolog_accession_col in homolog_accession_cols:
+		subset_cols = []
+		for col in cols:
+			if homolog_accession_col in col:
+				subset_cols.append(col)
+		reordered_cols.extend(subset_cols)
 
-				homologous_motifs = []
-				homologous_similarities = []
-				homologous_identities = []
-
-				pool = multiprocessing.pool.Pool()
-				for chunk_results in pool.imap(motif_similarity, seqs_tuple_chunks):
-					chunk_homologous_motifs, chunk_homologous_similarities, chunk_homologous_identities = chunk_results
-					homologous_motifs.extend(chunk_homologous_motifs)
-					homologous_similarities.extend(chunk_homologous_similarities)
-					homologous_identities.extend(chunk_homologous_identities)
-				pool.close()
-				pool.join()
-				del seqs_tuple_chunks
-
-			else:
-				# For small sets, parallelization is not worth the overhead
-				seqs_tuple = (valid_motif_seqs, valid_homolog_seqs)
-				result = motif_similarity(seqs_tuple)
-				homologous_motifs, homologous_similarities, homologous_identities = result
-				del seqs_tuple
-
-			t2 = time.time()
-			print(f"\t\tMotif homology: {t2-t1} seconds")
-
-			# Assign results to dataframe
-			motif_len = len(motif_seqs[0])
-			expanded_homologous_motifs = np.full(shape=len(data_df), fill_value="", dtype="<U"+str(motif_len))
-			expanded_homologous_motifs[both_valid] = homologous_motifs
-			data_df[col_prefix + "_matching_motif"] = expanded_homologous_motifs
-
-			expanded_homologous_similarities = np.full(shape=len(data_df), fill_value=0, dtype=float)
-			expanded_homologous_similarities[both_valid] = homologous_similarities
-			data_df[col_prefix + "_motif_similarity"] = expanded_homologous_similarities
-
-			expanded_homologous_identities = np.full(shape=len(data_df), fill_value=0, dtype=float)
-			expanded_homologous_identities[both_valid] = homologous_identities
-			data_df[col_prefix + "_motif_identity"] = expanded_homologous_identities
-
-			t3 = time.time()
-			print(f"\t\tAssignment to new_cols_df: {t3-t2} seconds")
-
-			# Insert cols in correct order for later reordering, and omit homolog seq col, which is no longer needed
-			new_cols = [col_prefix+"_matching_motif", col_prefix+"_motif_similarity", col_prefix+"_motif_identity"]
-			ordered_cols = ordered_cols[0:col_idx] + new_cols + ordered_cols[col_idx+1:]
-
-	# Delete unnecessary whole homolog sequences and reorder the dataframe
-	data_df.drop(homolog_seq_cols, axis=1)
-	data_df = data_df[ordered_cols]
+	data_df = data_df[reordered_cols]
 
 	return data_df, homolog_motif_cols
-
-
-
 
 
 
