@@ -49,7 +49,7 @@ def predict_chunk(chunk_df, motif_col, topology_trim_begin, topology_trim_end, t
             trimmed_motif_seq = motif_seq[topology_trim_begin: motif_len - topology_trim_end]
             trimmed_begin = sequence.find(trimmed_motif_seq)
             if trimmed_begin == -1:
-                print(f"\t\tFailed to find trimmed motif ({trimmed_motif_seq}) in sequence}")
+                print(f"\t\tFailed to find trimmed motif ({trimmed_motif_seq}) in sequence")
                 continue
             trimmed_end = trimmed_begin + len(trimmed_motif_seq)
 
