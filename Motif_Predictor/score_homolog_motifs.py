@@ -142,7 +142,7 @@ def seqs_chunk_generator(seqs_2d, chunk_size):
         yield seqs_2d[i:i+chunk_size]
 
 def score_motifs_parallel(seqs_2d, conditional_matrices, weights_tuple = None, standardization_coefficients = None,
-                          chunk_size = 1000, filters = None, selenocysteine_substitute = "C", gap_substitute = "G"):
+                          chunk_size = 10000, filters = None, selenocysteine_substitute = "C", gap_substitute = "G"):
     '''
     Parallelized function for scoring sequences using a ConditionalMatrices object
 
@@ -166,11 +166,8 @@ def score_motifs_parallel(seqs_2d, conditional_matrices, weights_tuple = None, s
     chunk_scores = []
     pool = multiprocessing.Pool()
 
-    chunk_count = int(np.ceil(len(seqs_2d) / chunk_size))
-    with trange(chunk_count, desc="\t\tScoring current set of motifs...") as pbar:
-        for scores in pool.map(partial_function, seqs_chunk_generator(seqs_2d, chunk_size)):
-            chunk_scores.append(scores)
-            pbar.update()
+    for scores in pool.map(partial_function, seqs_chunk_generator(seqs_2d, chunk_size)):
+        chunk_scores.append(scores)
 
     pool.close()
     pool.join()
