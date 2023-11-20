@@ -98,7 +98,7 @@ def main(predictor_params = predictor_params):
 
             chunk_dfs.append(chunk_df)
 
-        protein_seqs_df = pd.concat(chunk_dfs, axis=0)
+        protein_seqs_df = pd.concat(chunk_dfs, ignore_index=True)
 
         # Save scored data
         output_path = path[:-4] + "_scored.csv"
