@@ -3,7 +3,19 @@
 import numpy as np
 import pandas as pd
 import pickle
+import multiprocessing
+from functools import partial
 from Motif_Predictor.predictor_config import predictor_params
+
+def evaluate_chunk(chunk_seqs_2d, specificity_matrix, use_specificity_weighted):
+    # Simple low-level function that can be parallelized
+    chunk_specificity_scores = specificity_matrix.score_motifs(chunk_seqs_2d, use_specificity_weighted)
+    return chunk_specificity_scores
+
+def seq_chunk_generator(seqs_2d, chunk_size = 1000):
+    # Simple generator object to yield chunks of a 2D set of protein sequences
+    for i in range(0, len(seqs_2d), chunk_size):
+        yield seqs_2d[i:i+chunk_size]
 
 def apply_specificity_scores(protein_seqs_df, motif_cols, predictor_params=predictor_params):
     '''
@@ -29,6 +41,7 @@ def apply_specificity_scores(protein_seqs_df, motif_cols, predictor_params=predi
     use_specificity_weighted = predictor_params["use_specificity_weighted"]
     cols = list(protein_seqs_df.columns)
     for motif_col in motif_cols:
+        print(f"\tCalculating scores for motif col: {motif_col}")
         motif_col_index = cols.index(motif_col)
         specificity_score_col = motif_col + "_specificity_score"
 
@@ -41,7 +54,18 @@ def apply_specificity_scores(protein_seqs_df, motif_cols, predictor_params=predi
         valid_motifs_2d = np.array([list(motif) for motif in valid_motifs])
 
         if len(valid_motifs_2d) > 0 and valid_motifs_2d.ndim == 2:
-            valid_specificity_scores = specificity_matrix.score_motifs(valid_motifs_2d, use_specificity_weighted)
+            partial_evaluator = partial(evaluate_chunk, specificity_matrix = specificity_matrix,
+                                        use_specificity_weighted = use_specificity_weighted)
+
+            chunk_results = []
+            pool = multiprocessing.Pool()
+            for chunk_specificity_scores in pool.map(partial_evaluator, seq_chunk_generator(valid_motifs_2d)):
+                chunk_results.append(chunk_specificity_scores)
+
+            pool.close()
+            pool.join()
+
+            valid_specificity_scores = np.concatenate(chunk_results)
 
             # Apply the specificity score values to rows where there are non-blank motifs present
             specificity_score_vals = np.full(shape=len(protein_seqs_df), fill_value=np.nan, dtype=float)
@@ -50,6 +74,7 @@ def apply_specificity_scores(protein_seqs_df, motif_cols, predictor_params=predi
             cols.insert(motif_col_index + 2, specificity_score_col)
 
     # Reorder dataframe
+    print(f"\tReordering dataframe with new columns...")
     protein_seqs_df = protein_seqs_df[cols]
 
     return protein_seqs_df
