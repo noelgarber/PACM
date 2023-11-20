@@ -2,19 +2,11 @@
 
 import numpy as np
 import pandas as pd
-import math
-import os
-import sys
-import glob
-import time
-import requests
-import scipy.stats as stats
+
 import warnings
 import multiprocessing
 from tqdm import trange
 from Bio.Align import substitution_matrices
-from PACM_General_Vars import index_aa_dict
-from PACM_General_Functions import CharacAA, NumInput, FilenameSubdir, use_default, dict_inputter, ListInputter
 
 # Vectorization is not possible for this procedure; suppress Pandas performance warnings arising from fragmentatiom
 warnings.simplefilter(action = "ignore", category = pd.errors.PerformanceWarning)
@@ -93,48 +85,67 @@ def evaluate_homologs(data_df, motif_seq_cols, homolog_seq_cols):
 		homolog_motif_cols (list): list of column names containing homologous motif sequences
 	'''
 
+	# Generate tuples of motif columns and sequences to be used for similarity analysis
 	print("Preparing homolog and motif seqs for similarity analysis...")
 	homolog_motif_cols = []
+	homolog_motif_col_prefixes = []
 	seqs_tuples = []
 	for homolog_seq_col in homolog_seq_cols:
+		homolog_seq_col_elements = homolog_seq_col.split("_")
+		taxid = homolog_seq_col_elements[0]
+		homolog_number = homolog_seq_col_elements[2]
+
 		col_idx = data_df.columns.get_loc(homolog_seq_col)
-		homolog_seqs = data_df.pop(homolog_seq_col).fillna("").to_list()
 		current_insertion_point = col_idx
+
+		homolog_seqs = data_df.pop(homolog_seq_col).fillna("").to_list()
+
 		for i, motif_seq_col in enumerate(motif_seq_cols):
 			motif_seqs = data_df[motif_seq_col].fillna("").to_list()
-			col_prefix = homolog_seq_col.rsplit("_", 1)[0] + "_vs_" + motif_seq_col
-			cols = [col_prefix + "_matching_motif", col_prefix + "_motif_similarity", col_prefix + "_motif_identity"]
-			seqs_tuples.append((motif_seqs, homolog_seqs, cols, current_insertion_point))
-			homolog_motif_cols.append(col_prefix + "_matching_motif")
-			current_insertion_point += 3
+			col_prefix = f"{taxid}_homolog_{homolog_number}_vs_{motif_seq_col}"
+			if col_prefix not in homolog_motif_col_prefixes:
+				homolog_motif_col_prefixes.append(col_prefix)
+				cols = [col_prefix + "_matching_motif", col_prefix + "_motif_similarity", col_prefix + "_motif_identity"]
+				seqs_tuples.append((motif_seqs, homolog_seqs, cols, current_insertion_point))
+				homolog_motif_cols.append(col_prefix + "_matching_motif")
+				current_insertion_point += 3
+			else:
+				print(f"Caution: duplicate found for column prefix {col_prefix}")
 
-	new_cols_names = []
-	new_cols_data = []
+	# Run the similarity analysis
+	row_indices = data_df.index
+	homologous_motifs_df = pd.DataFrame(index = row_indices)
 	with trange(len(seqs_tuples), desc="Evaluating motif homolog similarities by column pair...") as pbar:
 		pool = multiprocessing.Pool()
 		for result in pool.imap(motif_similarity, seqs_tuples):
 			homologous_motifs, homologous_similarities, homologous_identities, col_names, insertion_idx = result
-
-			new_cols_names.extend(col_names)
-			new_cols_data.extend([homologous_motifs, homologous_similarities, homologous_identities])
+			homologous_motifs_df.loc[row_indices,col_names[0]] = homologous_motifs
+			homologous_motifs_df.loc[row_indices,col_names[1]] = homologous_similarities
+			homologous_motifs_df.loc[row_indices,col_names[2]] = homologous_identities
 
 			pbar.update()
 
 	pool.close()
 	pool.join()
 
-	homologous_motifs_df = pd.DataFrame(dict(zip(new_cols_names, new_cols_data)))
 	data_df = pd.concat([data_df, homologous_motifs_df], axis=1)
 
 	cols = list(data_df.columns)
 	homolog_accession_cols = [homolog_seq_col.rsplit("_",1)[0] for homolog_seq_col in homolog_seq_cols]
 	reordered_cols = [col for col in cols if "homolog" not in col]
 	for homolog_accession_col in homolog_accession_cols:
+		homolog_col_elements = homolog_accession_col.split("_")
+		homolog_taxid = homolog_col_elements[0]
+		homolog_number = homolog_col_elements[2]
+
 		subset_cols = []
 		for col in cols:
-			if homolog_accession_col in col:
-				subset_cols.append(col)
-		reordered_cols.extend(subset_cols)
+			col_elements = col.split("_")
+			if len(col_elements) >= 2:
+				if col_elements[0] == homolog_taxid and col_elements[2] == homolog_number:
+					subset_cols.append(col)
+
+		reordered_cols = reordered_cols + subset_cols
 
 	data_df = data_df[reordered_cols]
 
