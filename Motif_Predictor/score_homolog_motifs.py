@@ -177,7 +177,7 @@ def score_motifs_parallel(seqs_2d, conditional_matrices, weights_tuple = None, s
 
     return scores
 
-def score_homolog_motifs(data_df, homolog_motif_cols, predictor_params):
+def score_homolog_motifs(data_df, homolog_motif_cols, predictor_params, verbose = False):
     '''
     Main function for scoring homologous motifs
 
@@ -185,6 +185,7 @@ def score_homolog_motifs(data_df, homolog_motif_cols, predictor_params):
         data_df (pd.DataFrame):                     main dataframe with motif sequences for host and homologs
         homolog_motif_cols (list|tuple):            col names where homolog motif sequences are stored
         predictor_params (dict):                    dictionary of parameters for scoring
+        verbose (bool):                             whether to display verbose progress messages
 
     Returns:
         data_df (pd.DataFrame):                     dataframe with scores added for homolog motifs
@@ -210,9 +211,9 @@ def score_homolog_motifs(data_df, homolog_motif_cols, predictor_params):
 
     print("Scoring homologous motifs...")
     model_score_cols = []
-    homolog_motif_col_count = len(homolog_motif_cols)
+    homolog_motif_count = len(homolog_motif_cols)
     for i, homolog_motif_col in enumerate(homolog_motif_cols):
-        print(f"\tScoring homolog motif col ({i+1} of {homolog_motif_col_count}): {homolog_motif_col}")
+        print(f"\tScoring homolog motif col ({i+1} of {homolog_motif_count}): {homolog_motif_col}") if verbose else None
         motifs = data_df[homolog_motif_col].to_list()
 
         valid_motifs = []
@@ -226,21 +227,22 @@ def score_homolog_motifs(data_df, homolog_motif_cols, predictor_params):
         valid_motifs_2d = np.array([list(motif) for motif in valid_motifs])
         del valid_motifs
 
-        valid_scores = score_motifs_parallel(valid_motifs_2d, conditional_matrices, weights_tuple,
-                                             standardization_coefficients, filters = filters,
-                                             selenocysteine_substitute = selenocysteine_substitute,
-                                             gap_substitute = gap_substitute)
-        del valid_motifs_2d
+        if len(valid_motifs_2d) > 0:
+            valid_scores = score_motifs_parallel(valid_motifs_2d, conditional_matrices, weights_tuple,
+                                                 standardization_coefficients, filters = filters,
+                                                 selenocysteine_substitute = selenocysteine_substitute,
+                                                 gap_substitute = gap_substitute)
+            del valid_motifs_2d
 
-        all_scores = np.zeros(shape=len(motifs), dtype=float)
-        all_scores[valid_motif_indices] = valid_scores
+            all_scores = np.zeros(shape=len(motifs), dtype=float)
+            all_scores[valid_motif_indices] = valid_scores
 
-        model_score_col = homolog_motif_col + "_model_score"
-        data_df[model_score_col] = all_scores
-        model_score_cols.append(model_score_col)
+            model_score_col = homolog_motif_col + "_model_score"
+            data_df[model_score_col] = all_scores
+            model_score_cols.append(model_score_col)
 
     # Reorder columns so model scores are beside homolog motif sequences
-    print(f"Reordering dataframe...")
+    print(f"Reordering dataframe...") if verbose else None
     cols = list(data_df.columns)
     for cumulative_displacement, (motif_col, score_col) in enumerate(zip(homolog_motif_cols, model_score_cols)):
         insertion_idx = cols.index(motif_col) + cumulative_displacement + 1
