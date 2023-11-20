@@ -87,7 +87,10 @@ def main(predictor_params = predictor_params):
             df_with_homologs = apply_specificity_scores(df_with_homologs, homolog_motif_cols, predictor_params)
 
             # Recombine dataframes
-            chunk_df = pd.concat([df_with_homologs, df_without_homologs], axis=0)
+            df_with_homologs = df_with_homologs.reset_index(drop=True)
+            df_without_homologs = df_without_homologs.reset_index(drop=True)
+
+            chunk_df = pd.concat([df_with_homologs, df_without_homologs], ignore_index=True)
             del df_with_homologs, df_without_homologs
 
             # Get topology for predicted motifs
