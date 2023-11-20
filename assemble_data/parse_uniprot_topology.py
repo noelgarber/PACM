@@ -64,7 +64,7 @@ def get_topological_domains(path = None):
     sequences = {}
 
     entries = data["uniprot"]["entry"]
-    for entry in entries:
+    for i, entry in entries:
         # Parse topological features into a list of tuples
         features = entry["feature"]
         topological_features = []
@@ -72,10 +72,19 @@ def get_topological_domains(path = None):
             feature_type = feature["@type"]
             if "topo" in feature_type or "transmem" in feature_type or "intramem" in feature_type:
                 description = feature["@description"]
-                begin = feature["location"]["begin"]["@position"]
-                end = feature["location"]["end"]["@position"]
-                topological_feature_tuple = (feature_type, description, begin, end)
-                topological_features.append(topological_feature_tuple)
+                begin = feature["location"].get("begin")
+                end = feature["location"].get("end")
+                if begin is not None and end is not None:
+                    begin_position = begin.get("@position")
+                    end_position = end.get("@position")
+                    if begin_position is not None and end_position is not None:
+                        print(f"Entry {i}: found topological domain at ({begin_position},{end_position})")
+                        topological_feature_tuple = (feature_type, description, begin_position, end_position)
+                        topological_features.append(topological_feature_tuple)
+                    else:
+                        print(f"Entry {i}: could not find @position tag for begin/end in topo feature {description}")
+                else:
+                    print(f"Entry {i}: could not find location tag for begin/end in topo feature {description}")
 
         # Parse sequence and assign data to accessions only if topological domains are listed (saves memory)
         if len(topological_features) > 0:
