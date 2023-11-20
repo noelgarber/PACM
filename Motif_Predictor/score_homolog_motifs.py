@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import pickle
 import multiprocessing
+from tqdm import trange
 from functools import partial
 from Matrix_Generator.ConditionalMatrix import ConditionalMatrices
 
@@ -141,7 +142,7 @@ def seqs_chunk_generator(seqs_2d, chunk_size):
         yield seqs_2d[i:i+chunk_size]
 
 def score_motifs_parallel(seqs_2d, conditional_matrices, weights_tuple = None, standardization_coefficients = None,
-                          chunk_size = 10000, filters = None, selenocysteine_substitute = "C", gap_substitute = "G"):
+                          chunk_size = 1000, filters = None, selenocysteine_substitute = "C", gap_substitute = "G"):
     '''
     Parallelized function for scoring sequences using a ConditionalMatrices object
 
@@ -163,10 +164,14 @@ def score_motifs_parallel(seqs_2d, conditional_matrices, weights_tuple = None, s
                                selenocysteine_substitute = selenocysteine_substitute, gap_substitute = gap_substitute)
 
     chunk_scores = []
-
     pool = multiprocessing.Pool()
-    for scores in pool.map(partial_function, seqs_chunk_generator(seqs_2d, chunk_size)):
-        chunk_scores.append(scores)
+
+    chunk_count = int(np.ceil(len(seqs_2d) / chunk_size))
+    with trange(chunk_count, desc="\t\tScoring current set of motifs...") as pbar:
+        for scores in pool.map(partial_function, seqs_chunk_generator(seqs_2d, chunk_size)):
+            chunk_scores.append(scores)
+            pbar.update()
+
     pool.close()
     pool.join()
 
@@ -207,8 +212,10 @@ def score_homolog_motifs(data_df, homolog_motif_cols, predictor_params):
     gap_substitute = predictor_params["gap_substitute"]
 
     print("Scoring homologous motifs...")
-    for homolog_motif_col in homolog_motif_cols:
-        cols = list(data_df.columns)
+    model_score_cols = []
+    homolog_motif_col_count = len(homolog_motif_cols)
+    for i, homolog_motif_col in enumerate(homolog_motif_cols):
+        print(f"\tScoring homolog motif col ({i+1} of {homolog_motif_col_count}): {homolog_motif_col}")
         motifs = data_df[homolog_motif_col].to_list()
 
         valid_motifs = []
@@ -230,10 +237,18 @@ def score_homolog_motifs(data_df, homolog_motif_cols, predictor_params):
 
         all_scores = np.zeros(shape=len(motifs), dtype=float)
         all_scores[valid_motif_indices] = valid_scores
-        data_df[homolog_motif_col + "_model_score"] = all_scores
 
-        col_idx = data_df.columns.get_loc(homolog_motif_col)
-        cols.insert(col_idx+1, homolog_motif_col + "_model_score")
-        data_df = data_df[cols]
+        model_score_col = homolog_motif_col + "_model_score"
+        data_df[model_score_col] = all_scores
+        model_score_cols.append(model_score_col)
+
+    # Reorder columns so model scores are beside homolog motif sequences
+    print(f"Reordering dataframe...")
+    cols = list(data_df.columns)
+    for cumulative_displacement, (motif_col, score_col) in enumerate(zip(homolog_motif_cols, model_score_cols)):
+        insertion_idx = cols.index(motif_col) + cumulative_displacement + 1
+        cols.insert(insertion_idx, score_col)
+
+    data_df = data_df[cols]
 
     return data_df
