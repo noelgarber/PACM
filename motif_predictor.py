@@ -32,6 +32,7 @@ def main(predictor_params = predictor_params):
 
     # Also get dataframe chunk sizes for memory management
     df_chunk_counts = predictor_params["df_chunks"]
+    seq_col = predictor_params["seq_col"]
 
     for path, chunk_count in zip(protein_seqs_paths, df_chunk_counts):
         # Get row count for the whole spreadsheet
@@ -75,7 +76,7 @@ def main(predictor_params = predictor_params):
 
             # Drop homolog seq cols from df_without_homologs, since this will be done to df_with_homologs later
             for homolog_seq_col in homolog_seq_cols:
-                df_without_homologs.drop(homolog_seq_col, axis=1)
+                df_without_homologs.drop(homolog_seq_col, axis=1, inplace=True)
 
             # Evaluate motif homology
             df_with_homologs, homolog_motif_cols = evaluate_homologs(df_with_homologs, all_motif_cols, homolog_seq_cols)
@@ -92,6 +93,7 @@ def main(predictor_params = predictor_params):
 
             chunk_df = pd.concat([df_with_homologs, df_without_homologs], ignore_index=True)
             del df_with_homologs, df_without_homologs
+            chunk_df.drop(seq_col, axis=1, inplace=True)
 
             # Get topology for predicted motifs
             chunk_df = predict_topology(chunk_df, all_motif_cols, predictor_params)
