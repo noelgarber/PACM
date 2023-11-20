@@ -60,18 +60,22 @@ def score_motifs(seqs_2d, conditional_matrices, weights_tuple = None, standardiz
     for member_aa, encoded_class in conditional_matrices.encoded_chemical_classes.items():
         left_encoded_classes_2d[flanking_left_2d == member_aa] = encoded_class
         right_encoded_classes_2d[flanking_right_2d == member_aa] = encoded_class
+    del flanking_left_2d, flanking_right_2d
 
     # Find the matrix identifier number (1st dim of 3D matrix) for each encoded class, depending on seq position
     encoded_positions = np.arange(motif_length) * conditional_matrices.chemical_class_count
     left_encoded_matrix_refs = left_encoded_classes_2d + encoded_positions
     right_encoded_matrix_refs = right_encoded_classes_2d + encoded_positions
+    del left_encoded_classes_2d, right_encoded_classes_2d, encoded_positions
 
     # Flatten the encoded matrix refs, which serve as the 1st dimension referring to 3D matrices
     left_encoded_matrix_refs_flattened = left_encoded_matrix_refs.flatten()
     right_encoded_matrix_refs_flattened = right_encoded_matrix_refs.flatten()
+    del left_encoded_matrix_refs, right_encoded_matrix_refs
 
     # Flatten the amino acid row indices into a matching array serving as the 2nd dimension
     aa_row_indices_flattened = aa_row_indices_2d.flatten()
+    del aa_row_indices_2d
 
     # Tile the column indices into a matching array serving as the 3rd dimension
     column_indices = np.arange(motif_length)
@@ -88,16 +92,19 @@ def score_motifs(seqs_2d, conditional_matrices, weights_tuple = None, standardiz
     left_positive_2d = conditional_matrices.stacked_positive_weighted[left_dim1, dim2, dim3].reshape(shape_2d)
     right_positive_2d = conditional_matrices.stacked_positive_weighted[right_dim1, dim2, dim3].reshape(shape_2d)
     positive_scores_2d = (left_positive_2d + right_positive_2d) / 2
+    del left_positive_2d, right_positive_2d
 
     # Calculate suboptimal element scores
     left_suboptimal_2d = conditional_matrices.stacked_suboptimal_weighted[left_dim1, dim2, dim3].reshape(shape_2d)
     right_suboptimal_2d = conditional_matrices.stacked_suboptimal_weighted[right_dim1, dim2, dim3].reshape(shape_2d)
     suboptimal_scores_2d = (left_suboptimal_2d + right_suboptimal_2d) / 2
+    del left_suboptimal_2d, right_suboptimal_2d
 
     # Calculate forbidden element scores
     left_forbidden_2d = conditional_matrices.stacked_forbidden_weighted[left_dim1, dim2, dim3].reshape(shape_2d)
     right_forbidden_2d = conditional_matrices.stacked_forbidden_weighted[right_dim1, dim2, dim3].reshape(shape_2d)
     forbidden_scores_2d = (left_forbidden_2d + right_forbidden_2d) / 2
+    del left_forbidden_2d, right_forbidden_2d
 
     # Apply weights if a tuple of arrays of weights values were given
     if weights_tuple is not None:
@@ -108,7 +115,9 @@ def score_motifs(seqs_2d, conditional_matrices, weights_tuple = None, standardiz
 
     # Calculate total scores
     total_scores_2d = positive_scores_2d - suboptimal_scores_2d - forbidden_scores_2d
+    del positive_scores_2d, suboptimal_scores_2d, forbidden_scores_2d
     total_scores = total_scores_2d.sum(axis=1)
+    del total_scores_2d
 
     # Standardization of the scores
     if isinstance(standardization_coefficients, tuple) or isinstance(standardization_coefficients, list):
@@ -125,6 +134,11 @@ def score_motifs(seqs_2d, conditional_matrices, weights_tuple = None, standardiz
             total_scores[~seqs_pass] = 0
 
     return total_scores
+
+def seqs_chunk_generator(seqs_2d, chunk_size):
+    # Chunk generator; saves memory rather than loading list all at once
+    for i in range(0, len(seqs_2d), chunk_size):
+        yield seqs_2d[i:i+chunk_size]
 
 def score_motifs_parallel(seqs_2d, conditional_matrices, weights_tuple = None, standardization_coefficients = None,
                           chunk_size = 10000, filters = None, selenocysteine_substitute = "C", gap_substitute = "G"):
@@ -148,17 +162,16 @@ def score_motifs_parallel(seqs_2d, conditional_matrices, weights_tuple = None, s
                                standardization_coefficients = standardization_coefficients, filters = filters,
                                selenocysteine_substitute = selenocysteine_substitute, gap_substitute = gap_substitute)
 
-    chunks = [seqs_2d[i:i+chunk_size] for i in range(0, len(seqs_2d), chunk_size)]
-
     chunk_scores = []
 
     pool = multiprocessing.Pool()
-    for scores in pool.map(partial_function, chunks):
+    for scores in pool.map(partial_function, seqs_chunk_generator(seqs_2d, chunk_size)):
         chunk_scores.append(scores)
     pool.close()
     pool.join()
 
     scores = np.concatenate(chunk_scores)
+    del chunk_scores
 
     return scores
 
@@ -192,6 +205,8 @@ def score_homolog_motifs(data_df, homolog_motif_cols, predictor_params):
     filters = predictor_params["enforced_position_rules"]
     selenocysteine_substitute = predictor_params["selenocysteine_substitute"]
     gap_substitute = predictor_params["gap_substitute"]
+
+    print("Scoring homologous motifs...")
     for homolog_motif_col in homolog_motif_cols:
         cols = list(data_df.columns)
         motifs = data_df[homolog_motif_col].to_list()
@@ -205,10 +220,13 @@ def score_homolog_motifs(data_df, homolog_motif_cols, predictor_params):
                     valid_motif_indices.append(i)
 
         valid_motifs_2d = np.array([list(motif) for motif in valid_motifs])
+        del valid_motifs
+
         valid_scores = score_motifs_parallel(valid_motifs_2d, conditional_matrices, weights_tuple,
                                              standardization_coefficients, filters = filters,
                                              selenocysteine_substitute = selenocysteine_substitute,
                                              gap_substitute = gap_substitute)
+        del valid_motifs_2d
 
         all_scores = np.zeros(shape=len(motifs), dtype=float)
         all_scores[valid_motif_indices] = valid_scores
