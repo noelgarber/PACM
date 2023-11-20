@@ -58,9 +58,6 @@ def main(predictor_params = predictor_params):
                 if "homolog" in col and "seq" in col:
                     homolog_seq_cols.append(col)
 
-            # Get topology for predicted motifs
-            chunk_df = predict_topology(chunk_df, all_motif_cols, predictor_params)
-
             # Separate dataframe by whether entries have any homologs and motifs to score
             contains_homolog = np.full(shape=len(chunk_df), fill_value=False, dtype=bool)
             for homolog_seq_col in homolog_seq_cols:
@@ -74,7 +71,11 @@ def main(predictor_params = predictor_params):
 
             df_with_homologs = chunk_df.loc[contains_homolog_and_motif]
             df_without_homologs = chunk_df.loc[~contains_homolog_and_motif]
-            del chunk_df
+            del chunk_df # temporary; will be reconstructed
+
+            # Drop homolog seq cols from df_without_homologs, since this will be done to df_with_homologs later
+            for homolog_seq_col in homolog_seq_cols:
+                df_without_homologs.drop(homolog_seq_col, axis=1)
 
             # Evaluate motif homology
             df_with_homologs, homolog_motif_cols = evaluate_homologs(df_with_homologs, all_motif_cols, homolog_seq_cols)
@@ -86,10 +87,12 @@ def main(predictor_params = predictor_params):
             df_with_homologs = apply_specificity_scores(df_with_homologs, homolog_motif_cols, predictor_params)
 
             # Recombine dataframes
-            for homolog_seq_col in homolog_seq_cols:
-                df_without_homologs.drop(homolog_seq_col, axis=1)
             chunk_df = pd.concat([df_with_homologs, df_without_homologs], axis=0)
             del df_with_homologs, df_without_homologs
+
+            # Get topology for predicted motifs
+            chunk_df = predict_topology(chunk_df, all_motif_cols, predictor_params)
+
             chunk_dfs.append(chunk_df)
 
         protein_seqs_df = pd.concat(chunk_dfs, axis=0)
