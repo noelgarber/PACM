@@ -51,6 +51,7 @@ def main(predictor_params = predictor_params):
             all_motif_cols.extend(classical_motif_cols)
 
             # Apply bait specificity scoring of discovered motifs
+            print(f"Assigning specificity scores...")
             chunk_df = apply_specificity_scores(chunk_df, all_motif_cols, predictor_params)
 
             # Get homolog seq col names
