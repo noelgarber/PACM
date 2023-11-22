@@ -46,12 +46,13 @@ def load_uniprot(path = None):
 
     return data
 
-def get_topological_domains(path = None):
+def get_topological_domains(path = None, verbose = False):
     '''
     Function that parses the dictionary-of-dictionaries into topological domain and sequence dictionaries
 
     Args:
-        path (str):  path to either the XML file or a pickled version of it as a dictionary of dictionaries (pickled)
+        path (str):     path to either the XML file or a pickled version of it as a dictionary of dictionaries (pickled)
+        verbose (bool): whether to display progress information
 
     Returns:
         topological_domains (dict): dictionary of accession --> topological features list
@@ -80,18 +81,19 @@ def get_topological_domains(path = None):
                             begin_position = begin.get("@position")
                             end_position = end.get("@position")
                             if begin_position is not None and end_position is not None:
-                                print(f"Entry {i}: found topological domain at ({begin_position},{end_position})")
+                                if verbose:
+                                    print(f"\t\tEntry {i}: found topo domain at ({begin_position},{end_position})")
                                 begin_position = int(begin_position)
                                 end_position = int(end_position)
                                 topological_feature_tuple = (feature_type, description, begin_position, end_position)
                                 topological_features.append(topological_feature_tuple)
-                            else:
-                                print(f"\t\tEntry {i}: couldn't find @position tag for begin/end in topology: {description}")
-                        else:
+                            elif verbose:
+                                print(f"\t\tEntry {i}: couldn't find @position tag in topology: {description}")
+                        elif verbose:
                             print(f"\t\tEntry {i}: couldn't find location tag for begin/end in topology: {description}")
-                else:
+                elif verbose:
                     print(f"\t\tEntry {i}: could not find feature type for a feature in features")
-            else:
+            elif verbose:
                 print(f"\t\tEntry {i}: a feature ({feature}) was not a dictionary; it was skipped")
 
         # Parse sequence and assign data to accessions only if topological domains are listed (saves memory)
