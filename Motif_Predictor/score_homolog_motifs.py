@@ -177,7 +177,7 @@ def score_motifs_parallel(seqs_2d, conditional_matrices, weights_tuple = None, s
 
     return scores
 
-def score_homolog_motifs(data_df, homolog_motif_cols, predictor_params, verbose = False):
+def score_homolog_motifs(data_df, homolog_motif_cols, predictor_params, verbose = True):
     '''
     Main function for scoring homologous motifs
 
@@ -240,6 +240,9 @@ def score_homolog_motifs(data_df, homolog_motif_cols, predictor_params, verbose 
             model_score_col = homolog_motif_col + "_model_score"
             data_df[model_score_col] = all_scores
             model_score_cols.append(model_score_col)
+
+        else:
+            print(f"\t\t\tNo motif sequences were found in this column, so it is being skipped...")
 
     # Reorder columns so model scores are beside homolog motif sequences
     print(f"\t\tReordering dataframe...") if verbose else None
