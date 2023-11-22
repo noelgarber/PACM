@@ -21,7 +21,7 @@ def evaluate_chunk(chunk_tuple, specificity_matrix, use_specificity_weighted):
     '''
 
     if chunk_tuple is None:
-        return (None, specificity_score_col)
+        return (None, None)
 
     chunk_seqs_2d, specificity_score_col = chunk_tuple
     chunk_specificity_scores = specificity_matrix.score_motifs(chunk_seqs_2d, use_specificity_weighted)
