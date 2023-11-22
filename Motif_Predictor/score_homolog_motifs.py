@@ -204,45 +204,40 @@ def score_homolog_motifs(data_df, homolog_motif_cols, predictor_params, verbose 
     with open(conditional_matrices_path, "rb") as f:
         conditional_matrices = pickle.load(f)
 
-    # Score each column of homolog motifs
+    # Extract all unique motif sequences for scoring
+    print(f"\t\tGetting unique motif sequences...")
+    motif_seqs = []
+    for homolog_motif_col in homolog_motif_cols:
+        col_data = data_df[homolog_motif_col].copy()
+        col_data = col_data[col_data.notna()]
+        col_data = col_data[col_data.ne("")]
+        motif_seqs.append(col_data.to_numpy())
+
+    motif_seqs = np.concatenate(motif_seqs)
+    motif_seqs = np.unique(motif_seqs)
+    motif_seqs_2d = np.array([list(motif) for motif in motif_seqs])
+
+    # Score the unique motif sequences
+    print(f"\t\tScoring {len(motif_seqs_2d)} unique motifs...")
     filters = predictor_params["enforced_position_rules"]
     selenocysteine_substitute = predictor_params["selenocysteine_substitute"]
     gap_substitute = predictor_params["gap_substitute"]
-
+    chunk_size = predictor_params["homolog_score_chunk_size"]
     cols = list(data_df.columns)
+
+    scores = score_motifs_parallel(motif_seqs_2d, conditional_matrices, weights_tuple, standardization_coefficients,
+                                   chunk_size, filters, selenocysteine_substitute, gap_substitute)
+    print(f"\t\tAssigning scores to dict of motif sequences...")
+    scores_dict = {str(motif): score for motif, score in zip(motif_seqs, scores)}
+
+    # Apply the scores to the dataframe as appropriate
+    print(f"\t\tApplying scores to dataframe...")
     model_score_cols = []
-    homolog_motif_count = len(homolog_motif_cols)
     for i, homolog_motif_col in enumerate(homolog_motif_cols):
-        print(f"\t\tScoring homolog motif col ({i+1} of {homolog_motif_count}): {homolog_motif_col}") if verbose else None
-        motifs = data_df[homolog_motif_col].to_list()
-
-        valid_motifs = []
-        valid_motif_indices = []
-        for i, motif in enumerate(motifs):
-            if isinstance(motif, str):
-                if len(motif) > 0:
-                    valid_motifs.append(motif)
-                    valid_motif_indices.append(i)
-
-        valid_motifs_2d = np.array([list(motif) for motif in valid_motifs])
-        del valid_motifs
-
-        if len(valid_motifs_2d) > 0:
-            valid_scores = score_motifs_parallel(valid_motifs_2d, conditional_matrices, weights_tuple,
-                                                 standardization_coefficients, filters = filters,
-                                                 selenocysteine_substitute = selenocysteine_substitute,
-                                                 gap_substitute = gap_substitute)
-            del valid_motifs_2d
-
-            all_scores = np.zeros(shape=len(motifs), dtype=float)
-            all_scores[valid_motif_indices] = valid_scores
-
-            model_score_col = homolog_motif_col + "_model_score"
-            data_df[model_score_col] = all_scores
-            model_score_cols.append(model_score_col)
-
-        else:
-            print(f"\t\t\tNo motif sequences were found in this column, so it is being skipped...")
+        col_scores = [scores_dict.get(motif) for motif in data_df[homolog_motif_col]]
+        model_score_col = homolog_motif_col + "_model_score"
+        data_df[model_score_col] = col_scores
+        model_score_cols.append(model_score_col)
 
     # Reorder columns so model scores are beside homolog motif sequences
     print(f"\t\tReordering dataframe...") if verbose else None
