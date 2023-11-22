@@ -177,18 +177,92 @@ def score_motifs_parallel(seqs_2d, conditional_matrices, weights_tuple = None, s
 
     return scores
 
-def score_homolog_motifs(data_df, homolog_motif_cols, predictor_params, verbose = True):
+def collapse_to_best(data_df, homolog_id_cols, homolog_motif_cols, model_score_cols):
+    '''
+    Collapses homolog motif cols to top two matching homologs according to model score
+
+    Args:
+        data_df (pd.DataFrame):     main dataframe with motif and homolog data
+        homolog_id_cols (list):     list of col names where homolog ids are stored
+        homolog_motif_cols (list):  list of col names containing homologous motifs
+        model_score_cols (list):    list of col names containing homologous motif scores according to model
+
+    Returns:
+        data_df (pd.DataFrame):     dataframe with collapsed homologous motifs
+        homolog_id_cols (list):     shortened list of col names where homolog ids are stored
+        homolog_motif_cols (list):  shortened list of col names containing homologous motifs
+        model_score_cols (list):    shortened list of col names containing homologous motif scores according to model
+    '''
+
+    scores_df = data_df[model_score_cols]
+
+    best_ids = []
+    best_motifs = []
+    best_scores = []
+
+    second_best_ids = []
+    second_best_motifs = []
+    second_best_scores = []
+
+    for i, row in scores_df.iterrows():
+        sorted_indices = row.argsort()
+        valid_count = len(sorted_indices)
+        best_id, best_motif, second_best_id, second_best_motif = "", "", "", "" # default
+        best_score, second_best_score = np.nan, np.nan # default
+
+        if valid_count >= 1:
+            best_idx = sorted_indices[0]
+            best_id = data_df.at[i, homolog_id_cols[best_idx]]
+            best_motif = data_df.at[i, homolog_motif_cols[best_idx]]
+            best_score = row[best_idx]
+
+        if valid_count >= 2:
+            second_best_idx = sorted_indices[1]
+            second_best_id = data_df.at[i, homolog_id_cols[best_idx]]
+            second_best_motif = data_df.at[i, homolog_motif_cols[second_best_idx]]
+            second_best_score = row[second_best_idx]
+
+        best_ids.append(best_id)
+        best_motifs.append(best_motif)
+        best_scores.append(best_score)
+
+        second_best_ids.append(second_best_id)
+        second_best_motifs.append(second_best_motif)
+        second_best_scores.append(second_best_score)
+
+    cols_to_drop = homolog_id_cols[2:] + homolog_motif_cols[2:] + model_score_cols[2:]
+    data_df.drop(cols_to_drop, axis=1, inplace=True)
+
+    homolog_id_cols = homolog_id_cols[:2]
+    homolog_motif_cols = homolog_motif_cols[:2]
+    model_score_cols = model_score_cols[:2]
+
+    data_df[homolog_id_cols[0]] = best_ids
+    data_df[homolog_motif_cols[0]] = best_motifs
+    data_df[model_score_cols[0]] = best_scores
+
+    data_df[homolog_id_cols[1]] = second_best_ids
+    data_df[homolog_motif_cols[1]] = second_best_motifs
+    data_df[model_score_cols[1]] = second_best_scores
+
+    return data_df, homolog_id_cols, homolog_motif_cols, model_score_cols
+
+def score_homolog_motifs(data_df, homolog_id_cols, homolog_motif_cols, predictor_params, verbose = True):
     '''
     Main function for scoring homologous motifs
 
     Args:
-        data_df (pd.DataFrame):                     main dataframe with motif sequences for host and homologs
-        homolog_motif_cols (list|tuple):            col names where homolog motif sequences are stored
-        predictor_params (dict):                    dictionary of parameters for scoring
-        verbose (bool):                             whether to display verbose progress messages
+        data_df (pd.DataFrame):          main dataframe with motif sequences for host and homologs
+        homolog_id_cols (list|tuple):    col names where homolog ids are stored
+        homolog_motif_cols (list|tuple): col names where homolog motif sequences are stored
+        predictor_params (dict):         dictionary of parameters for scoring
+        verbose (bool):                  whether to display verbose progress messages
 
     Returns:
-        data_df (pd.DataFrame):                     dataframe with scores added for homolog motifs
+        data_df (pd.DataFrame):     dataframe with scores added for homolog motifs
+        homolog_id_cols (list):     shortened list of col names where homolog ids are stored
+        homolog_motif_cols (list):  shortened list of col names containing homologous motifs
+        model_score_cols (list):    shortened list of col names containing homologous motif scores according to model
     '''
 
     standardization_coefficients_path = predictor_params["standardization_coefficients_path"]
@@ -223,7 +297,6 @@ def score_homolog_motifs(data_df, homolog_motif_cols, predictor_params, verbose 
     selenocysteine_substitute = predictor_params["selenocysteine_substitute"]
     gap_substitute = predictor_params["gap_substitute"]
     chunk_size = predictor_params["homolog_score_chunk_size"]
-    cols = list(data_df.columns)
 
     scores = score_motifs_parallel(motif_seqs_2d, conditional_matrices, weights_tuple, standardization_coefficients,
                                    chunk_size, filters, selenocysteine_substitute, gap_substitute)
@@ -239,12 +312,19 @@ def score_homolog_motifs(data_df, homolog_motif_cols, predictor_params, verbose 
         data_df[model_score_col] = col_scores
         model_score_cols.append(model_score_col)
 
-    # Reorder columns so model scores are beside homolog motif sequences
+    # Collapse to best homolog motifs
+    print(f"\t\tCollapsing to best homolog motifs...")
+    data_df, homolog_id_cols, homolog_motif_cols, model_score_cols = collapse_to_best(data_df, homolog_id_cols,
+                                                                                      homolog_motif_cols,
+                                                                                      model_score_cols)
+
+    # Reorder columns so model scores are beside homolog mostif sequences
     print(f"\t\tReordering dataframe...") if verbose else None
+    cols = list(data_df.columns)
     for cumulative_displacement, (motif_col, score_col) in enumerate(zip(homolog_motif_cols, model_score_cols)):
         insertion_idx = cols.index(motif_col) + cumulative_displacement + 1
         cols.insert(insertion_idx, score_col)
 
     data_df = data_df[cols]
 
-    return data_df
+    return data_df, homolog_id_cols, homolog_motif_cols, model_score_cols
