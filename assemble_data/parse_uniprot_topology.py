@@ -86,13 +86,13 @@ def get_topological_domains(path = None):
                                 topological_feature_tuple = (feature_type, description, begin_position, end_position)
                                 topological_features.append(topological_feature_tuple)
                             else:
-                                print(f"Entry {i}: couldn't find @position tag for begin/end in topology: {description}")
+                                print(f"\t\tEntry {i}: couldn't find @position tag for begin/end in topology: {description}")
                         else:
-                            print(f"Entry {i}: couldn't find location tag for begin/end in topology: {description}")
+                            print(f"\t\tEntry {i}: couldn't find location tag for begin/end in topology: {description}")
                 else:
-                    print(f"Entry {i}: could not find feature type for a feature in features")
+                    print(f"\t\tEntry {i}: could not find feature type for a feature in features")
             else:
-                print(f"Entry {i}: a feature ({feature}) was not a dictionary; it was skipped")
+                print(f"\t\tEntry {i}: a feature ({feature}) was not a dictionary; it was skipped")
 
         # Parse sequence and assign data to accessions only if topological domains are listed (saves memory)
         if len(topological_features) > 0:

@@ -51,7 +51,7 @@ def main(predictor_params = predictor_params):
             all_motif_cols.extend(classical_motif_cols)
 
             # Apply bait specificity scoring of discovered motifs
-            print(f"Assigning specificity scores...")
+            print(f"\tAssigning specificity scores...")
             chunk_df = apply_specificity_scores(chunk_df, all_motif_cols, predictor_params)
 
             # Get homolog seq col names
@@ -61,6 +61,7 @@ def main(predictor_params = predictor_params):
                     homolog_seq_cols.append(col)
 
             # Separate dataframe by whether entries have any homologs and motifs to score
+            print(f"\tSeparating dataframe into entries with or without homologs...")
             contains_homolog = np.full(shape=len(chunk_df), fill_value=False, dtype=bool)
             for homolog_seq_col in homolog_seq_cols:
                 col_contains_homolog = chunk_df[homolog_seq_col].notna()
@@ -83,12 +84,15 @@ def main(predictor_params = predictor_params):
             df_with_homologs, homolog_motif_cols = evaluate_homologs(df_with_homologs, all_motif_cols, homolog_seq_cols)
 
             # Score homologous motifs
+            print("\tScoring homologous motifs...")
             df_with_homologs = score_homolog_motifs(df_with_homologs, homolog_motif_cols, predictor_params)
 
             # Apply bait specificity scoring to homologous motifs
+            print("\tApplying specificity scores to homologous motifs...")
             df_with_homologs = apply_specificity_scores(df_with_homologs, homolog_motif_cols, predictor_params)
 
             # Recombine dataframes
+            print("\tRejoining split dataframe...")
             df_with_homologs = df_with_homologs.reset_index(drop=True)
             df_without_homologs = df_without_homologs.reset_index(drop=True)
 
@@ -97,6 +101,7 @@ def main(predictor_params = predictor_params):
             chunk_df.drop(seq_col, axis=1, inplace=True)
 
             # Get topology for predicted motifs
+            print("\tGetting motif topologies...")
             chunk_df = predict_topology(chunk_df, all_motif_cols, predictor_params)
 
             chunk_dfs.append(chunk_df)

@@ -87,7 +87,7 @@ def apply_specificity_scores(protein_seqs_df, motif_cols, predictor_params=predi
     results = {}
 
     # Parallel processing of specificity score calculation
-    print(f"\tCalculating specificity scores in parallel...")
+    print(f"\t\tCalculating specificity scores in parallel...")
     pool = multiprocessing.Pool()
 
     for chunk_results in pool.map(partial_evaluator, seq_chunk_generator(protein_seqs_df, motif_cols)):
@@ -107,16 +107,14 @@ def apply_specificity_scores(protein_seqs_df, motif_cols, predictor_params=predi
     # Parse and reorder the results; assumes row order is the same as the input dataframe
     cols = protein_seqs_df.columns.copy()
     for motif_col, specificity_score_col, valid_specificity_scores in zip(motif_cols, results.keys(), results.values()):
-        print("\t---", f"\n\tParsing the data for specificity score col: {specificity_score_col}...")
+        print("\t\tParsing the data for specificity score col: {specificity_score_col}...")
         if valid_specificity_scores is not None:
             # Get mask for reapplying valid scores to whole column
-            print(f"\tFinding mask to apply values back onto the dataframe")
             not_nan = protein_seqs_df[motif_col].notna().to_numpy()
             not_blank = protein_seqs_df[motif_col].ne("").to_numpy()
             valid_mask = np.logical_and(not_nan, not_blank)
 
             # Apply valid scores onto an expanded column using the mask
-            print(f"\tApplying to dataframe...")
             specificity_scores = np.full(shape=len(protein_seqs_df), fill_value=np.nan, dtype=float)
             specificity_scores[valid_mask] = valid_specificity_scores
             protein_seqs_df[specificity_score_col] = specificity_scores
@@ -126,9 +124,7 @@ def apply_specificity_scores(protein_seqs_df, motif_cols, predictor_params=predi
             cols = cols.insert(motif_col_idx+2, specificity_score_col)
 
     # Apply dataframe reordering
-    print(f"\tReordering dataframe...")
+    print(f"\t\tReordering dataframe...")
     protein_seqs_df = protein_seqs_df[cols]
-
-    print(f"\t---", f"\n\tDone!")
 
     return protein_seqs_df

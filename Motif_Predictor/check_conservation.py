@@ -86,7 +86,7 @@ def evaluate_homologs(data_df, motif_seq_cols, homolog_seq_cols):
 	'''
 
 	# Generate tuples of motif columns and sequences to be used for similarity analysis
-	print("Preparing homolog and motif seqs for similarity analysis...")
+	print("\tPreparing homolog and motif seqs for similarity analysis...")
 	homolog_motif_cols = []
 	homolog_motif_col_prefixes = []
 	seqs_tuples = []
@@ -115,7 +115,7 @@ def evaluate_homologs(data_df, motif_seq_cols, homolog_seq_cols):
 	# Run the similarity analysis
 	row_indices = data_df.index
 	homologous_motifs_df = pd.DataFrame(index = row_indices)
-	with trange(len(seqs_tuples), desc="Evaluating motif homolog similarities by column pair...") as pbar:
+	with trange(len(seqs_tuples), desc="\tEvaluating motif homolog similarities by column pair...") as pbar:
 		pool = multiprocessing.Pool()
 		for result in pool.imap(motif_similarity, seqs_tuples):
 			homologous_motifs, homologous_similarities, homologous_identities, col_names, insertion_idx = result

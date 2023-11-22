@@ -35,15 +35,15 @@ def predict_chunk(chunk_df, motif_col, topology_trim_begin, topology_trim_end, t
             # Retrieve topological domains
             current_topological_domains = topological_domains.get(uniprot_swissprot_id)
             if current_topological_domains is None:
-                print(f"\tCould not find topological domains for {uniprot_swissprot_id}") if verbose else None
+                print(f"\t\tCould not find topological domains for {uniprot_swissprot_id}") if verbose else None
                 continue
             else:
-                print(f"\tFound topological domains for {uniprot_swissprot_id}") if verbose else None
+                print(f"\t\tFound topological domains for {uniprot_swissprot_id}") if verbose else None
 
             # Retrieve sequence matching topological domain begin/end indices
             sequence = sequences.get(uniprot_swissprot_id)
             if sequence is None:
-                print(f"\tCould not find matching sequence for {uniprot_swissprot_id}; skipping...")
+                print(f"\t\tCould not find matching sequence for {uniprot_swissprot_id}; skipping...")
                 continue
 
             # Find the corresponding index of the motif in the protein sequence
@@ -51,10 +51,10 @@ def predict_chunk(chunk_df, motif_col, topology_trim_begin, topology_trim_end, t
             trimmed_motif_seq = motif_seq[topology_trim_begin: motif_len - topology_trim_end]
             trimmed_begin = sequence.find(trimmed_motif_seq)
             if trimmed_begin == -1:
-                print(f"\t\tFailed to find trimmed motif ({trimmed_motif_seq}) in {uniprot_swissprot_id}")
+                print(f"\t\t\tFailed to find trimmed motif ({trimmed_motif_seq}) in {uniprot_swissprot_id}")
                 continue
             else:
-                print(f"\t\tSucceeded in finding trimmed motif ({trimmed_motif_seq}) in {uniprot_swissprot_id}")
+                print(f"\t\t\tSucceeded in finding trimmed motif ({trimmed_motif_seq}) in {uniprot_swissprot_id}")
             trimmed_end = trimmed_begin + len(trimmed_motif_seq)
 
             # Determine which topological domain the motif exists within
