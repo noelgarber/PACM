@@ -44,7 +44,9 @@ def main(predictor_params = predictor_params):
         chunk_dfs = []
         for i, chunk_df in enumerate(pd.read_csv(path, chunksize=chunk_size)):
             print(f"Processing chunk #{i+1} of {path}...")
+
             # Apply conditional matrices motif scoring
+            print(f"\tAssigning motif scores...")
             results = score_proteins(chunk_df, predictor_params)
             chunk_df, novel_motif_cols, novel_score_cols, classical_motif_cols, classical_score_cols = results
             all_motif_cols = novel_motif_cols.copy()
