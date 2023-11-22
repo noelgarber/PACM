@@ -2,6 +2,8 @@
 
 import numpy as np
 import pandas as pd
+import os
+import psutil
 from Motif_Predictor.score_protein_motifs import score_proteins
 from Motif_Predictor.specificity_score_assigner import apply_specificity_scores
 from Motif_Predictor.check_conservation import evaluate_homologs
@@ -41,6 +43,7 @@ def main(predictor_params = predictor_params):
 
         # Load dataframe in a memory-efficient manner
         chunk_size = np.ceil(row_count / chunk_count)
+        cache_paths = []
         chunk_dfs = []
         for i, chunk_df in enumerate(pd.read_csv(path, chunksize=chunk_size)):
             print(f"Processing chunk #{i+1} of {path}...")
@@ -57,7 +60,7 @@ def main(predictor_params = predictor_params):
             chunk_df = apply_specificity_scores(chunk_df, all_motif_cols, predictor_params)
 
             # Get topology for predicted motifs
-            print("\tGetting motif topologies...")
+            #print("\tGetting motif topologies...")
             #chunk_df = predict_topology(chunk_df, all_motif_cols, predictor_params)
 
             # Get homolog seq col names
@@ -81,10 +84,20 @@ def main(predictor_params = predictor_params):
             print("\tApplying specificity scores to homologous motifs...")
             chunk_df = apply_specificity_scores(chunk_df, homolog_motif_cols, predictor_params)
 
+            # Dump current data to save memory; will be concatenated later
+            print("\tCaching current chunk to save memory...")
             chunk_df.drop(seq_col, axis=1, inplace=True)
-            chunk_dfs.append(chunk_df)
+            temp_path = os.path.join(os.getcwd(), f"temp_df_dump_{i}.csv")
+            chunk_df.to_csv(temp_path)
+            cache_paths.append(temp_path)
+            del chunk_df
 
-        protein_seqs_df = pd.concat(chunk_dfs, ignore_index=True)
+        print("Concatenating cached dataframes...")
+        cache_dfs = []
+        for cache_path in cache_paths:
+            df = pd.read_csv(cache_path)
+            cache_dfs.append(df)
+        protein_seqs_df = pd.concat(cache_dfs, ignore_index=True)
 
         # Save scored data
         output_path = path[:-4] + "_scored.csv"
