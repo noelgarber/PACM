@@ -107,7 +107,6 @@ def apply_specificity_scores(protein_seqs_df, motif_cols, predictor_params=predi
     # Parse and reorder the results; assumes row order is the same as the input dataframe
     cols = protein_seqs_df.columns.copy()
     for motif_col, specificity_score_col, valid_specificity_scores in zip(motif_cols, results.keys(), results.values()):
-        print("\t\tParsing the data for specificity score col: {specificity_score_col}...")
         if valid_specificity_scores is not None:
             # Get mask for reapplying valid scores to whole column
             not_nan = protein_seqs_df[motif_col].notna().to_numpy()
