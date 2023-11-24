@@ -64,7 +64,7 @@ def main(predictor_params = predictor_params):
             #chunk_df = predict_topology(chunk_df, all_motif_cols, predictor_params)
 
             # Get homolog seq col names
-            homolog_id_cols = []
+            homolog_id_cols = [] # not currently used, but leaving it here for future use
             homolog_seq_cols = []
             for col in chunk_df.columns:
                 if "homolog" in col and "seq" in col:
@@ -77,7 +77,7 @@ def main(predictor_params = predictor_params):
 
             # Score homologous motifs
             print("\tScoring homologous motifs...")
-            chunk_df, _, homolog_motif_cols, _ = score_homolog_motifs(chunk_df, homolog_id_cols, homolog_motif_cols,
+            chunk_df, _, homolog_motif_cols, _ = score_homolog_motifs(chunk_df, homolog_motif_cols,
                                                                       predictor_params)
 
             # Apply bait specificity scoring to homologous motifs
