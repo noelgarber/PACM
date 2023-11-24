@@ -30,6 +30,7 @@ Old*
 *proteome_dataset*.csv
 *uniprot_sprot*
 *.xsd
+*temp_df_dump*
 
 #Ignore PyCharm idea files
 *.idea
