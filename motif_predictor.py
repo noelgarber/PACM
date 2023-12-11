@@ -73,12 +73,13 @@ def main(predictor_params = predictor_params):
                     homolog_id_cols.append(col)
 
             # Evaluate motif homology
-            chunk_df, homolog_motif_cols = evaluate_homologs(chunk_df, all_motif_cols, homolog_seq_cols)
+            homology_results = evaluate_homologs(chunk_df, all_motif_cols, homolog_seq_cols)
+            chunk_df, homolog_motif_cols, homolog_motif_col_groups = homology_results
 
             # Score homologous motifs
             print("\tScoring homologous motifs...")
             chunk_df, _, homolog_motif_cols, _ = score_homolog_motifs(chunk_df, homolog_motif_cols,
-                                                                      predictor_params)
+                                                                      homolog_motif_col_groups, predictor_params)
 
             # Apply bait specificity scoring to homologous motifs
             print("\tApplying specificity scores to homologous motifs...")
@@ -104,6 +105,12 @@ def main(predictor_params = predictor_params):
         protein_seqs_df.to_csv(output_path)
         print(f"Saved scored motifs to {output_path}")
         del protein_seqs_df, chunk_dfs
+
+        # Delete temporary files
+        print(f"Deleting temporary files...")
+        for cache_path in cache_paths:
+            os.remove(cache_path)
+        print(f"Done!")
 
 if __name__ == "__main__":
     main()

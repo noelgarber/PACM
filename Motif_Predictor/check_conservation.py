@@ -81,14 +81,16 @@ def evaluate_homologs(data_df, motif_seq_cols, homolog_seq_cols):
 		homolog_seq_cols (list):   col names with homolog protein sequences to be searched
 
 	Returns:
-		data_df (pd.DataFrame):    dataframe with added motif homology columns
-		homolog_motif_cols (list): list of column names containing homologous motif sequences
+		data_df (pd.DataFrame):          dataframe with added motif homology columns
+		homolog_motif_cols (list):       list of column names containing homologous motif sequences
+		homolog_motif_col_groups (list): list of lists of grouped column names for each homologous motif
 	'''
 
 	# Generate tuples of motif columns and sequences to be used for similarity analysis
 	print("\tPreparing homolog and motif seqs for similarity analysis...")
-	homolog_motif_cols = []
+	homolog_motif_col_groups = []
 	homolog_motif_col_prefixes = []
+	homolog_motif_cols = []
 	seqs_tuples = []
 	for homolog_seq_col in homolog_seq_cols:
 		homolog_seq_col_elements = homolog_seq_col.split("_")
@@ -102,21 +104,25 @@ def evaluate_homologs(data_df, motif_seq_cols, homolog_seq_cols):
 
 		for i, motif_seq_col in enumerate(motif_seq_cols):
 			motif_seqs = data_df[motif_seq_col].fillna("").to_list()
-			col_prefix = f"{taxid}_homolog_{homolog_number}_vs_{motif_seq_col}"
-			if col_prefix not in homolog_motif_col_prefixes:
-				homolog_motif_col_prefixes.append(col_prefix)
-				cols = [col_prefix + "_matching_motif", col_prefix + "_motif_similarity", col_prefix + "_motif_identity"]
+			prefix = f"{taxid}_homolog_{homolog_number}_vs_{motif_seq_col}"
+			if prefix not in homolog_motif_col_prefixes:
+				homolog_motif_col_prefixes.append(prefix)
+				cols = [prefix + "_matching_motif", prefix + "_motif_similarity", prefix + "_motif_identity"]
 				seqs_tuples.append((motif_seqs, homolog_seqs, cols, current_insertion_point))
-				homolog_motif_cols.append(col_prefix + "_matching_motif")
+				homolog_motif_cols.append(cols[0])
+				homolog_motif_col_groups.append(cols)
 				current_insertion_point += 3
 			else:
-				print(f"Caution: duplicate found for column prefix {col_prefix}")
+				print(f"Caution: duplicate found for column prefix {prefix}")
+
+	baseline_cols = list(data_df.columns)
 
 	# Run the similarity analysis
 	row_indices = data_df.index
 	homologous_motifs_df = pd.DataFrame(index = row_indices)
+
+	pool = multiprocessing.Pool()
 	with trange(len(seqs_tuples), desc="\tEvaluating motif homolog similarities by column pair...") as pbar:
-		pool = multiprocessing.Pool()
 		for result in pool.imap(motif_similarity, seqs_tuples):
 			homologous_motifs, homologous_similarities, homologous_identities, col_names, insertion_idx = result
 			homologous_motifs_df.loc[row_indices,col_names[0]] = homologous_motifs
@@ -149,4 +155,4 @@ def evaluate_homologs(data_df, motif_seq_cols, homolog_seq_cols):
 
 	data_df = data_df[reordered_cols]
 
-	return data_df, homolog_motif_cols
+	return (data_df, homolog_motif_cols, homolog_motif_col_groups)
