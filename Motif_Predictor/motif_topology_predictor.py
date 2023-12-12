@@ -89,25 +89,30 @@ def predict_chunk(motifs_ids_tuple, topology_trim_begin, topology_trim_end, topo
 
     return (domain_types_vals, domain_descriptions_vals)
 
-def predict_topology(data_df, motif_cols, predictor_params = predictor_params):
+def predict_topology(data_df, motif_cols, predictor_params = predictor_params,
+                     topological_domains = None, sequences = None):
     '''
     Main function to predict motif topologies
 
     Args:
-        data_df (pd.DataFrame):   main dataframe containing protein sequences and predicted motifs
-        motif_cols (list):        list of column names referring to motif sequences for topological analysis
-        predictor_params (dict):  dictionary of user-defined parameters for the motif prediction workflow
+        data_df (pd.DataFrame):     main dataframe containing protein sequences and predicted motifs
+        motif_cols (list):          list of column names referring to motif sequences for topological analysis
+        predictor_params (dict):    dictionary of user-defined parameters for the motif prediction workflow
+        topological_domains (dict): dictionary of accession --> topological features list; if not given, is computed
+        sequences (dict):           dictionary of accession --> sequence; if not given, is computed
 
     Returns:
         data_df (pd.DataFrame):   data_df with topology columns added
     '''
 
-    uniprot_path = predictor_params["uniprot_path"]
     topology_trim_begin = predictor_params["topology_trim_begin"]
     topology_trim_end = predictor_params["topology_trim_end"]
     chunk_size = predictor_params["topology_chunk_size"]
 
-    topological_domains, sequences = get_topological_domains(path = uniprot_path)
+    if topological_domains is None or sequences is None:
+        uniprot_path = predictor_params["uniprot_path"]
+        topological_domains, sequences = get_topological_domains(path = uniprot_path)
+
     uniprot_ids = data_df["uniprot"]
 
     predict_partial = partial(predict_chunk, topology_trim_begin = topology_trim_begin,
