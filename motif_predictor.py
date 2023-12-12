@@ -44,7 +44,6 @@ def main(predictor_params = predictor_params):
         # Load dataframe in a memory-efficient manner
         chunk_size = np.ceil(row_count / chunk_count)
         cache_paths = []
-        chunk_dfs = []
         for i, chunk_df in enumerate(pd.read_csv(path, chunksize=chunk_size)):
             print(f"Processing chunk #{i+1} of {path}...")
 
@@ -60,8 +59,8 @@ def main(predictor_params = predictor_params):
             chunk_df = apply_specificity_scores(chunk_df, all_motif_cols, predictor_params)
 
             # Get topology for predicted motifs
-            #print("\tGetting motif topologies...")
-            #chunk_df = predict_topology(chunk_df, all_motif_cols, predictor_params)
+            print("\tGetting motif topologies...")
+            chunk_df = predict_topology(chunk_df, all_motif_cols, predictor_params)
 
             # Get homolog seq col names
             homolog_id_cols = [] # not currently used, but leaving it here for future use
@@ -104,7 +103,7 @@ def main(predictor_params = predictor_params):
         output_path = path[:-4] + "_scored.csv"
         protein_seqs_df.to_csv(output_path)
         print(f"Saved scored motifs to {output_path}")
-        del protein_seqs_df, chunk_dfs
+        del protein_seqs_df
 
         # Delete temporary files
         print(f"Deleting temporary files...")
