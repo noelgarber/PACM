@@ -8,8 +8,7 @@ from functools import partial
 from assemble_data.parse_uniprot_topology import get_topological_domains
 from Motif_Predictor.predictor_config import predictor_params
 
-def predict_chunk(motifs_ids_tuple, topology_trim_begin, topology_trim_end, topological_domains, sequences,
-                  verbose = False):
+def predict_chunk(motifs_ids_tuple, topology_trim_begin, topology_trim_end, topological_domains, sequences):
     '''
     Lower-level function that predicts and assigns topologies for motifs in a chunk of a dataframe
 
@@ -19,7 +18,6 @@ def predict_chunk(motifs_ids_tuple, topology_trim_begin, topology_trim_end, topo
         topology_trim_end (int):    number of residues at the end of the motif to ignore when assigning topology
         topological_domains (dict): dictionary of accession --> topological domains list
         sequences (dict):           dictionary of accession --> sequence
-        verbose (bool):             whether to print progress messages
 
     Returns:
         domain_types_vals (list):        list of topological domain types for each element in chunk_df
@@ -89,7 +87,7 @@ def predict_chunk(motifs_ids_tuple, topology_trim_begin, topology_trim_end, topo
     if len(domain_types_vals) != len(motif_seqs):
         raise Exception(f"Topology list (len={len(domain_type_vals)}) does not match chunk_df (len={len(motif_seqs)})")
 
-    return domain_types_vals, domain_descriptions_vals
+    return (domain_types_vals, domain_descriptions_vals)
 
 def predict_topology(data_df, motif_cols, predictor_params = predictor_params):
     '''
@@ -108,33 +106,37 @@ def predict_topology(data_df, motif_cols, predictor_params = predictor_params):
     topology_trim_begin = predictor_params["topology_trim_begin"]
     topology_trim_end = predictor_params["topology_trim_end"]
     chunk_size = predictor_params["topology_chunk_size"]
-    verbose = predictor_params["topology_verbose"]
 
     topological_domains, sequences = get_topological_domains(path = uniprot_path)
     uniprot_ids = data_df["uniprot"]
 
     predict_partial = partial(predict_chunk, topology_trim_begin = topology_trim_begin,
                               topology_trim_end = topology_trim_end, topological_domains = topological_domains,
-                              sequences = sequences, verbose = verbose)
+                              sequences = sequences)
 
-    for motif_col in motif_cols:
-        print(f"\tPredicting motif topologies for col: {motif_col}")
-        motif_seqs = data_df[motif_col]
+    pbar_len = round(len(data_df) / chunk_size) * len(motif_cols)
+    with trange(pbar_len, desc="\tPredicting motif topologies...") as pbar:
+        for motif_col in motif_cols:
+            motif_seqs = data_df[motif_col]
 
-        domain_types_vals = []
-        domain_descriptions_vals = []
+            domain_types_vals = []
+            domain_descriptions_vals = []
 
-        with trange(round(len(data_df) / chunk_size), desc="\tProcessing dataframe chunks...") as pbar:
-            for n, i in enumerate(range(0, len(data_df), chunk_size)):
-                chunk_tuple = (motif_seqs[i:i + chunk_size], uniprot_ids[i:i + chunk_size])
-                chunk_domain_types_vals, chunk_domain_descriptions_vals = predict_partial(chunk_tuple)
+            start_indices = range(0, len(data_df), chunk_size)
+            chunk_tuples = [(motif_seqs[i:i+chunk_size], uniprot_ids[i:i+chunk_size]) for i in start_indices]
 
+            pool = multiprocessing.Pool()
+
+            for result in pool.imap(predict_partial, chunk_tuples):
+                chunk_domain_types_vals, chunk_domain_descriptions_vals = result
                 domain_types_vals.extend(chunk_domain_types_vals)
                 domain_descriptions_vals.extend(chunk_domain_descriptions_vals)
-
                 pbar.update()
 
-        data_df.loc[:, motif_col + "_topology_type"] = domain_types_vals
-        data_df.loc[:, motif_col + "_topology_description"] = domain_descriptions_vals
+            pool.close()
+            pool.join()
+
+            data_df.loc[:, motif_col + "_topology_type"] = domain_types_vals
+            data_df.loc[:, motif_col + "_topology_description"] = domain_descriptions_vals
 
     return data_df
