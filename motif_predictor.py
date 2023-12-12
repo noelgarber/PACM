@@ -96,7 +96,11 @@ def main(predictor_params = predictor_params):
 
             # Dump current data to save memory; will be concatenated later
             print("\tCaching current chunk to save memory...")
+
+            pd.options.mode.chained_assignment = None  # suppress SettingWithCopyWarning, which has no effect
             chunk_df.drop(seq_col, axis=1, inplace=True)
+            pd.options.mode.chained_assignment = "warn" #restore to default
+
             temp_path = os.path.join(os.getcwd(), f"temp_df_dump_{i}.csv")
             chunk_df.to_csv(temp_path)
             cache_paths.append(temp_path)
