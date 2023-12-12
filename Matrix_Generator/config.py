@@ -50,33 +50,33 @@ amino_acids_phos = ("D", "E", "R", "H", "K", "S", "T", "N", "Q", "C", "G", "P", 
 
 image_params = {"use_cached_data": False,
                 "cached_data_path": None,
-                "output_folder": "/home/user/example_folder/Sharpened and Cleaned - Natural Only/Image_Data",
+                "output_folder": "/home/user/example_folder/SPOT Peptide Screens/Straightened_TIFFs/Sharpened and Cleaned/Image_Data",
                 "add_peptide_seqs": True,
                 "peptide_seq_cols": ["Phos_Sequence", "No_Phos_Sequence", "BJO_Sequence"],
                 "save_pickled_data": True,
                 "buffer_width": 2,
-                "tiff_paths": ["/home/user/example_folder/Sharpened and Cleaned - Natural Only/1_Major_Screen",
-                               "/home/user/example_folder/Sharpened and Cleaned - Natural Only/4_Novel_Motif_Screen"],
+                "tiff_paths": ["/home/user/example_folder/SPOT Peptide Screens/Straightened_TIFFs/Sharpened and Cleaned/1_ExampleA",
+                               "/home/user/example_folder/SPOT Peptide Screens/Straightened_TIFFs/Sharpened and Cleaned/2_ExampleB"],
                 "pixel_encoding_base": 1,
                 "add_peptide_names": True,
                 "multiline_cols": False,
-                "peptide_names_paths": ["/home/user/example_folder/Sharpened and Cleaned - Natural Only/1_Major_Screen_Coordinate_Peptide_Names_and_Sequences.csv",
-                                        "/home/user/example_folder/Sharpened and Cleaned - Natural Only/4_Novel_Proteome_Motifs_Coordinate_Peptide_Names_and_Sequences.csv"],
-                "processed_image_paths": ["/home/user/example_folder/Sharpened and Cleaned - Natural Only/Image_Data/1_Major_Screen",
-                                          "/home/user/example_folder/Sharpened and Cleaned - Natural Only/Image_Data/4_Novel_Motif_Screen"],
-                "grid_dimensions": [[28, 6], [28, 2], [28, 4], [28, 4]],
+                "peptide_names_paths": ["/home/user/example_folder/SPOT Peptide Screens/Straightened_TIFFs/Sharpened and Cleaned/1_ExampleA_Coordinate_Peptide_Names_and_Sequences.csv",
+                                        "/home/user/example_folder/SPOT Peptide Screens/Straightened_TIFFs/Sharpened and Cleaned/2_ExampleB_Coordinate_Peptide_Names_and_Sequences.csv"],
+                "processed_image_paths": ["/home/user/example_folder/SPOT Peptide Screens/Straightened_TIFFs/Sharpened and Cleaned/Image_Data/1_ExampleA",
+                                          "/home/user/example_folder/SPOT Peptide Screens/Straightened_TIFFs/Sharpened and Cleaned/Image_Data/2_ExampleB"],
+                "grid_dimensions": [[28, 6], [28, 4]],
                 "circle_index_threshold": 1.4,
-                "last_valid_coords": ["F1", "B15", "D27", "D8"],
-                "ordered_probe_names": ["Secondary-only", "ABC1", "GHI3", "DEF2"],
+                "last_valid_coords": ["F1", "D8"],
+                "ordered_probe_names": ["Secondary-only", "GHI3", "DEF2", "ABC1"],
                 "control_probe_name": "Secondary-only",
                 "control_multiplier": 5,
                 "standardize_within_datasets": True,
-                "intra_dataset_controls": ["JKL4"],
+                "intra_dataset_controls": ["OSBP"],
                 "max_bait_mean_col": "Max_Bait_Background-Adjusted_Mean",
                 "standardize_between_datasets": True,
-                "inter_dataset_control": "JKL4",
+                "inter_dataset_control": "OSBP",
                 "enforce_positive_control_multiple": True,
-                "positive_control": "JKL4",
+                "positive_control": "OSBP",
                 "positive_control_multiple": 0.05}
 
 
@@ -89,12 +89,13 @@ image_params = {"use_cached_data": False,
 
 aa_charac_dict = {"Acidic": ["D", "E"],
                   "Basic": ["K", "R"],
-                  "SerThr": ["S", "T", "B", "J"],
-                  "Aromatic": ["F", "Y", "W", "O"],
+                  "ST": ["S", "T", "B", "J"],
+                  "Phenyl": ["F", "Y", "W", "O"],
                   "Aliphatic": ["A", "V", "I", "L", "M"],
                   "Polar": ["N", "Q", "H", "C"],
                   "Proline": ["P"],
-                  "Glycine": ["G"]}
+                  "Glycine": ["G"],
+                  "Indole": ["W"]}
 
 ''' Amino acid equivalence dict (more closely related), used for constructing the forbidden residues matrix; 
     operates on the premise of "if this residue is forbidden, those residues are also likely to be forbidden" '''
@@ -123,22 +124,6 @@ aa_equivalence_dict = {"D": ("D", "E"),
                        "P": ("P"),
                        "G": ("G", "A")}
 
-possible_conditional_weights = [np.array([0.5]),
-                                np.array([0.5]),
-                                np.array([0.5]),
-                                np.array([0.5]),
-                                np.array([1.0, 0.5]),
-                                np.array([2.0, 1.0, 0.5]),
-                                np.array([1.0, 3.0, 2.0, 0.5]),
-                                np.array([1.0, 3.0, 2.0]),
-                                np.array([1.0, 3.0, 2.0]),
-                                np.array([1.0, 3.0, 2.0]),
-                                np.array([1.0, 3.0, 2.0]),
-                                np.array([0.0, 1.0]),
-                                np.array([1.0, 2.0, 0.5]),
-                                np.array([0.5, 0.0]),
-                                np.array([0.0])]
-
 ''' General parameters included in general_params: 
         "motif_length":           length of the peptide motif for which matrices are being generated
         "output_folder":          folder to save matrices and scored data into; user is prompted if None
@@ -149,7 +134,7 @@ possible_conditional_weights = [np.array([0.5]),
         "position_thresholds":    range of values for optimization, as a list, for thresholding points values '''
 
 general_params = {"motif_length": 15,
-                  "output_folder": "/home/user/example_folder/Sharpened and Cleaned - Natural Only/Matrix_Data",
+                  "output_folder": "/home/user/example_folder/SPOT Peptide Screens/Straightened_TIFFs/Sharpened and Cleaned/Matrix_Data",
                   "make_calls": True,
                   "aa_charac_dict": aa_charac_dict,
                   "convert_phospho": True,
@@ -177,19 +162,12 @@ data_params = {"bait": None,
         "points_assignment_mode": if "continuous", points are assigned according to a rational function that puts the 
                                   highest weight on midrange binders and a moderate weight on high-end binders; 
                                   if "thresholds", points are assigned according to thresholds_points_dict
-        "continuous_constants":   dict of constants L, k, and x_midpoint for the sigmoid (logistic) function; this is
-                                  only required if points_assignment_mode is set to "continuous"; 
-                                  when x_midpoint is None, the function will use half of the x-value at maximum signal
         "amino_acids":            amino acid alphabet to use, as a list of single-letter codes
         "include_phospho":        whether to include phospho-residues in matrices; collapses to non-phospho if False
         "min_members":            the minimum number of peptides belonging to a type-position rule for a conditional
                                   matrix to be constructed; for cases where not enough peptides are in source data, 
                                   the conditional matrix defaults to a standard matrix using all passing peptides
         "clear_filtering_column": whether to clear the column to which a conditional matrix's rule refers
-        "penalize_negatives":     whether to use negative peptides to decrement the matrix for disfavoured residues
-        "use_sigmoid":            whether to scale matrix values using a sigmoid function
-        "sigmoid_strength":       the strength of the sigmoid function scaling; defaults to 1
-        "sigmoid_inflection":     threshold where matrix values are scaled larger when above or smaller when below
         "optimize_weights":       whether to permute weights to get optimally accurate results; takes a long time
         "possible_weights":       possible weights values to permute for optimization 
         "chunk_size":             parallel processing chunk size for weights optimization if optimize_weights is True
@@ -202,29 +180,24 @@ data_params = {"bait": None,
 
 matrix_params = {"thresholds_points_dict": None,
                  "points_assignment_mode": "continuous",
-                 "continuous_constants": {"L": 1, "k": 5, "x_midpoint": None},
                  "amino_acids": amino_acids_phos,
                  "include_phospho": False,
-                 "min_members": 10,
+                 "min_members": 20,
                  "barnard_alpha": 0.2,
-                 "penalize_negatives": True,
-                 "use_sigmoid": True,
-                 "sigmoid_strength": 0.5,
-                 "sigmoid_inflection": 0.3,
+                 "suboptimal_points_mode": "counts",
+                 "min_aa_entries": 4,
+                 "replace_forbidden": True,
                  "optimize_weights": True,
                  "possible_weights": None,
                  "chunk_size": 1000,
-                 "position_weights": np.array([1,1,1,1,1,
+                 "position_weights": np.array([0.5,0.5,0.5,0.5,0.5,
                                                1,2,
                                                3,3,3,3,
                                                0,
                                                1,
                                                0,0]),
-                 "use_r2": False,
-                 "forbidden_threshold": 3,
-                 "slice_scores_subsets": np.array([5,2,4,1,1,2]),
-                 "nn_index_handling": {"collapse_indices": [(0,4)],
-                                       "remove_indices": [7, 9, 10]}}
+                 "objective_mode": "accuracy",
+                 "forbidden_threshold": 3}
 
 
 ''' ----------------------------------------------------------------------------------------------------------------
@@ -238,8 +211,8 @@ matrix_params = {"thresholds_points_dict": None,
         "bait_pass_col":    name of column containing pass/fail information for whether peptides bind to the baits
         "pass_str":         string representing a pass in bait_pass_col, e.g. "Yes" '''
 
-comparator_info = {"comparator_set_1": ["ABC1"],
-                   "comparator_set_2": ["DEF2", "GHI3"],
+comparator_info = {"comparator_set_1": ["GHI3"],
+                   "comparator_set_2": ["ABC1", "DEF2"],
                    "seq_col": "BJO_Sequence",
                    "bait_pass_col": "One_Passes",
                    "pass_str": "Yes"}
@@ -259,19 +232,24 @@ comparator_info = {"comparator_set_1": ["ABC1"],
         "plus_threshold":            positive log2fc threshold to be considered "specific"
         "minus_threshold":           negative log2fc threshold to be considered "specific"
         "fit_mode":                  can be either "f1" (fits weights to f1-score), "mcc" (fits to MCC), or "accuracy"
-        "standardize_matrix":        whether to standardize matrix values per col; set to True if applying weights '''
+        "standardize_matrix":        whether to standardize matrix values per col; set to True if applying weights
+        "matrix_alpha":              p-value threshold for log2fc values before a nonzero value can be added to the 
+                                     matrix; this is generally much more permissive than significance testing, and 
+                                     serves only to remove obvious noise '''
 
 specificity_params = {"motif_length": 15,
                       "include_phospho": False,
                       "predefined_weights": None,
                       "optimize_weights": True,
+                      "optimize_separately": False,
                       "control_peptide_index": 0,
-                      "control_peptide_threshold": 0.2,
-                      "output_folder": "/home/user/example_folder/Sharpened and Cleaned - Natural Only/Matrix_Data",
+                      "control_peptide_threshold": 0.3,
+                      "output_folder": "/home/user/example_folder/SPOT Peptide Screens/Straightened_TIFFs/Sharpened and Cleaned/Matrix_Data",
                       "chunk_size": 1000,
-                      "ignore_positions": (11, 14),
+                      "ignore_positions": (14,),
                       "max_bait_mean_col": "Max_Bait_Background-Adjusted_Mean",
-                      "plus_threshold": 0.5,
-                      "minus_threshold": -0.5,
+                      "plus_threshold": 1.0,
+                      "minus_threshold": -1.0,
                       "fit_mode": "f1",
-                      "standardize_matrix": True}
+                      "standardize_matrix": True,
+                      "matrix_alpha": 0.25}
