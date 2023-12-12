@@ -25,6 +25,16 @@ def main(predictor_params = predictor_params):
         protein_seqs_df (pd.DataFrame): dataframe of scored protein sequences
     '''
 
+    # Optionally pre-parse topological domains from Uniprot instead of doing so for each chunk
+    parse_topologies_upfront = predictor_params.get("parse_topologies_upfront")
+    if parse_topologies_upfront:
+        print("Parsing topologies upfront from Uniprot...")
+        from assemble_data.parse_uniprot_topology import get_topological_domains
+        uniprot_path = predictor_params["uniprot_path"]
+        topological_domains, sequences = get_topological_domains(path = uniprot_path)
+    else:
+        topological_domains, sequences = None, None
+
     # Get CSV paths with protein sequences to score
     protein_seqs_path = predictor_params["protein_seqs_path"]
     if isinstance(protein_seqs_path, list):
@@ -60,7 +70,7 @@ def main(predictor_params = predictor_params):
 
             # Get topology for predicted motifs
             print("\tGetting motif topologies...")
-            chunk_df = predict_topology(chunk_df, all_motif_cols, predictor_params)
+            chunk_df = predict_topology(chunk_df, all_motif_cols, predictor_params, topological_domains, sequences)
 
             # Get homolog seq col names
             homolog_id_cols = [] # not currently used, but leaving it here for future use
