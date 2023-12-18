@@ -65,8 +65,10 @@ def main(predictor_params = predictor_params):
             all_motif_cols.extend(classical_motif_cols)
 
             # Apply bait specificity scoring of discovered motifs
-            print(f"\tAssigning specificity scores...")
-            chunk_df = apply_specificity_scores(chunk_df, all_motif_cols, predictor_params)
+            assign_specificities = predictor_params["assign_specificity_scores"]
+            if assign_specificities:
+                print(f"\tAssigning specificity scores...")
+                chunk_df = apply_specificity_scores(chunk_df, all_motif_cols, predictor_params)
 
             # Get topology for predicted motifs
             print("\tGetting motif topologies...")
@@ -91,8 +93,9 @@ def main(predictor_params = predictor_params):
                                                                       homolog_motif_col_groups, predictor_params)
 
             # Apply bait specificity scoring to homologous motifs
-            print("\tApplying specificity scores to homologous motifs...")
-            chunk_df = apply_specificity_scores(chunk_df, homolog_motif_cols, predictor_params)
+            if assign_specificities:
+                print("\tApplying specificity scores to homologous motifs...")
+                chunk_df = apply_specificity_scores(chunk_df, homolog_motif_cols, predictor_params)
 
             # Dump current data to save memory; will be concatenated later
             print("\tCaching current chunk to save memory...")
