@@ -144,6 +144,30 @@ def optimize_points_2d(points_2d, value_range, mode, actual_truths, signal_value
 
     return points_optimizer.best_array, points_optimizer.x
 
+def thresholds_accuracy(thresholds, positive_scores, suboptimal_scores, forbidden_scores, actual_truths):
+    '''
+    Function to check the accuracy of a set of thresholds when applied to the set of scores
+
+    Args:
+        thresholds (np.ndarray):        array of (positive_threshold, suboptimal_threshold, forbidden_threshold)
+        positive_scores (np.ndarray):   positive element scores (weighted or unweighted)
+        suboptimal_scores (np.ndarray): suboptimal element scores (weighted or unweighted)
+        forbidden_scores (np.ndarray):  forbidden element scores (weighted or unweighted)
+        actual_truths (np.ndarray):     boolean calls for each peptide based on whether the bind the protein bait(s)
+
+    Returns:
+        accuracy (float): accuracy of the calls derived from the given thresholds
+    '''
+
+    positive_bools = np.greater_equal(positive_scores, thresholds[0])
+    suboptimal_bools = np.less_equal(suboptimal_scores, thresholds[1])
+    forbidden_bools = np.less_equal(forbidden_scores, thresholds[2])
+
+    total_bools = np.logical_and(positive_bools, np.logical_and(suboptimal_bools, forbidden_bools))
+    accuracy = np.mean(np.equal(total_bools, actual_truths))
+
+    return accuracy
+
 
 ''' ----------------------------------------------------------------------------------------------------------------
                                            Main ScoredPeptideResult Object
@@ -281,29 +305,72 @@ class ScoredPeptideResult:
         self.weighted_suboptimals = self.weighted_suboptimals_2d.sum(axis=1)
         self.weighted_forbiddens = self.weighted_forbiddens_2d.sum(axis=1)
 
-        # Get total scores
+        # Get total raw and standardized scores
         self.weighted_scores = np.multiply(combined_2d, combined_weights).sum(axis=1)
 
         coefficient_a = self.weighted_scores.min()
         self.standardized_weighted_scores = self.weighted_scores - coefficient_a
-
         coefficient_b = self.standardized_weighted_scores.max()
         self.standardized_weighted_scores = self.standardized_weighted_scores / coefficient_b
-
-        print(f"Done! objective function output = {best_objective_output}", "\n---")
-
-        # Save standardization coefficients
-        standardization_coefficients = (coefficient_a, coefficient_b)
-        coefficients_path = os.getcwd().rsplit("/")[0] if coefficients_path is None else coefficients_path
-        coefficients_path = os.path.join(coefficients_path, "standardization_coefficients.pkl")
-        with open(coefficients_path, "wb") as f:
-            pickle.dump(standardization_coefficients, f)
 
         # Plot precisions and recalls for different thresholds
         precisions, recalls, thresholds = precision_recall_curve(actual_truths, self.standardized_weighted_scores)
         threshold_predictions = np.greater_equal(self.standardized_weighted_scores, thresholds[:, np.newaxis])
         accuracies = np.mean(threshold_predictions == actual_truths, axis=1)
         plot_precision_recall(precisions[:-1], recalls[:-1], accuracies, thresholds, fig_path)
+
+        # Also get stratified raw and standardized positive/suboptimal/forbidden scores
+        positives_coefficient_a = self.weighted_positives.min()
+        self.standardized_weighted_positives = self.weighted_positives - positives_coefficient_a
+        positives_coefficient_b = self.standardized_weighted_positives.max()
+        self.standardized_weighted_positives = self.standardized_weighted_positives / positives_coefficient_b
+
+        suboptimals_coefficient_a = self.weighted_suboptimals.min()
+        self.standardized_weighted_suboptimals = self.weighted_suboptimals - suboptimals_coefficient_a
+        suboptimals_coefficient_b = self.standardized_weighted_suboptimals.max()
+        self.standardized_weighted_suboptimals = self.standardized_weighted_suboptimals / suboptimals_coefficient_b
+
+        forbiddens_coefficient_a = self.weighted_forbiddens.min()
+        self.standardized_weighted_forbiddens = self.weighted_forbiddens - forbiddens_coefficient_a
+        forbiddens_coefficient_b = self.standardized_weighted_forbiddens.max()
+        self.standardized_weighted_forbiddens = self.standardized_weighted_forbiddens / forbiddens_coefficient_b
+
+        print(f"Done! objective function output = {best_objective_output}", "\n---")
+
+        # Save standardization coefficients
+        self.standardization_coefficients = (coefficient_a, coefficient_b,
+                                        positives_coefficient_a, positives_coefficient_b,
+                                        suboptimals_coefficient_a, suboptimals_coefficient_b,
+                                        forbiddens_coefficient_a, forbiddens_coefficient_b)
+        coefficients_path = os.getcwd().rsplit("/")[0] if coefficients_path is None else coefficients_path
+        coefficients_path = os.path.join(coefficients_path, "standardization_coefficients.pkl")
+        with open(coefficients_path, "wb") as f:
+            pickle.dump(self.standardization_coefficients, f)
+
+        # Optimize thresholds
+        print(f"Optimizing thresholds for merged binary classification...")
+        thresholds_objective = partial(thresholds_accuracy, positive_scores = self.standardized_weighted_positives,
+                                       suboptimal_scores = self.standardized_weighted_suboptimals,
+                                       forbidden_scores = self.standardized_weighted_forbiddens,
+                                       actual_truths = actual_truths)
+
+        search_sample = 10000000
+        thresholds_optimizer = RandomSearchOptimizer(thresholds_objective, array_len = 3, value_range = (0,1),
+                                                     mode = "maximize")
+        done = False
+        while not done:
+            thresholds_optimizer.search(search_sample)
+            search_again = input("\tSearch again? (Y/N)  ")
+            done = search_again != "Y"
+        self.best_thresholds = thresholds_optimizer.best_array
+        self.thresholds_accuracy = thresholds_optimizer.x
+
+        self.weighted_positives_above = np.greater_equal(self.standardized_weighted_positives, self.best_thresholds[0])
+        self.weighted_suboptimals_below = np.less_equal(self.standardized_weighted_suboptimals, self.best_thresholds[1])
+        self.weighted_forbiddens_below = np.less_equal(self.standardized_weighted_forbiddens, self.best_thresholds[2])
+        self.combined_bools = np.logical_and(self.weighted_positives_above,
+                                             np.logical_and(self.weighted_suboptimals_below,
+                                                            self.weighted_forbiddens_below))
 
     def apply_weights(self, positives_weights, suboptimals_weights, forbiddens_weights, type_weights):
         '''
@@ -353,24 +420,39 @@ class ScoredPeptideResult:
             None
         '''
 
-        precision, recall, thresholds = precision_recall_curve(actual_truths, self.weighted_scores)
-        f1_scores = 2 * (precision * recall) / (precision + recall)
-        best_idx = np.nanargmax(f1_scores)
-
-        self.weighted_score_threshold = thresholds[best_idx]
-        above_threshold = np.greater_equal(self.weighted_scores, self.weighted_score_threshold)
-        self.weighted_accuracy = np.equal(actual_truths, above_threshold).mean()
-        self.weighted_mcc = matthews_corrcoef(actual_truths, above_threshold)
-
-        self.weighted_f1_score = f1_scores[best_idx]
-        self.weighted_precision = precision[best_idx]
-        self.weighted_recall = recall[best_idx]
+        # Find f1 score, precision, recall, and MCC
+        TPs = np.logical_and(self.combined_bools, actual_truths)
+        FPs = np.logical_and(self.combined_bools, ~actual_truths)
+        TNs = np.logical_and(~self.combined_bools, ~actual_truths)
+        FNs = np.logical_and(~self.combined_bools, actual_truths)
+        self.weighted_precision = TPs.sum() / (TPs.sum() + FPs.sum())
+        self.weighted_recall = TNs.sum() / (TNs.sum() + FNs.sum())
+        self.weighted_f1_score = 2 * (self.weighted_precision * self.weighted_recall) / (self.weighted_precision + self.weighted_recall)
+        self.weighted_mcc = matthews_corrcoef(actual_truths, self.combined_bools)
 
         # Generate text report
+        totals_stds = self.standardization_coefficients[0:2]
+        pes_stds = self.standardization_coefficients[2:4]
+        ses_stds = self.standardization_coefficients[4:6]
+        fes_stds = self.standardization_coefficients[6:8]
         self.weights_report = [f"---\n",
-                               f"Weighting Accuracy Report\n",
-                               f"Weighted score threshold: {self.weighted_score_threshold}\n",
-                               f"Accuracy={self.weighted_accuracy}\n",
+                               f"Classification Accuracy Report\n",
+                               f"---\n",
+                               f"Positive Element Score Weights: {self.positives_weights}\n",
+                               f"Positive Element Score Std Coefficients: a={pes_stds[0]}, b={pes_stds[1]}\n",
+                               f"Standardized Weighted Positive Element Score Threshold: {self.best_thresholds[0]}\n",
+                               f"---\n",
+                               f"Suboptimal Element Score Weights: {self.suboptimals_weights}\n",
+                               f"Suboptimal Element Score Std Coefficients: a={ses_stds[0]}, b={ses_stds[1]}\n",
+                               f"Standardized Weighted Suboptimal Element Score Threshold: {self.best_thresholds[1]}\n",
+                               f"---\n",
+                               f"Forbidden Element Score Weights: {self.forbiddens_weights}\n",
+                               f"Forbidden Element Score Std Coefficients: a={fes_stds[0]}, b={fes_stds[1]}\n",
+                               f"Standardized Weighted Forbidden Element Score Threshold: {self.best_thresholds[2]}\n",
+                               f"---\n",
+                               f"Total Score Std Coefficients: a={totals_stds[0]}, b={totals_stds[1]}\n",
+                               f"---\n",
+                               f"Accuracy: {self.thresholds_accuracy}\n",
                                f"MCC={self.weighted_mcc}\n",
                                f"Precision={self.weighted_precision}\n",
                                f"Recall={self.weighted_recall}\n",
@@ -378,7 +460,7 @@ class ScoredPeptideResult:
                                f"---\n"]
 
         for line in self.weights_report:
-            print(f"\t" + line)
+            print(f"\t" + line.strip("\n"))
 
     def generate_scored_df(self):
 
@@ -389,7 +471,14 @@ class ScoredPeptideResult:
                        self.weighted_suboptimals.reshape(-1,1),
                        self.weighted_forbiddens.reshape(-1,1),
                        self.weighted_scores.reshape(-1,1),
-                       self.standardized_weighted_scores.reshape(-1,1)]
+                       self.standardized_weighted_scores.reshape(-1,1),
+                       self.standardized_weighted_positives.reshape(-1,1),
+                       self.weighted_positives_above.reshape(-1,1),
+                       self.standardized_weighted_suboptimals.reshape(-1,1),
+                       self.weighted_suboptimals_below.reshape(-1,1),
+                       self.standardized_weighted_forbiddens.reshape(-1,1),
+                       self.weighted_forbiddens_below.reshape(-1,1),
+                       self.combined_bools.reshape(-1,1)]
         arrays_fused = np.hstack(arrays_list)
 
         # Construct column titles
@@ -403,8 +492,12 @@ class ScoredPeptideResult:
         col_titles.extend(["Weighted_Positive_#" + position for position in positions])
         col_titles.extend(["Weighted_Suboptimal_#" + position for position in positions])
         col_titles.extend(["Weighted_Forbidden_#" + position for position in positions])
-        col_titles.extend(["Weighted_Positive_Score", "Weighted_Suboptimal_Score", "Weighted_Forbidden_Score"])
-        col_titles.extend(["Weighted_Total_Score", "Standardized_Weighted_Score"])
+        col_titles.extend(["Weighted_Positive_Score", "Weighted_Suboptimal_Score", "Weighted_Forbidden_Score",
+                           "Weighted_Total_Score", "Standardized_Total_Weighted_Score",
+                           "Standardized_Weighted_Positive_Score", "Above_Positive_Threshold",
+                           "Standardized_Weighted_Suboptimal_Score", "Below_Suboptimal_Threshold",
+                           "Standardized_Weighted_Forbidden_Score", "Below_Forbidden_Threshold",
+                           "Final_Boolean_Classification"])
 
         # Make the dataframe
         self.scored_df = pd.DataFrame(arrays_fused, columns=col_titles)
