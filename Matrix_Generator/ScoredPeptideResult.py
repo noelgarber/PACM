@@ -133,7 +133,7 @@ def optimize_points_2d(points_2d, value_range, mode, actual_truths, signal_value
 
     # Points optimization
     array_len = points_2d.shape[1]
-    search_sample = 1000000
+    search_sample = 10000000
     print(f"RandomSearchOptimizer mode: {mode}")
     points_optimizer = RandomSearchOptimizer(objective, array_len, value_range, mode)
     done = False
@@ -343,8 +343,8 @@ class ScoredPeptideResult:
                                         suboptimals_coefficient_a, suboptimals_coefficient_b,
                                         forbiddens_coefficient_a, forbiddens_coefficient_b)
         coefficients_path = os.getcwd().rsplit("/")[0] if coefficients_path is None else coefficients_path
-        coefficients_path = os.path.join(coefficients_path, "standardization_coefficients.pkl")
-        with open(coefficients_path, "wb") as f:
+        coefficients_path_pkl = os.path.join(coefficients_path, "standardization_coefficients.pkl")
+        with open(coefficients_path_pkl, "wb") as f:
             pickle.dump(self.standardization_coefficients, f)
 
         # Optimize thresholds
@@ -365,6 +365,13 @@ class ScoredPeptideResult:
         self.best_thresholds = thresholds_optimizer.best_array
         self.thresholds_accuracy = thresholds_optimizer.x
 
+        # Save best thresholds
+        thresholds_path = os.getcwd().rsplit("/")[0] if coefficients_path is None else coefficients_path
+        thresholds_path = os.path.join(thresholds_path, "best_thresholds.pkl")
+        with open(thresholds_path, "wb") as f:
+            pickle.dump(self.best_thresholds, f)
+
+        # Make boolean calls
         self.weighted_positives_above = np.greater_equal(self.standardized_weighted_positives, self.best_thresholds[0])
         self.weighted_suboptimals_below = np.less_equal(self.standardized_weighted_suboptimals, self.best_thresholds[1])
         self.weighted_forbiddens_below = np.less_equal(self.standardized_weighted_forbiddens, self.best_thresholds[2])
