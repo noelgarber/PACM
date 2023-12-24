@@ -144,7 +144,8 @@ def optimize_points_2d(points_2d, value_range, mode, actual_truths, signal_value
 
     return points_optimizer.best_array, points_optimizer.x
 
-def thresholds_accuracy(thresholds, positive_scores, suboptimal_scores, forbidden_scores, actual_truths):
+def evaluate_thresholds_accuracy(thresholds, positive_scores, suboptimal_scores, forbidden_scores, total_scores,
+                                 actual_truths):
     '''
     Function to check the accuracy of a set of thresholds when applied to the set of scores
 
@@ -153,6 +154,7 @@ def thresholds_accuracy(thresholds, positive_scores, suboptimal_scores, forbidde
         positive_scores (np.ndarray):   positive element scores (weighted or unweighted)
         suboptimal_scores (np.ndarray): suboptimal element scores (weighted or unweighted)
         forbidden_scores (np.ndarray):  forbidden element scores (weighted or unweighted)
+        total_scores (np.ndarray):      total_scores = positive_scores - suboptimal_scores - forbidden_scores
         actual_truths (np.ndarray):     boolean calls for each peptide based on whether the bind the protein bait(s)
 
     Returns:
@@ -162,9 +164,11 @@ def thresholds_accuracy(thresholds, positive_scores, suboptimal_scores, forbidde
     positive_bools = np.greater_equal(positive_scores, thresholds[0])
     suboptimal_bools = np.less_equal(suboptimal_scores, thresholds[1])
     forbidden_bools = np.less_equal(forbidden_scores, thresholds[2])
+    total_bools = np.greater_equal(total_scores, thresholds[3])
 
-    total_bools = np.logical_and(positive_bools, np.logical_and(suboptimal_bools, forbidden_bools))
-    accuracy = np.mean(np.equal(total_bools, actual_truths))
+    combined_bools = np.logical_and(np.logical_and(positive_bools, total_bools),
+                                    np.logical_and(suboptimal_bools, forbidden_bools))
+    accuracy = np.mean(np.equal(combined_bools, actual_truths))
 
     return accuracy
 
@@ -349,13 +353,15 @@ class ScoredPeptideResult:
 
         # Optimize thresholds
         print(f"Optimizing thresholds for merged binary classification...")
-        thresholds_objective = partial(thresholds_accuracy, positive_scores = self.standardized_weighted_positives,
+        thresholds_objective = partial(evaluate_thresholds_accuracy,
+                                       positive_scores = self.standardized_weighted_positives,
                                        suboptimal_scores = self.standardized_weighted_suboptimals,
                                        forbidden_scores = self.standardized_weighted_forbiddens,
+                                       total_scores = self.standardized_weighted_scores,
                                        actual_truths = actual_truths)
 
         search_sample = 10000000
-        thresholds_optimizer = RandomSearchOptimizer(thresholds_objective, array_len = 3, value_range = (0,1),
+        thresholds_optimizer = RandomSearchOptimizer(thresholds_objective, array_len = 4, value_range = (0,1),
                                                      mode = "maximize")
         done = False
         while not done:
@@ -375,7 +381,9 @@ class ScoredPeptideResult:
         self.weighted_positives_above = np.greater_equal(self.standardized_weighted_positives, self.best_thresholds[0])
         self.weighted_suboptimals_below = np.less_equal(self.standardized_weighted_suboptimals, self.best_thresholds[1])
         self.weighted_forbiddens_below = np.less_equal(self.standardized_weighted_forbiddens, self.best_thresholds[2])
-        self.combined_bools = np.logical_and(self.weighted_positives_above,
+        self.weighted_scores_above = np.greater_equal(self.standardized_weighted_scores, self.best_thresholds[3])
+        self.combined_bools = np.logical_and(np.logical_and(self.weighted_positives_above,
+                                                            self.weighted_scores_above),
                                              np.logical_and(self.weighted_suboptimals_below,
                                                             self.weighted_forbiddens_below))
 
@@ -479,6 +487,7 @@ class ScoredPeptideResult:
                        self.weighted_forbiddens.reshape(-1,1),
                        self.weighted_scores.reshape(-1,1),
                        self.standardized_weighted_scores.reshape(-1,1),
+                       self.weighted_scores_above.reshape(-1,1),
                        self.standardized_weighted_positives.reshape(-1,1),
                        self.weighted_positives_above.reshape(-1,1),
                        self.standardized_weighted_suboptimals.reshape(-1,1),
@@ -500,7 +509,8 @@ class ScoredPeptideResult:
         col_titles.extend(["Weighted_Suboptimal_#" + position for position in positions])
         col_titles.extend(["Weighted_Forbidden_#" + position for position in positions])
         col_titles.extend(["Weighted_Positive_Score", "Weighted_Suboptimal_Score", "Weighted_Forbidden_Score",
-                           "Weighted_Total_Score", "Standardized_Total_Weighted_Score",
+                           "Weighted_Total_Score",
+                           "Standardized_Total_Above_Threshold", "Standardized_Total_Weighted_Score",
                            "Standardized_Weighted_Positive_Score", "Above_Positive_Threshold",
                            "Standardized_Weighted_Suboptimal_Score", "Below_Suboptimal_Threshold",
                            "Standardized_Weighted_Forbidden_Score", "Below_Forbidden_Threshold",
