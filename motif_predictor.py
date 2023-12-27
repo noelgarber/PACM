@@ -75,7 +75,6 @@ def main(predictor_params = predictor_params):
                 chunk_df = apply_specificity_scores(chunk_df, all_motif_cols, predictor_params)
 
             # Get topology for predicted motifs
-            print("\tGetting motif topologies...", flush=True) # flush prevents this printing after tqdm.trange loads
             chunk_df = predict_topology(chunk_df, all_motif_cols, predictor_params, topological_domains, sequences)
 
             # Get homolog seq col names
