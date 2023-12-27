@@ -484,7 +484,7 @@ def score_proteins(protein_seqs_df, predictor_params = predictor_params):
     novel_motif_cols, novel_score_cols, classical_motif_cols, classical_score_cols = [], [], [], []
 
     with trange(len(df_chunks), desc="\tScoring proteins...") as pbar:
-        for results in pool.imap_unordered(score_chunk_partial, df_chunks):
+        for results in pool.imap(score_chunk_partial, df_chunks):
             df_chunk_scored = results[0]
             scored_chunks.append(df_chunk_scored)
 
