@@ -60,7 +60,11 @@ def main(predictor_params = predictor_params):
             # Apply conditional matrices motif scoring
             print(f"\tAssigning motif scores...")
             results = score_proteins(chunk_df, predictor_params)
-            chunk_df, novel_motif_cols, novel_score_cols, classical_motif_cols, classical_score_cols = results
+
+            chunk_df = results[0]
+            novel_motif_cols = results[1]
+            classical_motif_cols = results[7]
+
             all_motif_cols = novel_motif_cols.copy()
             all_motif_cols.extend(classical_motif_cols)
 
@@ -71,7 +75,7 @@ def main(predictor_params = predictor_params):
                 chunk_df = apply_specificity_scores(chunk_df, all_motif_cols, predictor_params)
 
             # Get topology for predicted motifs
-            print("\tGetting motif topologies...")
+            print("\tGetting motif topologies...", flush=True) # flush prevents this printing after tqdm.trange loads
             chunk_df = predict_topology(chunk_df, all_motif_cols, predictor_params, topological_domains, sequences)
 
             # Get homolog seq col names
@@ -89,8 +93,8 @@ def main(predictor_params = predictor_params):
 
             # Score homologous motifs
             print("\tScoring homologous motifs...")
-            chunk_df, _, homolog_motif_cols, _ = score_homolog_motifs(chunk_df, homolog_motif_cols,
-                                                                      homolog_motif_col_groups, predictor_params)
+            chunk_df, homolog_motif_cols = score_homolog_motifs(chunk_df, homolog_motif_cols,
+                                                                homolog_motif_col_groups, predictor_params)
 
             # Apply bait specificity scoring to homologous motifs
             if assign_specificities:

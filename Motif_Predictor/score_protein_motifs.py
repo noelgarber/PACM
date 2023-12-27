@@ -19,7 +19,7 @@ except:
 if predictor_params["compare_classical_method"]:
     from Motif_Predictor.classical_method import classical_method
 
-def score_sliced_protein(sequences_2d, conditional_matrices, weights_tuple = None, return_count = 3,
+def score_sliced_protein(sequences_2d, conditional_matrices, thresholds_tuple, weights_tuple = None, return_count = 3,
                          standardization_coefficients = None):
     '''
     Vectorized function to score amino acid sequences based on the dictionary of context-aware weighted matrices
@@ -27,13 +27,17 @@ def score_sliced_protein(sequences_2d, conditional_matrices, weights_tuple = Non
     Args:
         sequences_2d (np.ndarray):                  unravelled peptide sequences to score
         conditional_matrices (ConditionalMatrices): conditional weighted matrices for scoring peptides
+        thresholds_tuple (tuple):                   tuple of thresholds used for score classification
         weights_tuple (tuple):                      (positives_weights, suboptimals_weights, forbiddens_weights)
         return_count (int):                         number of motifs to return
         standardization_coefficients (tuple)        tuple of coefficients from the model for standardizing score values
 
     Returns:
         output_motifs (list):                       list of motifs as strings
-        output_scores (list):                       list of matching scores for each motif
+        output_total_scores (list):                 list of matching total scores for each motif
+        output_positive_scores (list):              list of matching positive element scores for each motif
+        output_suboptimal_scores (list):            list of matching suboptimal element scores for each motif
+        output_forbidden_scores (list):             list of matching forbidden element scores for each motif
     '''
 
     motif_length = sequences_2d.shape[1]
@@ -107,39 +111,104 @@ def score_sliced_protein(sequences_2d, conditional_matrices, weights_tuple = Non
         forbidden_scores_2d = np.multiply(forbidden_scores_2d, forbiddens_weights)
 
     # Calculate total scores
-    total_scores_2d = positive_scores_2d - suboptimal_scores_2d - forbidden_scores_2d
-    total_scores = total_scores_2d.sum(axis=1)
+    total_scores = positive_scores_2d.sum(axis=1) - suboptimal_scores_2d.sum(axis=1) - forbidden_scores_2d.sum(axis=1)
 
-    valid_row_indices = np.isfinite(total_scores)
-    valid_seqs_2d = sequences_2d[valid_row_indices]
-    valid_scores = total_scores[valid_row_indices]
-
-    sorted_indices = np.argsort(valid_scores * -1) # multiply by -1 to get indices in descending order
-    sorted_seqs_2d = valid_seqs_2d[sorted_indices]
-    sorted_scores = valid_scores[sorted_indices]
-
-    # Return the desired number of motifs and handle cases when less motifs than desired are found
-    output_motifs = []
-    output_scores = []
-    real_output_count = return_count if return_count <= len(sorted_scores) else len(sorted_scores)
-    for i in np.arange(real_output_count):
-        output_motifs.append("".join(sorted_seqs_2d[i]))
-        output_scores.append(sorted_scores[i])
-
-    if len(sorted_scores) < return_count:
-        for i in np.arange(real_output_count, return_count):
-            output_motifs.append("")
-            output_scores.append(np.nan)
+    # Calculate positive, suboptimal, and forbidden scores
+    positive_scores = positive_scores_2d.sum(axis=1)
+    suboptimal_scores = suboptimal_scores_2d.sum(axis=1)
+    forbidden_scores = forbidden_scores_2d.sum(axis=1)
 
     # Standardization of the scores
     if isinstance(standardization_coefficients, tuple) or isinstance(standardization_coefficients, list):
-        coefficient_a, coefficient_b = standardization_coefficients
-        output_scores = np.array(output_scores)
-        output_scores = output_scores - coefficient_a
-        output_scores = output_scores / coefficient_b
-        output_scores = list(output_scores)
+        total_scores = (total_scores - standardization_coefficients[0]) / standardization_coefficients[1]
+        positive_scores = (positive_scores - standardization_coefficients[2]) / standardization_coefficients[3]
+        suboptimal_scores = (suboptimal_scores - standardization_coefficients[4]) / standardization_coefficients[5]
+        forbidden_scores = (forbidden_scores - standardization_coefficients[6]) / standardization_coefficients[7]
 
-    return output_motifs, output_scores
+    # Find passing indices
+    above_positives = np.greater_equal(positive_scores, thresholds_tuple[0])
+    below_suboptimals = np.less_equal(suboptimal_scores, thresholds_tuple[1])
+    below_forbiddens = np.less_equal(forbidden_scores, thresholds_tuple[2])
+    above_totals = np.greater_equal(total_scores, thresholds_tuple[3])
+    combined_bools = np.logical_and(np.logical_and(above_positives, above_totals),
+                                    np.logical_and(below_suboptimals, below_forbiddens))
+
+    # Sort passing motifs (which will be preferentially selected)
+    passing_seqs_2d = sequences_2d[combined_bools]
+    passing_total_scores = total_scores[combined_bools]
+    passing_positive_scores = positive_scores[combined_bools]
+    passing_suboptimal_scores = suboptimal_scores[combined_bools]
+    passing_forbidden_scores = forbidden_scores[combined_bools]
+
+    sorted_passing_indices = np.argsort(passing_total_scores * -1) # multiply by -1 to get indices in descending order
+    sorted_passing_seqs_2d = passing_seqs_2d[sorted_passing_indices]
+    sorted_passing_total_scores = passing_total_scores[sorted_passing_indices]
+    sorted_passing_positive_scores = passing_positive_scores[sorted_passing_indices]
+    sorted_passing_suboptimal_scores = passing_suboptimal_scores[sorted_passing_indices]
+    sorted_passing_forbidden_scores = passing_forbidden_scores[sorted_passing_indices]
+
+    # Return the desired number of motifs into a set of lists
+    output_motifs = []
+    output_total_scores = []
+    output_positive_scores = []
+    output_suboptimal_scores = []
+    output_forbidden_scores = []
+    output_calls = []
+
+    # Select best motifs, first selecting from the group that pass the thresholds
+    passing_count = len(sorted_passing_total_scores)
+    passing_output_count = return_count if return_count <= passing_count else passing_count
+    for i in np.arange(passing_output_count):
+        output_motifs.append("".join(sorted_passing_seqs_2d[i]))
+        output_total_scores.append(sorted_passing_total_scores[i])
+        output_positive_scores.append(sorted_passing_positive_scores[i])
+        output_suboptimal_scores.append(sorted_passing_suboptimal_scores[i])
+        output_forbidden_scores.append(sorted_passing_forbidden_scores[i])
+        output_calls.append(True)
+
+    # Handle cases where not enough score sets pass thresholds
+    if passing_output_count < return_count:
+        # Sort failing motifs
+        failing_seqs_2d = sequences_2d[~combined_bools]
+        failing_total_scores = total_scores[~combined_bools]
+        failing_positive_scores = positive_scores[~combined_bools]
+        failing_suboptimal_scores = suboptimal_scores[~combined_bools]
+        failing_forbidden_scores = forbidden_scores[~combined_bools]
+
+        sorted_failing_indices = np.argsort(failing_total_scores * -1)  # multiply by -1 to get indices in descending order
+        sorted_failing_seqs_2d = failing_seqs_2d[sorted_failing_indices]
+        sorted_failing_total_scores = failing_total_scores[sorted_failing_indices]
+        sorted_failing_positive_scores = failing_positive_scores[sorted_failing_indices]
+        sorted_failing_suboptimal_scores = failing_suboptimal_scores[sorted_failing_indices]
+        sorted_failing_forbidden_scores = failing_forbidden_scores[sorted_failing_indices]
+        failing_count = len(sorted_failing_total_scores)
+
+        # Add best failed motifs to make up for not enough passing motifs existing to fill the return_count
+        remaining_output_count = return_count - passing_output_count
+        failing_output_count = remaining_output_count if remaining_output_count <= failing_count else failing_count
+        for i in np.arange(failing_output_count):
+            output_motifs.append("".join(sorted_failing_seqs_2d[i]))
+            output_total_scores.append(sorted_failing_total_scores[i])
+            output_positive_scores.append(sorted_failing_positive_scores[i])
+            output_suboptimal_scores.append(sorted_failing_suboptimal_scores[i])
+            output_forbidden_scores.append(sorted_failing_forbidden_scores[i])
+            output_calls.append(False)
+
+        # If there are still not enough output motifs, supplement with blanks
+        if len(output_total_scores) < return_count:
+            blanks_count = return_count - len(output_total_scores)
+            for i in np.arange(blanks_count):
+                output_motifs.append("")
+                output_total_scores.append(np.nan)
+                output_positive_scores.append(np.nan)
+                output_suboptimal_scores.append(np.nan)
+                output_forbidden_scores.append(np.nan)
+                output_calls.append(False)
+
+    output_lists = (output_motifs, output_total_scores,
+                    output_positive_scores, output_suboptimal_scores, output_forbidden_scores, output_calls)
+
+    return output_lists
 
 def scan_protein_seq(protein_seq, conditional_matrices, weights_tuple, predictor_params = predictor_params):
     '''
@@ -205,20 +274,41 @@ def scan_protein_seq(protein_seq, conditional_matrices, weights_tuple, predictor
 
         # Calculate motif scores
         if len(cleaned_sliced_2d) > 0:
+            # Get the standardization coefficients to convert raw scores to floats between 0 and 1
             standardization_coefficients_path = predictor_params["standardization_coefficients_path"]
             with open(standardization_coefficients_path, "rb") as f:
                 standardization_coefficients = pickle.load(f)
-            motifs, scores = score_sliced_protein(cleaned_sliced_2d, conditional_matrices, weights_tuple, return_count,
-                                                  standardization_coefficients)
+
+            # Get the optimized thresholds for converting sets of scores to binary classifications
+            optimized_thresholds_path = predictor_params["optimized_thresholds_path"]
+            with open(optimized_thresholds_path, "rb") as f:
+                optimized_thresholds = pickle.load(f)
+
+            # Score the protein sequence chunks
+            output_lists = score_sliced_protein(cleaned_sliced_2d, conditional_matrices, optimized_thresholds,
+                                                weights_tuple, return_count, standardization_coefficients)
+            motifs, total_scores = output_lists[0:2]
+            positive_scores, suboptimal_scores, forbidden_scores, final_calls = output_lists[2:]
+
         else:
+            # Assign blank values if there is no sequence to score
             motifs = ["" for i in np.arange(return_count)]
-            scores = [np.nan for i in np.arange(return_count)]
+            total_scores = [np.nan for i in np.arange(return_count)]
+            positive_scores = [np.nan for i in np.arange(return_count)]
+            suboptimal_scores = [np.nan for i in np.arange(return_count)]
+            forbidden_scores = [np.nan for i in np.arange(return_count)]
+            final_calls = [False for i in np.arange(return_count)]
 
     else:
+        # Assign blank values if sequence is not valid
         motifs = ["" for i in np.arange(return_count)]
-        scores = [np.nan for i in np.arange(return_count)]
+        total_scores = [np.nan for i in np.arange(return_count)]
+        positive_scores = [np.nan for i in np.arange(return_count)]
+        suboptimal_scores = [np.nan for i in np.arange(return_count)]
+        forbidden_scores = [np.nan for i in np.arange(return_count)]
+        final_calls = [False for i in np.arange(return_count)]
 
-    return motifs, scores
+    return (motifs, total_scores, positive_scores, suboptimal_scores, forbidden_scores, final_calls)
 
 def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
     '''
@@ -247,16 +337,29 @@ def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
     compare_classical_method = predictor_params["compare_classical_method"]
 
     ordered_motifs_cols = [[] for i in np.arange(return_count)]
-    ordered_scores_cols = [[] for i in np.arange(return_count)]
+    ordered_total_scores_cols = [[] for i in np.arange(return_count)]
+    ordered_positive_scores_cols = [[] for i in np.arange(return_count)]
+    ordered_suboptimal_scores_cols = [[] for i in np.arange(return_count)]
+    ordered_forbidden_scores_cols = [[] for i in np.arange(return_count)]
+    ordered_final_calls_cols = [[] for i in np.arange(return_count)]
     classical_motifs_cols = [[] for i in np.arange(return_count)]
     classical_scores_cols = [[] for i in np.arange(return_count)]
 
+    # Generate names for the aforementioned columns
     motif_col_names = []
-    score_col_names = []
+    total_score_col_names = []
+    positive_score_col_names = []
+    suboptimal_score_col_names = []
+    forbidden_score_col_names = []
+    final_call_col_names = []
     for i in np.arange(return_count):
         suffix_number = add_number_suffix(i+1)
         motif_col_names.append(suffix_number+"_motif")
-        score_col_names.append(suffix_number+"_motif_score")
+        total_score_col_names.append(suffix_number+"_total_motif_score")
+        positive_score_col_names.append(suffix_number+"_positive_motif_score")
+        suboptimal_score_col_names.append(suffix_number+"_suboptimal_motif_score")
+        forbidden_score_col_names.append(suffix_number+"_forbidden_motif_score")
+        final_call_col_names.append(suffix_number+"_final_call")
 
     # Assemble a partial function for scoring individual proteins
     weights_path = predictor_params["pickled_weights_path"]
@@ -269,10 +372,16 @@ def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
     # Loop over the protein sequences to score them
     for i, protein_seq in enumerate(protein_seqs_list):
         # Score the protein sequence using conditional matrices
-        motifs, scores = scan_seq_partial(protein_seq)
-        for j, (motif, score) in enumerate(zip(motifs, scores)):
+        protein_results = scan_seq_partial(protein_seq)
+        motifs, total_scores, positive_scores, suboptimal_scores, forbidden_scores, final_calls = protein_results
+        zipped_results = zip(motifs, total_scores, positive_scores, suboptimal_scores, forbidden_scores, final_calls)
+        for j, (motif, total, positive, suboptimal, forbidden, call) in enumerate(zipped_results):
             ordered_motifs_cols[j].append(motif)
-            ordered_scores_cols[j].append(score)
+            ordered_total_scores_cols[j].append(total)
+            ordered_positive_scores_cols[j].append(positive)
+            ordered_suboptimal_scores_cols[j].append(suboptimal)
+            ordered_forbidden_scores_cols[j].append(forbidden)
+            ordered_final_calls_cols[j].append(call)
 
         # Optionally score the sequence using a classical method for comparison
         if compare_classical_method:
@@ -281,36 +390,75 @@ def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
                 classical_motifs_cols[j].append(classical_motif)
                 classical_scores_cols[j].append(classical_score)
 
-    # Apply motifs and scores as columns to the dataframe
+    # Apply motifs and scores as columns to the dataframe, and record col names
     novel_motif_headers = []
-    novel_score_headers = []
-    zipped_cols = zip(ordered_motifs_cols, motif_col_names, ordered_scores_cols, score_col_names)
-    for ordered_motifs_col, motif_col_name, ordered_scores_col, score_col_name in zipped_cols:
+    novel_total_score_headers = []
+    novel_positive_score_headers = []
+    novel_suboptimal_score_headers = []
+    novel_forbidden_score_headers = []
+    novel_final_call_headers = []
+
+    for i in np.arange(len(motif_col_names)):
+        ordered_motifs_col = ordered_motifs_cols[i]
+        motif_col_name = motif_col_names[i]
+
+        ordered_total_scores_col = ordered_total_scores_cols[i]
+        total_score_col_name = total_score_col_names[i]
+
+        ordered_positive_scores_col = ordered_positive_scores_cols[i]
+        positive_score_col_name = positive_score_col_names[i]
+
+        ordered_suboptimal_scores_col = ordered_suboptimal_scores_cols[i]
+        suboptimal_score_col_name = suboptimal_score_col_names[i]
+
+        ordered_forbidden_scores_col = ordered_forbidden_scores_cols[i]
+        forbidden_score_col_name = forbidden_score_col_names[i]
+
+        ordered_final_calls_col = ordered_final_calls_cols[i]
+        final_call_col_name = final_call_col_names[i]
+
         if compare_classical_method:
-            motif_col_name = "Novel_" + motif_col_name
-            score_col_name = "Novel_" + score_col_name
+            motif_col_name = f"Novel_{motif_col_name}"
+            total_score_col_name = f"Novel_{total_score_col_name}"
+            positive_score_col_name = f"Novel_{positive_score_col_name}"
+            suboptimal_score_col_name = f"Novel_{suboptimal_score_col_name}"
+            forbidden_score_col_name = f"Novel_{forbidden_score_col_name}"
+            final_call_col_name = f"Novel_{final_call_col_name}"
 
         df_chunk_scored[motif_col_name] = ordered_motifs_col
-        df_chunk_scored[score_col_name] = ordered_scores_col
+        df_chunk_scored[total_score_col_name] = ordered_total_scores_col
+        df_chunk_scored[positive_score_col_name] = ordered_positive_scores_col
+        df_chunk_scored[suboptimal_score_col_name] = ordered_suboptimal_scores_col
+        df_chunk_scored[forbidden_score_col_name] = ordered_forbidden_scores_col
+        df_chunk_scored[final_call_col_name] = ordered_final_calls_col
 
         novel_motif_headers.append(motif_col_name)
-        novel_score_headers.append(score_col_name)
+        novel_total_score_headers.append(total_score_col_name)
+        novel_positive_score_headers.append(positive_score_col_name)
+        novel_suboptimal_score_headers.append(suboptimal_score_col_name)
+        novel_forbidden_score_headers.append(forbidden_score_col_name)
+        novel_final_call_headers.append(final_call_col_name)
 
     # Optionally apply classical motifs and scores as columns if they were generated
     classical_motif_headers = []
     classical_score_headers = []
     if compare_classical_method:
-        zipped_classical_cols = zip(classical_motifs_cols, motif_col_names, classical_scores_cols, score_col_names)
-        for classical_motif_col, motif_col_name, classical_scores_col, score_col_name in zipped_classical_cols:
-            motif_col_name = "Classical_" + motif_col_name
-            score_col_name = "Classical_" + score_col_name
-            df_chunk_scored[motif_col_name] = classical_motif_col
-            df_chunk_scored[score_col_name] = classical_scores_col
+        zipped_classical_cols = zip(classical_motifs_cols, motif_col_names,
+                                    classical_scores_cols, total_score_col_names)
+        for classical_motif_col, motif_col_name, classical_scores_col, total_score_col_name in zipped_classical_cols:
+            classical_motif_col_name = "Classical_" + motif_col_name
+            classical_score_col_name = "Classical_" + total_score_col_name
+            df_chunk_scored[classical_motif_col_name] = classical_motif_col
+            df_chunk_scored[classical_score_col_name] = classical_scores_col
 
-            classical_motif_headers.append(motif_col_name)
-            classical_score_headers.append(score_col_name)
+            classical_motif_headers.append(classical_motif_col_name)
+            classical_score_headers.append(classical_score_col_name)
 
-    return (df_chunk_scored, novel_motif_headers, novel_score_headers, classical_motif_headers, classical_score_headers)
+    results_tuple = (df_chunk_scored, novel_motif_headers, novel_total_score_headers,
+                     novel_positive_score_headers, novel_suboptimal_score_headers, novel_forbidden_score_headers,
+                     novel_final_call_headers, classical_motif_headers, classical_score_headers)
+
+    return results_tuple
 
 def score_proteins(protein_seqs_df, predictor_params = predictor_params):
     '''
@@ -321,7 +469,9 @@ def score_proteins(protein_seqs_df, predictor_params = predictor_params):
         predictor_params (dict):          dictionary of user-defined parameters from predictor_config.py
 
     Returns:
-        scored_protein_df (pd.DataFrame): dataframe with protein sequences and found motifs
+        final_results (tuple): tuple of (scored_protein_df, novel_motif_cols, novel_total_score_cols,
+                               novel_positive_score_cols, novel_suboptimal_score_cols, novel_forbidden_score_cols,
+                               classical_motif_cols, classical_score_cols)
     '''
 
     chunk_size = predictor_params["chunk_size"]
@@ -329,7 +479,7 @@ def score_proteins(protein_seqs_df, predictor_params = predictor_params):
 
     score_chunk_partial = partial(score_proteins_chunk, predictor_params = predictor_params)
 
-    pool = multiprocessing.Pool()
+    pool = multiprocessing.Pool(1)
     scored_chunks = []
     novel_motif_cols, novel_score_cols, classical_motif_cols, classical_score_cols = [], [], [], []
 
@@ -338,7 +488,10 @@ def score_proteins(protein_seqs_df, predictor_params = predictor_params):
             df_chunk_scored = results[0]
             scored_chunks.append(df_chunk_scored)
 
-            novel_motif_cols, novel_score_cols, classical_motif_cols, classical_score_cols = results[1:]
+            novel_motif_cols, novel_total_score_cols = results[1:3]
+            novel_positive_score_cols, novel_suboptimal_score_cols, novel_forbidden_score_cols = results[3:6]
+            novel_final_call_cols = results[6]
+            classical_motif_cols, classical_score_cols = results[7:]
 
             pbar.update()
 
@@ -347,4 +500,9 @@ def score_proteins(protein_seqs_df, predictor_params = predictor_params):
 
     scored_protein_df = pd.concat(scored_chunks, ignore_index=True)
 
-    return (scored_protein_df, novel_motif_cols, novel_score_cols, classical_motif_cols, classical_score_cols)
+    final_results = (scored_protein_df, novel_motif_cols, novel_total_score_cols,
+                     novel_positive_score_cols, novel_suboptimal_score_cols, novel_forbidden_score_cols,
+                     novel_final_call_cols,
+                     classical_motif_cols, classical_score_cols)
+
+    return final_results
