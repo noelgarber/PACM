@@ -479,7 +479,7 @@ def score_proteins(protein_seqs_df, predictor_params = predictor_params):
 
     score_chunk_partial = partial(score_proteins_chunk, predictor_params = predictor_params)
 
-    pool = multiprocessing.Pool(1)
+    pool = multiprocessing.Pool()
     scored_chunks = []
     novel_motif_cols, novel_score_cols, classical_motif_cols, classical_score_cols = [], [], [], []
 
