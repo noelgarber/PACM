@@ -87,35 +87,37 @@ def evaluate_homologs(data_df, motif_seq_cols, homolog_seq_cols):
 	'''
 
 	# Generate tuples of motif columns and sequences to be used for similarity analysis
-	print("\tPreparing homolog and motif seqs for similarity analysis...")
 	homolog_motif_col_groups = []
 	homolog_motif_col_prefixes = []
 	homolog_motif_cols = []
 	seqs_tuples = []
-	for homolog_seq_col in homolog_seq_cols:
-		homolog_seq_col_elements = homolog_seq_col.split("_")
-		taxid = homolog_seq_col_elements[0]
-		homolog_number = homolog_seq_col_elements[2]
 
-		col_idx = data_df.columns.get_loc(homolog_seq_col)
-		current_insertion_point = col_idx
+	steps = round(len(homolog_seq_cols) * len(motif_seq_cols))
+	with trange(steps, desc="\tPreparing homolog and motif seqs for similarity analysis...") as prep_pbar:
+		for homolog_seq_col in homolog_seq_cols:
+			homolog_seq_col_elements = homolog_seq_col.split("_")
+			taxid = homolog_seq_col_elements[0]
+			homolog_number = homolog_seq_col_elements[2]
 
-		homolog_seqs = data_df.pop(homolog_seq_col).fillna("").to_list()
+			col_idx = data_df.columns.get_loc(homolog_seq_col)
+			current_insertion_point = col_idx
 
-		for i, motif_seq_col in enumerate(motif_seq_cols):
-			motif_seqs = data_df[motif_seq_col].fillna("").to_list()
-			prefix = f"{taxid}_homolog_{homolog_number}_vs_{motif_seq_col}"
-			if prefix not in homolog_motif_col_prefixes:
-				homolog_motif_col_prefixes.append(prefix)
-				cols = [prefix + "_matching_motif", prefix + "_motif_similarity", prefix + "_motif_identity"]
-				seqs_tuples.append((motif_seqs, homolog_seqs, cols, current_insertion_point))
-				homolog_motif_cols.append(cols[0])
-				homolog_motif_col_groups.append(cols)
-				current_insertion_point += 3
-			else:
-				print(f"Caution: duplicate found for column prefix {prefix}")
+			homolog_seqs = data_df.pop(homolog_seq_col).fillna("").to_list()
 
-	baseline_cols = list(data_df.columns)
+			for i, motif_seq_col in enumerate(motif_seq_cols):
+				motif_seqs = data_df[motif_seq_col].fillna("").to_list()
+				prefix = f"{taxid}_homolog_{homolog_number}_vs_{motif_seq_col}"
+				if prefix not in homolog_motif_col_prefixes:
+					homolog_motif_col_prefixes.append(prefix)
+					cols = [prefix + "_matching_motif", prefix + "_motif_similarity", prefix + "_motif_identity"]
+					seqs_tuples.append((motif_seqs, homolog_seqs, cols, current_insertion_point))
+					homolog_motif_cols.append(cols[0])
+					homolog_motif_col_groups.append(cols)
+					current_insertion_point += 3
+				else:
+					print(f"Caution: duplicate found for column prefix {prefix}")
+
+				prep_pbar.update()
 
 	# Run the similarity analysis
 	row_indices = data_df.index
