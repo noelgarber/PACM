@@ -295,7 +295,8 @@ def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, 
     homolog_id_cols = [homolog_motif_col.split("_vs_")[0] for homolog_motif_col in homolog_motif_cols]
 
     # Extract homologous motifs from dataframe
-    homolog_motifs_grid = data_df[homolog_motif_cols]
+    homolog_motifs_grid = data_df[homolog_motif_cols].copy()
+    data_df.drop(homolog_motif_cols, axis=1, inplace=True)
 
     print("\t\tOrganizing motif score information...")
     total_scores_grid = homolog_motifs_grid.applymap(lambda x: total_dict.get(x)).to_numpy(dtype=float)
