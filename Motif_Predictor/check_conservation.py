@@ -121,17 +121,21 @@ def evaluate_homologs(data_df, motif_seq_cols, homolog_seq_cols):
 
 	# Run the similarity analysis
 	row_indices = data_df.index
-	homologous_motifs_df = pd.DataFrame(index = row_indices)
+	homologous_motifs_dict = {}
 
 	pool = multiprocessing.Pool()
-	with trange(len(seqs_tuples), desc="\tEvaluating motif homolog similarities by column pair...") as pbar:
+	with trange(len(seqs_tuples) + 1, desc="\tEvaluating motif homolog similarities by column pair...") as pbar:
 		for result in pool.imap(motif_similarity, seqs_tuples):
 			homologous_motifs, homologous_similarities, homologous_identities, col_names, insertion_idx = result
-			homologous_motifs_df.loc[row_indices,col_names[0]] = homologous_motifs
-			homologous_motifs_df.loc[row_indices,col_names[1]] = homologous_similarities
-			homologous_motifs_df.loc[row_indices,col_names[2]] = homologous_identities
+
+			homologous_motifs_dict[col_names[0]] = homologous_motifs
+			homologous_motifs_dict[col_names[1]] = homologous_similarities
+			homologous_motifs_dict[col_names[2]] = homologous_identities
 
 			pbar.update()
+
+		homologous_motifs_df = pd.DataFrame(homologous_motifs_dict, index=row_indices)
+		pbar.update()
 
 	pool.close()
 	pool.join()
