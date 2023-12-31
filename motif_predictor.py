@@ -58,7 +58,6 @@ def main(predictor_params = predictor_params):
             print(f"Processing chunk #{i+1} of {path}...")
 
             # Apply conditional matrices motif scoring
-            print(f"\tAssigning motif scores...")
             results = score_proteins(chunk_df, predictor_params)
 
             chunk_df = results[0]
