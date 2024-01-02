@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import pickle
 import multiprocessing
+from tqdm import trange
 from functools import partial
 from Motif_Predictor.predictor_config import predictor_params
 
@@ -87,43 +88,57 @@ def apply_specificity_scores(protein_seqs_df, motif_cols, predictor_params=predi
     results = {}
 
     # Parallel processing of specificity score calculation
-    print(f"\t\tCalculating specificity scores in parallel...")
-    pool = multiprocessing.Pool()
+    chunk_size = 1000
+    chunk_count = int(np.ceil(len(protein_seqs_df) / chunk_size))
 
-    for chunk_results in pool.map(partial_evaluator, seq_chunk_generator(protein_seqs_df, motif_cols)):
-        chunk_valid_scores, specificity_score_col = chunk_results
+    with trange(chunk_count+1, desc="\tScoring motif specificities...") as pbar:
+        pool = multiprocessing.Pool()
 
-        if chunk_valid_scores is None:
-            results[specificity_score_col] = None
-        elif results.get(specificity_score_col) is None:
-            results[specificity_score_col] = chunk_valid_scores
-        else:
-            previous_scores = results[specificity_score_col]
-            results[specificity_score_col] = np.concatenate([previous_scores, chunk_valid_scores])
+        for chunk_results in pool.map(partial_evaluator, seq_chunk_generator(protein_seqs_df, motif_cols)):
+            chunk_valid_scores, specificity_score_col = chunk_results
 
-    pool.close()
-    pool.join()
+            if chunk_valid_scores is None:
+                results[specificity_score_col] = None
+            elif results.get(specificity_score_col) is None:
+                results[specificity_score_col] = chunk_valid_scores
+            else:
+                previous_scores = results[specificity_score_col]
+                results[specificity_score_col] = np.concatenate([previous_scores, chunk_valid_scores])
 
-    # Parse and reorder the results; assumes row order is the same as the input dataframe
-    cols = protein_seqs_df.columns.copy()
-    for motif_col, specificity_score_col, valid_specificity_scores in zip(motif_cols, results.keys(), results.values()):
-        if valid_specificity_scores is not None:
-            # Get mask for reapplying valid scores to whole column
-            not_nan = protein_seqs_df[motif_col].notna().to_numpy()
-            not_blank = protein_seqs_df[motif_col].ne("").to_numpy()
-            valid_mask = np.logical_and(not_nan, not_blank)
+            pbar.update()
 
-            # Apply valid scores onto an expanded column using the mask
-            specificity_scores = np.full(shape=len(protein_seqs_df), fill_value=np.nan, dtype=float)
-            specificity_scores[valid_mask] = valid_specificity_scores
-            protein_seqs_df[specificity_score_col] = specificity_scores
+        pool.close()
+        pool.join()
 
-            # Reorder the columns so that specificity score is to the right of the motif's model score
-            motif_col_idx = cols.get_loc(motif_col)
-            cols = cols.insert(motif_col_idx+2, specificity_score_col)
+        # Parse and reorder the results; assumes row order is the same as the input dataframe
+        cols = protein_seqs_df.columns.copy()
+        for motif_col, specificity_score_col, valid_specificity_scores in zip(motif_cols, results.keys(), results.values()):
+            if valid_specificity_scores is not None:
+                # Get mask for reapplying valid scores to whole column
+                not_nan = protein_seqs_df[motif_col].notna().to_numpy()
+                not_blank = protein_seqs_df[motif_col].ne("").to_numpy()
+                valid_mask = np.logical_and(not_nan, not_blank)
 
-    # Apply dataframe reordering
-    print(f"\t\tReordering dataframe...")
-    protein_seqs_df = protein_seqs_df[cols]
+                # Apply valid scores onto an expanded column using the mask
+                specificity_scores = np.full(shape=len(protein_seqs_df), fill_value=np.nan, dtype=float)
+                specificity_scores[valid_mask] = valid_specificity_scores
+                protein_seqs_df[specificity_score_col] = specificity_scores
+
+                # Reorder the columns so that specificity score is to the right of the motif's model score
+                motif_col_idx = cols.get_loc(motif_col)
+                if "homolog" in motif_col:
+                    if "Classical" in motif_col:
+                        cols = cols.insert(motif_col_idx+8, specificity_score_col)
+                    else:
+                        cols = cols.insert(motif_col_idx+8, specificity_score_col)
+                else:
+                    if "Classical" in motif_col:
+                        cols = cols.insert(motif_col_idx+2, specificity_score_col)
+                    else:
+                        cols = cols.insert(motif_col_idx+5, specificity_score_col)
+
+        # Apply dataframe reordering
+        protein_seqs_df = protein_seqs_df[cols]
+        pbar.update()
 
     return protein_seqs_df
