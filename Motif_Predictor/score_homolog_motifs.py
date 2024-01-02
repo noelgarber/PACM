@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import pickle
 import multiprocessing
+import concurrent.futures
 from tqdm import trange
 from functools import partial
 from Matrix_Generator.ConditionalMatrix import ConditionalMatrices
@@ -212,6 +213,9 @@ def score_motifs_parallel(seqs_2d, conditional_matrices, thresholds_tuple, weigh
 
     return output
 
+def process_grid(grid, lookup_dict, dtype):
+    return grid.applymap(lambda x: lookup_dict.get(x)).to_numpy(dtype=dtype)
+
 def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, predictor_params):
     '''
     Main function for scoring homologous motifs
@@ -219,7 +223,7 @@ def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, 
     Args:
         data_df (pd.DataFrame):          main dataframe with motif sequences for host and homologs
         homolog_motif_cols (list|tuple): col names where homolog motif sequences are stored
-        homolog_motif_col_groups (list): list of lists of grouped column names for each homologous motif
+		homolog_motif_col_groups (dict): dict of host motif seq col --> grouped column names for each homologous motif
         predictor_params (dict):         dictionary of parameters for scoring
 
     Returns:
@@ -228,6 +232,8 @@ def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, 
         homolog_motif_cols (list):  shortened list of col names containing homologous motifs
         model_score_cols (list):    shortened list of col names containing homologous motif scores according to model
     '''
+
+    verbose = predictor_params["homolog_scoring_verbose"]
 
     standardization_coefficients_path = predictor_params["standardization_coefficients_path"]
     with open(standardization_coefficients_path, "rb") as f:
@@ -247,7 +253,7 @@ def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, 
         conditional_matrices = pickle.load(f)
 
     # Extract all unique motif sequences for scoring
-    print(f"\t\tGetting unique motif sequences...")
+    print(f"\t\tGetting unique motif sequences...") if verbose else None
     motif_seqs = []
     for homolog_motif_col in homolog_motif_cols:
         col_data = data_df[homolog_motif_col].copy()
@@ -270,7 +276,7 @@ def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, 
                                     standardization_coefficients, chunk_size, filters,
                                     selenocysteine_substitute, gap_substitute)
 
-    print(f"\t\tParsing results into motif-score dicts...")
+    print(f"\t\tParsing results into motif-score dicts...") if verbose else None
     motifs, total_scores, positive_scores, suboptimal_scores, forbidden_scores, final_calls = results
     zipped_results = zip(motifs, total_scores, positive_scores, suboptimal_scores, forbidden_scores, final_calls)
     total_dict = {}
@@ -287,89 +293,122 @@ def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, 
         calls_dict[motif] = call
         combined_dict[motif] = (total_score, positive, suboptimal, forbidden, call)
 
-    # Apply the scores to the dataframe as appropriate
-    final_homolog_motif_cols = []
-    homolog_motif_cols = [col_group[0] for col_group in homolog_motif_col_groups]
-    similarity_cols = [col_group[1] for col_group in homolog_motif_col_groups]
-    identity_cols = [col_group[2] for col_group in homolog_motif_col_groups]
-    homolog_id_cols = [homolog_motif_col.split("_vs_")[0] for homolog_motif_col in homolog_motif_cols]
-
-    # Extract homologous motifs from dataframe
-    homolog_motifs_grid = data_df[homolog_motif_cols].copy()
-    data_df.drop(homolog_motif_cols, axis=1, inplace=True)
-
-    print("\t\tOrganizing motif score information...")
-    total_scores_grid = homolog_motifs_grid.applymap(lambda x: total_dict.get(x)).to_numpy(dtype=float)
-    positive_scores_grid = homolog_motifs_grid.applymap(lambda x: positive_dict.get(x)).to_numpy(dtype=float)
-    suboptimal_scores_grid = homolog_motifs_grid.applymap(lambda x: suboptimal_dict.get(x)).to_numpy(dtype=float)
-    forbidden_scores_grid = homolog_motifs_grid.applymap(lambda x: forbidden_dict.get(x)).to_numpy(dtype=float)
-    final_calls_grid = homolog_motifs_grid.applymap(lambda x: calls_dict.get(x)).to_numpy(dtype=bool)
-
-    # Find best col indices for best homologous motifs
-    selection_mode = predictor_params["homolog_selection_mode"]
-    if selection_mode == "similarity":
-        similarities_grid = data_df[similarity_cols].to_numpy(dtype=float)
-        best_col_indices = np.nanargmax(similarities_grid, axis=1)
-    elif selection_mode == "identity":
-        identities_grid = data_df[identity_cols].to_numpy(dtype=float)
-        best_col_indices = np.nanargmax(identities_grid, axis=1)
-    elif selection_mode == "score":
-        best_col_indices = np.nanargmax(total_scores_grid, axis=1)
-    else:
-        message = f"predictor_params[mode] was set to {selection_mode}, but must be identity, similarity, or score"
-        raise ValueError(message)
-
-    # Extract and assign best homologous motifs
-    print(f"\tAssigning best homologous motifs to dataframe and removing others...")
-
+    # Iterate over homolog motif col groups, organized by host motif col
     row_indices = np.arange(len(data_df))
+    drop_cols = []
+    selection_mode = predictor_params["homolog_selection_mode"]
+    description = "\t\tAssigning best homologous motifs to dataframe and removing others..."
+    with trange(int(17*len(homolog_motif_col_groups)), desc=description) as pbar:
+        # Get the grids of scores from the dataframe
+        for motif_seq_col, col_groups in homolog_motif_col_groups.items():
+            final_homolog_motif_cols = []
+            homolog_motif_cols = [col_group[0] for col_group in col_groups]
+            similarity_cols = [col_group[1] for col_group in col_groups]
+            identity_cols = [col_group[2] for col_group in col_groups]
+            homolog_id_cols = [homolog_motif_col.split("_vs_")[0] for homolog_motif_col in homolog_motif_cols]
 
-    homolog_col_element, source_col_element = homolog_motif_cols[0].split("_vs_")
-    homolog_col_element = homolog_col_element.rsplit("_", 1)[0]
-    source_col_element = source_col_element.split("_matching_motif")[0]
-    col_prefix = f"{homolog_col_element}_vs_{source_col_element}"
+            # Extract homologous motifs from dataframe
+            homolog_motifs_grid = data_df[homolog_motif_cols].copy()
+            data_df.drop(homolog_motif_cols, axis=1, inplace=True)
 
-    homolog_ids_grid = data_df[homolog_id_cols].to_numpy(dtype="U")
-    data_df.drop(homolog_id_cols, axis=1, inplace=True)
-    best_homolog_ids = homolog_ids_grid[row_indices, best_col_indices]
-    data_df[col_prefix + "_id_best"] = best_homolog_ids
-    del homolog_ids_grid, best_homolog_ids
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                futures = [
+                    executor.submit(homolog_motifs_grid.applymap, lambda x: total_dict.get(x)),
+                    executor.submit(homolog_motifs_grid.applymap, lambda x: positive_dict.get(x)),
+                    executor.submit(homolog_motifs_grid.applymap, lambda x: suboptimal_dict.get(x)),
+                    executor.submit(homolog_motifs_grid.applymap, lambda x: forbidden_dict.get(x)),
+                    executor.submit(homolog_motifs_grid.applymap, lambda x: calls_dict.get(x)),
+                ]
 
-    best_homolog_motifs = homolog_motifs_grid.values[row_indices, best_col_indices]
-    data_df[col_prefix + "_best"] = best_homolog_motifs
-    del homolog_motifs_grid, best_homolog_motifs
+                results = []
+                for f in futures:
+                    results.append(f.result())
+                    pbar.update()
 
-    similarities_grid = data_df[similarity_cols].to_numpy(dtype=float)
-    data_df.drop(similarity_cols, axis=1, inplace=True)
-    best_similarities = similarities_grid[row_indices, best_col_indices]
-    data_df[col_prefix + "_similarity_best"] = best_similarities
-    del similarities_grid, best_similarities
+                total_scores_grid = results[0].to_numpy(dtype=float)
+                positive_scores_grid = results[1].to_numpy(dtype=float)
+                suboptimal_scores_grid = results[2].to_numpy(dtype=float)
+                forbidden_scores_grid = results[3].to_numpy(dtype=float)
+                final_calls_grid = results[4].to_numpy(dtype=bool)
+                del results
 
-    identities_grid = data_df[identity_cols].to_numpy(dtype=float)
-    data_df.drop(identity_cols, axis=1, inplace=True)
-    best_identities = identities_grid[row_indices, best_col_indices]
-    data_df[col_prefix + "_identity_best"] = best_identities
-    final_homolog_motif_cols.append(col_prefix + "_best")
-    del identities_grid, best_identities
+                pbar.update()
 
-    best_positive_scores = positive_scores_grid[row_indices, best_col_indices]
-    data_df[col_prefix + "_best_positive_model_score"] = best_positive_scores
-    del positive_scores_grid, best_positive_scores
+            # Find best col indices for best homologous motifs
+            if selection_mode == "similarity":
+                similarities_grid = data_df[similarity_cols].to_numpy(dtype=float)
+                best_col_indices = np.nanargmax(similarities_grid, axis=1)
+            elif selection_mode == "identity":
+                identities_grid = data_df[identity_cols].to_numpy(dtype=float)
+                best_col_indices = np.nanargmax(identities_grid, axis=1)
+            elif selection_mode == "score":
+                best_col_indices = np.nanargmax(total_scores_grid, axis=1)
+            else:
+                message = f"mode was set to {selection_mode}, but must be identity, similarity, or score"
+                raise ValueError(message)
 
-    best_suboptimal_scores = suboptimal_scores_grid[row_indices, best_col_indices]
-    data_df[col_prefix + "_best_suboptimal_model_score"] = best_suboptimal_scores
-    del suboptimal_scores_grid, best_suboptimal_scores
+            pbar.update()
 
-    best_forbidden_scores = forbidden_scores_grid[row_indices, best_col_indices]
-    data_df[col_prefix + "_best_forbidden_model_score"] = best_forbidden_scores
-    del forbidden_scores_grid, best_forbidden_scores
+            # Find the col prefix to use for best homologous motifs
+            homolog_col_element, source_col_element = homolog_motif_cols[0].split("_vs_")
+            homolog_col_element = homolog_col_element.rsplit("_", 1)[0]
+            source_col_element = source_col_element.split("_matching_motif")[0]
+            col_prefix = f"{homolog_col_element}_vs_{source_col_element}"
+            pbar.update()
 
-    best_total_scores = total_scores_grid[row_indices, best_col_indices]
-    data_df[col_prefix + "_best_total_model_score"] = best_total_scores
-    del total_scores_grid, best_total_scores
+            homolog_ids_grid = data_df[homolog_id_cols].to_numpy(dtype="U")
+            drop_cols.extend(homolog_id_cols)
+            best_homolog_ids = homolog_ids_grid[row_indices, best_col_indices]
+            data_df[col_prefix + "_id_best"] = best_homolog_ids
+            del homolog_ids_grid, best_homolog_ids
+            pbar.update()
 
-    best_calls = final_calls_grid[row_indices, best_col_indices]
-    data_df[col_prefix + "_best_model_call"] = best_calls
-    del final_calls_grid, best_calls
+            best_homolog_motifs = homolog_motifs_grid.values[row_indices, best_col_indices]
+            data_df[col_prefix + "_best"] = best_homolog_motifs
+            del homolog_motifs_grid, best_homolog_motifs
+            pbar.update()
+
+            similarities_grid = data_df[similarity_cols].to_numpy(dtype=float)
+            data_df.drop(similarity_cols, axis=1, inplace=True)
+            best_similarities = similarities_grid[row_indices, best_col_indices]
+            data_df[col_prefix + "_similarity_best"] = best_similarities
+            del similarities_grid, best_similarities
+            pbar.update()
+
+            identities_grid = data_df[identity_cols].to_numpy(dtype=float)
+            data_df.drop(identity_cols, axis=1, inplace=True)
+            best_identities = identities_grid[row_indices, best_col_indices]
+            data_df[col_prefix + "_identity_best"] = best_identities
+            final_homolog_motif_cols.append(col_prefix + "_best")
+            del identities_grid, best_identities
+            pbar.update()
+
+            best_positive_scores = positive_scores_grid[row_indices, best_col_indices]
+            data_df[col_prefix + "_best_positive_model_score"] = best_positive_scores
+            del positive_scores_grid, best_positive_scores
+            pbar.update()
+
+            best_suboptimal_scores = suboptimal_scores_grid[row_indices, best_col_indices]
+            data_df[col_prefix + "_best_suboptimal_model_score"] = best_suboptimal_scores
+            del suboptimal_scores_grid, best_suboptimal_scores
+            pbar.update()
+
+            best_forbidden_scores = forbidden_scores_grid[row_indices, best_col_indices]
+            data_df[col_prefix + "_best_forbidden_model_score"] = best_forbidden_scores
+            del forbidden_scores_grid, best_forbidden_scores
+            pbar.update()
+
+            best_total_scores = total_scores_grid[row_indices, best_col_indices]
+            data_df[col_prefix + "_best_total_model_score"] = best_total_scores
+            del total_scores_grid, best_total_scores
+            pbar.update()
+
+            best_calls = final_calls_grid[row_indices, best_col_indices]
+            data_df[col_prefix + "_best_model_call"] = best_calls
+            del final_calls_grid, best_calls
+            pbar.update()
+
+    drop_cols = list(set(drop_cols))
+    data_df.drop(drop_cols, axis=1, inplace=True)
 
     return data_df, final_homolog_motif_cols
