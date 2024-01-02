@@ -70,7 +70,6 @@ def main(predictor_params = predictor_params):
             # Apply bait specificity scoring of discovered motifs
             assign_specificities = predictor_params["assign_specificity_scores"]
             if assign_specificities:
-                print(f"\tAssigning specificity scores...")
                 chunk_df = apply_specificity_scores(chunk_df, all_motif_cols, predictor_params)
 
             # Get topology for predicted motifs
