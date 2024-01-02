@@ -295,13 +295,13 @@ def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, 
 
     # Iterate over homolog motif col groups, organized by host motif col
     row_indices = np.arange(len(data_df))
+    final_homolog_motif_cols = []
     drop_cols = []
     selection_mode = predictor_params["homolog_selection_mode"]
     description = "\t\tAssigning best homologous motifs to dataframe and removing others..."
     with trange(int(17*len(homolog_motif_col_groups)), desc=description) as pbar:
         # Get the grids of scores from the dataframe
         for motif_seq_col, col_groups in homolog_motif_col_groups.items():
-            final_homolog_motif_cols = []
             homolog_motif_cols = [col_group[0] for col_group in col_groups]
             similarity_cols = [col_group[1] for col_group in col_groups]
             identity_cols = [col_group[2] for col_group in col_groups]
