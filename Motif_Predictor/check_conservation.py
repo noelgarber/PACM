@@ -83,11 +83,12 @@ def evaluate_homologs(data_df, motif_seq_cols, homolog_seq_cols):
 	Returns:
 		data_df (pd.DataFrame):          dataframe with added motif homology columns
 		homolog_motif_cols (list):       list of column names containing homologous motif sequences
-		homolog_motif_col_groups (list): list of lists of grouped column names for each homologous motif
+		homolog_motif_col_groups (dict): dict of host motif seq col --> grouped column names for each homologous motif
 	'''
 
 	# Generate tuples of motif columns and sequences to be used for similarity analysis
-	homolog_motif_col_groups = []
+	homolog_motif_col_groups = {motif_seq_col: [] for motif_seq_col in motif_seq_cols}
+
 	homolog_motif_col_prefixes = []
 	homolog_motif_cols = []
 	seqs_tuples = []
@@ -110,9 +111,13 @@ def evaluate_homologs(data_df, motif_seq_cols, homolog_seq_cols):
 				if prefix not in homolog_motif_col_prefixes:
 					homolog_motif_col_prefixes.append(prefix)
 					cols = [prefix + "_matching_motif", prefix + "_motif_similarity", prefix + "_motif_identity"]
+
 					seqs_tuples.append((motif_seqs, homolog_seqs, cols, current_insertion_point))
 					homolog_motif_cols.append(cols[0])
-					homolog_motif_col_groups.append(cols)
+
+					# Organize homolog motif col groups by host motif
+					homolog_motif_col_groups[motif_seq_col].append(cols)
+
 					current_insertion_point += 3
 				else:
 					print(f"Caution: duplicate found for column prefix {prefix}")
