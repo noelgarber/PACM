@@ -17,7 +17,7 @@ except:
 
 # If selected, import a parallel method for comparison
 if predictor_params["compare_classical_method"]:
-    from Motif_Predictor.classical_method import classical_method
+    from Motif_Predictor.classical_method import classical_protein_method
 
 def score_sliced_protein(sequences_2d, conditional_matrices, thresholds_tuple, weights_tuple = None, return_count = 3,
                          standardization_coefficients = None):
@@ -385,7 +385,7 @@ def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
 
         # Optionally score the sequence using a classical method for comparison
         if compare_classical_method:
-            classical_motifs, classical_scores = classical_method(protein_seq, predictor_params)
+            classical_motifs, classical_scores = classical_protein_method(protein_seq, predictor_params)
             for j, (classical_motif, classical_score) in enumerate(zip(classical_motifs, classical_scores)):
                 classical_motifs_cols[j].append(classical_motif)
                 classical_scores_cols[j].append(classical_score)

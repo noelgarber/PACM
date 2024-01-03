@@ -15,6 +15,10 @@ try:
 except:
     from Motif_Predictor.predictor_config import predictor_params
 
+# If selected, import a parallel method for comparison
+if predictor_params["compare_classical_method"]:
+    from Motif_Predictor.classical_method import classical_motif_method
+
 def score_motifs(seqs_2d, conditional_matrices, thresholds_tuple, weights_tuple = None,
                  standardization_coefficients = None, filters = None,
                  selenocysteine_substitute = "C", gap_substitute = "G"):
@@ -188,25 +192,32 @@ def score_motifs_parallel(seqs_2d, conditional_matrices, thresholds_tuple, weigh
     chunk_suboptimal_scores = []
     chunk_forbidden_scores = []
     chunk_final_calls = []
-    pool = multiprocessing.Pool()
 
-    for results in pool.map(partial_function, seqs_chunk_generator(seqs_2d, chunk_size)):
-        chunk_motifs.append(results[0])
-        chunk_total_scores.append(results[1])
-        chunk_positive_scores.append(results[2])
-        chunk_suboptimal_scores.append(results[3])
-        chunk_forbidden_scores.append(results[4])
-        chunk_final_calls.append(results[5])
+    description = f"\tScoring {len(seqs_2d)} unique homologous motifs..."
+    with trange(int(np.ceil(len(seqs_2d) / chunk_size) + 1), desc=description) as pbar:
+        pool = multiprocessing.Pool()
 
-    pool.close()
-    pool.join()
+        for results in pool.imap(partial_function, seqs_chunk_generator(seqs_2d, chunk_size)):
+            chunk_motifs.append(results[0])
+            chunk_total_scores.append(results[1])
+            chunk_positive_scores.append(results[2])
+            chunk_suboptimal_scores.append(results[3])
+            chunk_forbidden_scores.append(results[4])
+            chunk_final_calls.append(results[5])
 
-    chunk_motifs = np.concatenate(chunk_motifs)
-    chunk_total_scores = np.concatenate(chunk_total_scores)
-    chunk_positive_scores = np.concatenate(chunk_positive_scores)
-    chunk_suboptimal_scores = np.concatenate(chunk_suboptimal_scores)
-    chunk_forbidden_scores = np.concatenate(chunk_forbidden_scores)
-    chunk_final_calls = np.concatenate(chunk_final_calls)
+            pbar.update()
+
+        pool.close()
+        pool.join()
+
+        chunk_motifs = np.concatenate(chunk_motifs)
+        chunk_total_scores = np.concatenate(chunk_total_scores)
+        chunk_positive_scores = np.concatenate(chunk_positive_scores)
+        chunk_suboptimal_scores = np.concatenate(chunk_suboptimal_scores)
+        chunk_forbidden_scores = np.concatenate(chunk_forbidden_scores)
+        chunk_final_calls = np.concatenate(chunk_final_calls)
+
+        pbar.update()
 
     output = (chunk_motifs, chunk_total_scores, chunk_positive_scores, chunk_suboptimal_scores, chunk_forbidden_scores,
               chunk_final_calls)
@@ -266,7 +277,6 @@ def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, 
     motif_seqs_2d = np.array([list(motif) for motif in motif_seqs])
 
     # Score the unique motif sequences
-    print(f"\t\tScoring {len(motif_seqs_2d)} unique motifs...")
     filters = predictor_params["enforced_position_rules"]
     selenocysteine_substitute = predictor_params["selenocysteine_substitute"]
     gap_substitute = predictor_params["gap_substitute"]
@@ -296,9 +306,10 @@ def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, 
     # Iterate over homolog motif col groups, organized by host motif col
     row_indices = np.arange(len(data_df))
     final_homolog_motif_cols = []
+    final_call_cols = []
     drop_cols = []
     selection_mode = predictor_params["homolog_selection_mode"]
-    description = "\t\tAssigning best homologous motifs to dataframe and removing others..."
+    description = "\tAssigning best homologous motifs to dataframe and removing others..."
     with trange(int(17*len(homolog_motif_col_groups)), desc=description) as pbar:
         # Get the grids of scores from the dataframe
         for motif_seq_col, col_groups in homolog_motif_col_groups.items():
@@ -405,10 +416,31 @@ def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, 
 
             best_calls = final_calls_grid[row_indices, best_col_indices]
             data_df[col_prefix + "_best_model_call"] = best_calls
+            final_call_cols.append(col_prefix + "_best_model_call")
             del final_calls_grid, best_calls
             pbar.update()
 
     drop_cols = list(set(drop_cols))
     data_df.drop(drop_cols, axis=1, inplace=True)
+
+    # Apply classical method if necessary
+    compare_classical_method = predictor_params["compare_classical_method"]
+    if compare_classical_method:
+        cols = data_df.columns.copy()
+        description = "\tAdding classical motif scores to best homologous motifs"
+        with trange(len(final_homolog_motif_cols) + 1, desc=description) as pbar:
+            for homolog_motif_col, final_call_col in zip(final_homolog_motif_cols, final_call_cols):
+                insertion_idx = cols.get_loc(final_call_col) + 1
+                classical_score_col = f"{homolog_motif_col}_classical_score"
+                cols.insert(insertion_idx, classical_score_col)
+
+                motif_seqs = data_df[homolog_motif_col].to_list()
+                classical_motif_scores = classical_motif_method(motif_seqs)
+                data_df[classical_score_col] = classical_motif_scores
+
+                pbar.update()
+
+            data_df = data_df[cols]
+            pbar.update()
 
     return data_df, final_homolog_motif_cols

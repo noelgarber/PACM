@@ -17,15 +17,76 @@ except:
 
 motif_length = 15
 
-def classical_method(sequence, predictor_params = predictor_params, classical_matrix = classical_matrix):
+def classical_motif_method(motif_seqs, classical_matrix = classical_matrix):
     '''
     Example of a parallel classical scoring method to employ alongside the new one; replace with your method as needed
 
     Args:
-        sequence (str): protein sequence to check for motifs
+        motif_seqs (list): motif sequences of equal length
 
     Returns:
-        best_motif_seq, best_motif_score, second_best_seq, second_best_score
+        total_points_motifs (np.ndarray): array of corresponding classical motif scores for the input sequences
+    '''
+
+    correct_lengths = np.array([len(seq) == motif_length for seq in motif_seqs])
+    valid_indices = np.where(correct_lengths)[0]
+    motif_seqs = np.array(motif_seqs)
+    valid_motif_seqs = motif_seqs[valid_indices]
+
+    valid_motif_seqs_2d = np.array([list(seq) for seq in valid_motif_seqs])
+
+    tract_seqs = valid_motif_seqs_2d[:,0:6]
+    core_seqs = valid_motif_seqs_2d[:,6:13]
+
+    # Calculate charges on tract sequences
+    tract_residue_charges = np.zeros(shape=tract_seqs.shape, dtype=float)
+    tract_residue_charges[tract_seqs == "D"] = -1
+    tract_residue_charges[tract_seqs == "E"] = -1
+    tract_residue_charges[tract_seqs == "S"] = -0.5
+    tract_residue_charges[tract_seqs == "T"] = -0.5
+    tract_residue_charges[tract_seqs == "R"] = 1
+    tract_residue_charges[tract_seqs == "K"] = 1
+
+    tract_charges = tract_residue_charges.sum(axis=1)
+
+    # Translate tract charges into points values
+    tract_points = np.full(shape=tract_charges.shape, fill_value=np.inf, dtype=float)
+    tract_points[tract_charges <= -4] = 0
+    tract_points[np.logical_and(tract_charges <= -3, tract_charges > -4)] = 0.5
+    tract_points[np.logical_and(tract_charges <= -2, tract_charges > -3)] = 1
+    tract_points[tract_charges > -2] = 1.5
+
+    # Apply matrix to core sequences
+    core_points = np.zeros(shape=core_seqs.shape, dtype=float)
+    for col_index in np.arange(core_seqs.shape[1]):
+        col_residues = core_seqs[:,col_index]
+        col_points = np.full(shape=len(col_residues), fill_value=np.inf, dtype=float)
+
+        matrix_row_indices = classical_matrix.index.get_indexer_for(col_residues)
+        matrix_column = classical_matrix.values[:,col_index]
+        col_points[matrix_row_indices != -1] = matrix_column[matrix_row_indices[matrix_row_indices != -1]]
+        core_points[:,col_index] = col_points
+
+    core_points_sums = core_points.sum(axis=1)
+
+    # Get the total points for all the possible motifs
+    valid_total_points = tract_points + core_points_sums
+
+    total_points_motifs = np.full(len(motif_seqs), fill_value=np.nan, dtype=float)
+    total_points_motifs[valid_indices] = valid_total_points
+
+    return total_points_motifs
+
+def classical_protein_method(sequence, predictor_params = predictor_params, classical_matrix = classical_matrix):
+    '''
+    Example of a parallel classical scoring method to employ alongside the new one; replace with your method as needed
+
+    Args:
+        sequence (str):       protein sequence to check for motifs
+
+    Returns:
+        sorted_motifs (np.ndarray): sorted motifs (count = return_count)
+        sorted_scores (np.ndarray): corresponding classical motif scores
     '''
 
     return_count = predictor_params["return_count"]

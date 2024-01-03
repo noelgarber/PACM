@@ -89,13 +89,11 @@ def main(predictor_params = predictor_params):
             chunk_df, homolog_motif_cols, homolog_motif_col_groups = homology_results
 
             # Score homologous motifs
-            print("\tScoring homologous motifs...")
             chunk_df, homolog_motif_cols = score_homolog_motifs(chunk_df, homolog_motif_cols,
                                                                 homolog_motif_col_groups, predictor_params)
 
             # Apply bait specificity scoring to homologous motifs
             if assign_specificities:
-                print("\tApplying specificity scores to homologous motifs...")
                 chunk_df = apply_specificity_scores(chunk_df, homolog_motif_cols, predictor_params)
 
             # Dump current data to save memory; will be concatenated later

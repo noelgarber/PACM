@@ -91,7 +91,12 @@ def apply_specificity_scores(protein_seqs_df, motif_cols, predictor_params=predi
     chunk_size = 1000
     chunk_count = int(np.ceil(len(protein_seqs_df) / chunk_size))
 
-    with trange(chunk_count+1, desc="\tScoring motif specificities...") as pbar:
+    if "homolog" in motif_cols[0]:
+        description = "\tScoring homologous motif specificities..."
+    else:
+        description  = "\tScoring motif specificities..."
+
+    with trange(chunk_count+1, desc=description) as pbar:
         pool = multiprocessing.Pool()
 
         for chunk_results in pool.map(partial_evaluator, seq_chunk_generator(protein_seqs_df, motif_cols)):
