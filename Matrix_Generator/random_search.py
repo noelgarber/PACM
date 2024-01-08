@@ -10,7 +10,7 @@ class RandomSearchOptimizer():
     This contains a simple random search optimizer that generates random arrays and tests against an objective function
     '''
 
-    def __init__(self, objective_function, array_len, value_range, mode):
+    def __init__(self, objective_function, array_len, value_range, mode, forced_values_dict = None):
         '''
         Initialization function that assigns input objects to self
 
@@ -34,8 +34,14 @@ class RandomSearchOptimizer():
         self.x = np.inf if mode == "minimize" else -np.inf
 
         # Calculate and display baseline accuracy of all-ones weights
+        self.forced_values_dict = forced_values_dict
         baseline_weights = np.ones(shape=self.array_len, dtype=float)
+        if isinstance(self.forced_values_dict, dict):
+            for idx, value in self.forced_values_dict.items():
+                baseline_weights[idx] = value
+
         self.baseline_x = self.objective_function(baseline_weights)
+
         print(f"Initialized RandomSearchOptimizer; baseline unweighted accuracy objective x={self.baseline_x}")
 
     def search(self, sample_size):
@@ -47,6 +53,9 @@ class RandomSearchOptimizer():
         '''
 
         trial_arrays = np.random.uniform(self.value_range[0], self.value_range[1], size=(sample_size, self.array_len))
+        if isinstance(self.forced_values_dict, dict):
+            for idx, value in self.forced_values_dict.items():
+                trial_arrays[:,idx] = value
 
         chunk_size = int(np.ceil(trial_arrays.shape[0] / (100 * os.cpu_count())))
         trial_arrays_chunks = [trial_arrays[i:i + chunk_size] for i in range(0, len(trial_arrays), chunk_size)]
