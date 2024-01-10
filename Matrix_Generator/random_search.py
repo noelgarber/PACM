@@ -42,7 +42,7 @@ class RandomSearchOptimizer():
 
         self.baseline_x = self.objective_function(baseline_weights)
 
-        print(f"Initialized RandomSearchOptimizer; baseline unweighted accuracy objective x={self.baseline_x}")
+        print(f"Initialized RandomSearchOptimizer; baseline objective x={self.baseline_x}")
 
     def search(self, sample_size):
         '''
