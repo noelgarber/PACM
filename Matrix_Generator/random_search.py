@@ -62,7 +62,7 @@ class RandomSearchOptimizer():
 
         pool = multiprocessing.Pool()
 
-        with trange(len(trial_arrays_chunks), desc="Random search optimization in progress...") as pbar:
+        with trange(len(trial_arrays_chunks), desc="\tRandom search optimization in progress...") as pbar:
             for chunk_results in pool.imap_unordered(self.search_chunk, trial_arrays_chunks):
                 if chunk_results[1] > self.x and self.mode == "maximize":
                     self.best_array, self.x = chunk_results
