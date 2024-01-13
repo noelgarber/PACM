@@ -4,6 +4,9 @@ import numpy as np
 import pandas as pd
 import os
 import pickle
+import matplotlib.pyplot as plt
+import warnings
+from scipy.optimize import curve_fit, OptimizeWarning
 from functools import partial
 from sklearn.metrics import precision_recall_curve, matthews_corrcoef
 from sklearn.linear_model import LinearRegression
@@ -32,6 +35,9 @@ def accuracy_objective(weights, actual_truths, points_2d, invert_points = False)
     Returns:
         max_accuracy (float):       best accuracy
     '''
+
+    if points_2d.shape[1] != len(weights):
+        raise ValueError(f"points_2d width ({points_2d.shape[1]}) doesn't match weights array (len={len(weights)})")
 
     weighted_points = np.multiply(points_2d, weights).sum(axis=1)
     if invert_points:
@@ -99,74 +105,93 @@ def r2_objective(weights, signal_values, points_2d, invert_points = False):
 
     return r2
 
-def optimize_points_2d(points_2d, value_range, mode, actual_truths, signal_values = None, objective_type = "accuracy",
-                       invert_points = False):
+def exp_func(x, a, b, c, d):
+    # Basic exponential function, where y = ae^(b*(x-c))-d
+    return a * np.exp(b * (x - c)) - d
+
+def positive_objective_r2(positive_matrix_weights, signal_values, points_2d, initial_guess_range = (-10, 10)):
+    '''
+    Objective function for weights optimization of the positive element matrices
+
+    Args:
+        positive_matrix_weights (np.ndarray): weights to test
+        signal_values (np.ndarray):           signal values
+        points_2d (np.ndarray):               matching arrays of points of shape (peptide_count, peptide_length)
+
+    Returns:
+        r2 (float):  R2 correlation coefficient
+    '''
+
+    weighted_points_2d = np.multiply(points_2d, positive_matrix_weights)
+    weighted_points = weighted_points_2d.sum(axis=1)
+
+    initial_guesses = np.random.uniform(initial_guess_range[0], initial_guess_range[1], 400).reshape(100, 4)
+    initial_guesses[0] = [1,1,1,1]
+    r2 = -np.inf # default if none found
+
+    for initial_guess in initial_guesses:
+        try:
+            params, _ = curve_fit(exp_func, weighted_points, signal_values, p0 = initial_guess, maxfev = 10000)
+            predicted_signal_values = exp_func(weighted_points, *params)
+            r2 = r2_score(signal_values, predicted_signal_values)
+            break
+        except:
+            continue
+
+    return r2
+
+def optimize_points_2d(array_len, value_range, mode, objective_function, forced_values_dict = None,
+                       search_sample = 100000):
     '''
     Helper function that applies random search optimization of weights for a 2D points matrix
 
     Args:
-        points_2d (np.ndarray):      2D points array, where rows are scored peptides and columns are sequence positions
-        value_range (iterable):      range of allowed weights values
-        mode (str):                  optimization mode; must either be "maximize" or "minimize"
-        actual_truths (np.ndarray):  array of actual boolean truths
-        signal_values (np.ndarray):  array of binding signal values between peptides and the protein bait(s)
-        objective_type (str):        defines the objective function as `accuracy`, `f1`, or `r2`
-        invert_points (bool):        set to True if lower points values are better, otherwise set to False
+        array_len (int):                       number of weights required in each trial array
+        value_range (iterable):                range of allowed weights values
+        mode (str):                            optimization mode; must either be "maximize" or "minimize"
+        objective_function (function|partial): objective function that takes an array of weights as its single argument
+        signal_values (np.ndarray):            array of binding signal values between peptides and the protein bait(s)
+        search_sample (int):                   number of weights arrays to test per round of selection
 
     Returns:
-        best_weights (np.ndarray):   best position weights for the given points matrix
-        x (float):                   value of points_objective for best_weights
+        best_weights (np.ndarray):     best position weights for the given points matrix
+        x (float):                     value of points_objective for best_weights
     '''
 
-    # Set the appropriate objective function
-    if objective_type == "accuracy":
-        objective = partial(accuracy_objective, actual_truths = actual_truths, points_2d = points_2d,
-                            invert_points = invert_points)
-    elif objective_type == "r2":
-        objective = partial(r2_objective, signal_values = signal_values, points_2d = points_2d,
-                            invert_points = invert_points)
-    elif objective_type == "f1":
-        objective = partial(f1_objective, actual_truths = actual_truths, points_2d = points_2d,
-                            invert_points = invert_points)
-    else:
-        raise ValueError(f"expected mode to be `f1`, `r2`, or `accuracy`, but got {mode}")
-
-    # Points optimization
-    array_len = points_2d.shape[1]
-    search_sample = 10000000
-    print(f"RandomSearchOptimizer mode: {mode}")
-    points_optimizer = RandomSearchOptimizer(objective, array_len, value_range, mode)
+    print(f"\tRandomSearchOptimizer mode: {mode}")
+    points_optimizer = RandomSearchOptimizer(objective_function, array_len, value_range, mode, forced_values_dict)
     done = False
     while not done:
         points_optimizer.search(search_sample)
         search_again = input("\tSearch again? (Y/N)  ")
         done = search_again != "Y"
 
-    return points_optimizer.best_array, points_optimizer.x
+    return (points_optimizer.best_array, points_optimizer.x)
 
-def evaluate_thresholds_accuracy(thresholds, positive_scores, suboptimal_scores, forbidden_scores, total_scores,
-                                 actual_truths):
+def evaluate_thresholds_accuracy(thresholds, binding_scores, total_scores, positive_scores, suboptimal_scores,
+                                 forbidden_scores, actual_truths):
     '''
     Function to check the accuracy of a set of thresholds when applied to the set of scores
 
     Args:
         thresholds (np.ndarray):        array of (positive_threshold, suboptimal_threshold, forbidden_threshold)
+        binding_scores (np.ndarray):    binding scores used for interaction strength prediction
+        total_scores (np.ndarray):      total_scores = positive_scores - suboptimal_scores - forbidden_scores
         positive_scores (np.ndarray):   positive element scores (weighted or unweighted)
         suboptimal_scores (np.ndarray): suboptimal element scores (weighted or unweighted)
         forbidden_scores (np.ndarray):  forbidden element scores (weighted or unweighted)
-        total_scores (np.ndarray):      total_scores = positive_scores - suboptimal_scores - forbidden_scores
         actual_truths (np.ndarray):     boolean calls for each peptide based on whether the bind the protein bait(s)
 
     Returns:
         accuracy (float): accuracy of the calls derived from the given thresholds
     '''
 
-    positive_bools = np.greater_equal(positive_scores, thresholds[0])
-    suboptimal_bools = np.less_equal(suboptimal_scores, thresholds[1])
-    forbidden_bools = np.less_equal(forbidden_scores, thresholds[2])
-    total_bools = np.greater_equal(total_scores, thresholds[3])
+    total_bools = np.greater_equal(total_scores, thresholds[0])
+    positive_bools = np.greater_equal(positive_scores, thresholds[1])
+    suboptimal_bools = np.less_equal(suboptimal_scores, thresholds[2])
+    forbidden_bools = np.less_equal(forbidden_scores, 0)
 
-    combined_bools = np.logical_and(np.logical_and(positive_bools, total_bools),
+    combined_bools = np.logical_and(np.logical_and(total_bools, positive_bools),
                                     np.logical_and(suboptimal_bools, forbidden_bools))
     accuracy = np.mean(np.equal(combined_bools, actual_truths))
 
@@ -181,10 +206,10 @@ class ScoredPeptideResult:
     '''
     Class that represents the result of scoring peptides using ConditionalMatrices.score_peptides()
     '''
-    def __init__(self, seqs_2d, slice_scores_subsets,
-                 positive_scores_2d, suboptimal_scores_2d, forbidden_scores_2d, actual_truths = None,
-                 signal_values = None, objective_type = "accuracy", predefined_weights = None, fig_path = None,
-                 make_df = True, coefficients_path = None):
+    def __init__(self, seqs_2d, slice_scores_subsets, positive_scores_2d, suboptimal_scores_2d, forbidden_scores_2d,
+                 actual_truths = None, signal_values = None, predefined_weights = None, fig_path = None,
+                 make_df = True, coefficients_path = None, suppress_positives = None, suppress_suboptimals = None,
+                 suppress_forbiddens = None, ignore_failed_peptides = True, preview_scatter_plot = True):
         '''
         Initialization function to generate the score values and assign them to self
 
@@ -197,12 +222,16 @@ class ScoredPeptideResult:
             forbidden_scores_2d (np.ndarray):  forbidden element scores for each residue for each peptide
             actual_truths (np.ndarray):        array of actual binary calls for each peptide
             signal_values (np.ndarray):        array of binding signal values for peptides against protein bait(s)
-            objective_type (str):              defines the objective function as `accuracy`, `f1`, or `r2`
             predefined_weights (tuple):        tuple of (position_weights, positive_score_weight,
                                                suboptimal_score_weight, forbidden_score_weight)
             fig_path (str):                    desired file name, as full path, to save precision/recall graph
             make_df (bool):                    whether to generate a dataframe containing scores
             coefficients_path (str):           path to save standardization coefficients to; required by motif predictor
+            suppress_positives (np.ndarray):   array of position indices to suppress effect of positive elements at
+            suppress_suboptimals (np.ndarray): array of position indices to suppress effect of suboptimal elements at
+            suppress_forbiddens (np.ndarray):  array of position indices to suppress effect of forbidden elements at
+            ignore_failed_peptides (bool):     whether to only use signals from passing peptides for positive matrix
+            preview_scatter_plot (bool):       whether to show a scatter plot of summed positive points against signals
         '''
 
         # Check validity of slice_scores_subsets
@@ -211,9 +240,13 @@ class ScoredPeptideResult:
                 raise ValueError(f"ScoredPeptideResult error: slice_scores_subsets sum ({slice_scores_subsets.sum()}) "
                                  f"does not match axis=1 shape of 2D score arrays ({positive_scores_2d.shape[1]})")
 
-        # Assign constituent sequences to self
+        # Assign constituent sequences and associated values to self
         self.sequences_2d = seqs_2d
         self.actual_truths = actual_truths
+        signal_values[signal_values < 0] = 0
+        self.all_signal_values = signal_values
+        self.passing_signal_values = signal_values[actual_truths]
+        self.failing_signal_values = signal_values[~actual_truths]
 
         # Assign predicted signals score values
         self.positive_scores_2d = positive_scores_2d
@@ -230,56 +263,58 @@ class ScoredPeptideResult:
         self.forbidden_scores = forbidden_scores_2d.sum(axis=1)
 
         # Apply and assess score weightings, and assign them to a dataframe
-        self.process_weights(actual_truths, signal_values, objective_type, predefined_weights,
-                             fig_path, coefficients_path)
+        self.process_weights(predefined_weights, fig_path, coefficients_path, suppress_positives, suppress_suboptimals,
+                             suppress_forbiddens, ignore_failed_peptides, preview_scatter_plot)
         if make_df:
             self.generate_scored_df()
 
-    def process_weights(self, actual_truths = None, signal_values = None, objective_type = "accuracy",
-                        predefined_weights = None, fig_path = None, coefficients_path = None):
+    def process_weights(self, predefined_weights = None, fig_path = None, coefficients_path = None,
+                        suppress_positives = None, suppress_suboptimals = None, suppress_forbiddens = None,
+                        ignore_failed_peptides = True, preview_scatter_plot = True):
         '''
         Parent function to either optimize weights or apply predefined weights (or all ones if not given)
 
         Args:
-            actual_truths (np.ndarray):   array of actual binary calls for each peptide
-            signal_values (np.ndarray):   array of binding signal values for peptides against protein bait(s)
-            objective_type (str):         defines the objective function as `accuracy`, `f1`, or `r2`
-            predefined_weights (tuple):   tuple of (positive_score_weights, suboptimal_score_weights,
-                                          forbidden_score_weights, type_weights)
-            fig_path (str):               path to save the precision/recall/accuracy plot to
-            coefficients_path (str):      path to save the standardization coefficients to; required by motif predictor
+            predefined_weights (tuple):        tuple of (positive_score_weights, suboptimal_score_weights,
+                                               forbidden_score_weights, type_weights)
+            fig_path (str):                    path to save the precision/recall/accuracy plot to
+            coefficients_path (str):           path to save the standardization coefficients to
+            suppress_positives (np.ndarray):   position indices to suppress positive elements at
+            suppress_suboptimals (np.ndarray): position indices to suppress suboptimal elements at
+            suppress_forbiddens (np.ndarray):  position indices to suppress forbidden elements at
+            ignore_failed_peptides (bool):     whether to only use signals from passing peptides for positive matrix
+            preview_scatter_plot (bool):       whether to show a scatter plot of summed positive points against signals
 
         Returns:
             None
         '''
 
-        if actual_truths is not None and predefined_weights is None:
+        if self.actual_truths is not None and predefined_weights is None:
             # Optimize weights for combining sets of scores
-            self.optimize_weights(actual_truths, signal_values, objective_type, fig_path, coefficients_path)
-            self.evaluate_weighted_scores(actual_truths)
+            self.optimize_positive_weights(suppress_positives, ignore_failed_peptides, preview_scatter_plot)
+            self.optimize_total_weights(fig_path, coefficients_path, suppress_suboptimals, suppress_forbiddens)
+            self.evaluate_weighted_scores()
         elif predefined_weights is not None:
             # Apply predefined weights and assess them
             positive_weights, suboptimal_weights, forbidden_weights, type_weights = predefined_weights
             self.apply_weights(positive_weights, suboptimal_weights, forbidden_weights, type_weights)
-            if actual_truths is not None:
-                self.evaluate_weighted_scores(actual_truths)
+            if self.actual_truths is not None:
+                self.evaluate_weighted_scores()
         else:
             positions_count = self.positive_scores_2d.shape[1]
             position_weights = np.ones(positions_count, dtype=float)
             positive_weight, suboptimal_weight, forbidden_weight = np.ones(3, dtype=float)
             self.apply_weights(position_weights, positive_weight, suboptimal_weight, forbidden_weight)
 
-    def optimize_weights(self, actual_truths, signal_values = None, objective_type = "accuracy", fig_path = None,
-                         coefficients_path = None):
+    def optimize_positive_weights(self, suppress_positives = None, ignore_failed_peptides = True,
+                                  preview_scatter_plot = True):
         '''
         Function that applies random search optimization to find ideal position and score weights to maximize f1-score
 
         Args:
-            actual_truths (np.ndarray):  array of actual truth values as binary integer-encoded labels
-            signal_values (np.ndarray):  array of binding signal values for peptides against protein bait(s)
-            objective_type (str):        defines the objective function as `accuracy`, `f1`, or `r2`
-            fig_path (str):              path to save the precision/recall/accuracy plot to
-            coefficients_path (str):     path to save the standardization coefficients to; required by motif predictor
+            suppress_positives (np.ndarray):   position indices to suppress positive elements at
+            ignore_failed_peptides (bool):     whether to only use signals from passing peptides for positive matrix
+            preview_scatter_plot (bool):       whether to show a scatter plot of summed positive points against signals
 
         Returns:
             None
@@ -287,18 +322,233 @@ class ScoredPeptideResult:
 
         # Get weights for each set of points
         print(f"---\n",
-              f"Optimizing weights for each 2D points array...")
+              f"Optimizing weights for positive element scores...")
         weights_range = (0.0, 10.0)
-        positions_count = self.positive_scores_2d.shape[1]
+
+        # Define signal values to use
+        if ignore_failed_peptides:
+            signal_values = self.passing_signal_values
+        else:
+            signal_values = self.all_signal_values
+
+        # Preview correlation before optimizing weights
+        unweighted_summed_points = self.positive_scores_2d.sum(axis=1)
+        if ignore_failed_peptides:
+            unweighted_summed_points = unweighted_summed_points[self.actual_truths]
+
+        if preview_scatter_plot:
+            print(f"\tPreviewing unweighted positive element score sum correlation with signal values...")
+
+            params, _ = curve_fit(exp_func, unweighted_summed_points, signal_values, p0 = [1, 1, 1, 1])
+            predicted_signal_values = exp_func(unweighted_summed_points, *params)
+
+            r2 = r2_score(signal_values, predicted_signal_values)
+            r2 = round(r2, 2)
+
+            min_points = np.min(unweighted_summed_points)
+            max_points = np.max(unweighted_summed_points)
+            points_range = max_points - min_points
+
+            min_signal = np.min(signal_values)
+            max_signal = np.max(signal_values)
+            signal_range = max_signal - min_signal
+
+            equation_text = f"y = {params[0]:.2f}e^({params[1]:.2f}(x-{params[2]:.2f})) - {params[3]:.2f}"
+
+            sorted_order = np.argsort(unweighted_summed_points)
+            plt.scatter(unweighted_summed_points, signal_values, label = "data")
+            plt.plot(unweighted_summed_points[sorted_order], predicted_signal_values[sorted_order],
+                     label = equation_text, color = "red")
+            plt.legend()
+            plt.annotate(f"R2 = {r2}", (min_points + 0.1 * points_range, min_signal + 0.8 * signal_range))
+            plt.xlabel("Positive Element Score (Unweighted Sum)")
+            plt.ylabel("Signal Value")
+            plt.show()
+
+        # Optimize positive element score weights
+        print(f"\tOptimizing positive element score values to maximize R2 against log signal values...")
+
+        passing_points_2d = self.positive_scores_2d[self.actual_truths]
+        positive_forced_values = {idx: 0 for idx in suppress_positives} if suppress_positives is not None else {}
+        positive_objective = partial(positive_objective_r2, signal_values=signal_values, points_2d=passing_points_2d)
+        array_len = self.positive_scores_2d.shape[1]
+
+        with warnings.catch_warnings():
+            # Bad sets of weights may fail to converge, generating warnings; this code suppresses these warnings
+            warnings.simplefilter("ignore", RuntimeWarning)
+            warnings.simplefilter("ignore", OptimizeWarning)
+            positive_weights, positive_best_r2 = optimize_points_2d(array_len, weights_range, "maximize",
+                                                                    positive_objective, positive_forced_values,
+                                                                    search_sample = 100000)
+
+        # Generate weighted summed points array
+        self.binding_positive_weights = positive_weights
+        weighted_summed_points = np.sum(np.multiply(self.positive_scores_2d, positive_weights), axis=1)
+        self.binding_positive_scores = weighted_summed_points
+
+        coefficient_a = np.min(weighted_summed_points)
+        standardized_weighted_points = weighted_summed_points - coefficient_a
+        coefficient_b = np.abs(np.max(standardized_weighted_points))
+        standardized_weighted_points = standardized_weighted_points / coefficient_b
+        self.binding_standardization_coefficients = (coefficient_a, coefficient_b)
+        self.standardized_binding_scores = standardized_weighted_points.copy()
+
+        # Calculate R2
+        if ignore_failed_peptides:
+            weighted_summed_points = weighted_summed_points[self.actual_truths]
+
+        params, _ = curve_fit(exp_func, weighted_summed_points, signal_values, p0=[1, 1, 1, 1])
+        predicted_signal_values = exp_func(weighted_summed_points, *params)
+
+        self.binding_score_r2 = r2_score(signal_values, predicted_signal_values)
+
+        # Also fit a curve to standardized binding scores and save the params to self (for future use)
+        if ignore_failed_peptides:
+            standardized_weighted_points = standardized_weighted_points[self.actual_truths]
+        standardized_params, _ = curve_fit(exp_func, standardized_weighted_points, signal_values,
+                                           p0=[0.5, 0.5, 0.5, 0.5])
+        self.standardized_binding_exp_params = standardized_params
+
+        # Show post-weighting scatter plot if necessary
+        if preview_scatter_plot:
+            print(f"\tPreviewing weighted positive element score sum correlation with signal values...")
+            r2 = round(self.binding_score_r2, 2)
+
+            min_points = np.min(weighted_summed_points)
+            max_points = np.max(weighted_summed_points)
+            points_range = max_points - min_points
+
+            min_signal = np.min(signal_values)
+            max_signal = np.max(signal_values)
+            signal_range = max_signal - min_signal
+
+            a,b,c,d = params
+            c_sign = "+" if c >= 0 else "-"
+            d_sign = "+" if d >= 0 else "-"
+            equation_text = f"y = {a:.2f}e^({b:.2f}(x{c_sign}{np.abs(c):.2f})) {d_sign}{np.abs(d):.2f}"
+
+            sorted_order = np.argsort(weighted_summed_points)
+
+            if ignore_failed_peptides:
+                # Also plot failed peptides in a different color
+                weighted_points_failed = np.sum(np.multiply(self.positive_scores_2d, positive_weights), axis=1)
+                weighted_points_failed = weighted_points_failed[~self.actual_truths]
+
+                plt.scatter(weighted_points_failed, self.failing_signal_values,
+                            label = "non-interacting peptides (weighted)", color = "red", alpha = 0.5)
+                plt.scatter(weighted_summed_points, signal_values,
+                            label = "interacting peptides (weighted)", color = "blue", alpha = 0.5)
+            else:
+                plt.scatter(weighted_summed_points, signal_values,
+                            label = "data (weighted)", color = "blue", alpha = 0.5)
+
+            plt.plot(weighted_summed_points[sorted_order], predicted_signal_values[sorted_order],
+                     label = equation_text, color = "black")
+            plt.annotate(f"R2 = {r2}", xy = (min_points + 0.1 * points_range, min_signal + 0.8 * signal_range),
+                         fontsize = "medium")
+
+            plt.legend()
+            plt.xlabel("Positive Element Score (Weighted Sum)", fontsize = "medium")
+            plt.ylabel("Signal Value (arbitrary units)", fontsize = "medium")
+
+            plt.show()
+
+    def optimize_total_weights(self, fig_path = None, coefficients_path = None, suppress_suboptimals = None,
+                               suppress_forbiddens = None):
+        '''
+        Function that applies random search optimization to find ideal position and score weights to maximize f1-score
+
+        Args:
+            fig_path (str):                    path to save the precision/recall/accuracy plot to
+            coefficients_path (str):           path to save the standardization coefficients to
+            suppress_suboptimals (np.ndarray): position indices to suppress suboptimal elements at
+            suppress_forbiddens (np.ndarray):  position indices to suppress forbidden elements at
+
+        Returns:
+            None
+        '''
+
+        weights_range = (0.0, 10.0)
         mode = "maximize"
-        combined_2d = np.hstack([self.positive_scores_2d,
-                                 self.suboptimal_scores_2d * -1,
-                                 self.forbidden_scores_2d * -1])
-        combined_weights, best_objective_output = optimize_points_2d(combined_2d, weights_range, mode, actual_truths,
-                                                                     signal_values, objective_type, invert_points = False)
-        self.positives_weights = combined_weights[:positions_count]
-        self.suboptimals_weights = combined_weights[positions_count:positions_count*2]
-        self.forbiddens_weights = combined_weights[positions_count*2:positions_count*3]
+        motif_length = self.positive_scores_2d.shape[1]
+
+        # Optimize weights; first value is a multiplier of summed weighted positive scores
+        print(f"\tOptimizing final score values to maximize accuracy in binary calls...")
+
+        # Attempt accuracy optimization with and without positive element scores, then use the better option
+        print(f"\t\tAttempting with unweighted positive, suboptimal, and forbidden scores combined...")
+        psf_forced_values_dict = {idx + motif_length: 0 for idx in suppress_suboptimals}
+        psf_forced_values_dict = psf_forced_values_dict | {idx + 2*motif_length : 0 for idx in suppress_forbiddens}
+        psf_combined_2d = np.hstack([self.positive_scores_2d,
+                                     self.suboptimal_scores_2d * -1,
+                                     self.forbidden_scores_2d * -1])
+
+        psf_objective = partial(accuracy_objective, actual_truths = self.actual_truths, points_2d = psf_combined_2d)
+        combined_array_len = psf_combined_2d.shape[1]
+
+        psf_optimized_results = optimize_points_2d(combined_array_len, weights_range, mode, psf_objective,
+                                                   psf_forced_values_dict, search_sample = 500000)
+        psf_preliminary_weights, psf_best_x = psf_optimized_results
+
+        print(f"\t\tAttempting with pre-weighted positive, unweighted suboptimal, and unweighted forbidden scores...")
+        # Note that weighted positive score sums are multiplied by the motif length to prevent under-weighting
+        wpsf_forced_values_dict = {idx + 1: 0 for idx in suppress_suboptimals}
+        wpsf_forced_values_dict = wpsf_forced_values_dict | {idx + motif_length + 1: 0 for idx in suppress_forbiddens}
+
+        binding_positive_multiplier = self.suboptimal_scores_2d.shape[1] # scales to prevent underrepresentation
+        wpsf_combined_2d = np.hstack([self.binding_positive_scores.reshape(-1, 1) * binding_positive_multiplier,
+                                      self.suboptimal_scores_2d * -1,
+                                      self.forbidden_scores_2d * -1])
+        wpsf_objective = partial(accuracy_objective, actual_truths = self.actual_truths, points_2d = wpsf_combined_2d)
+
+        wpsf_combined_array_len = wpsf_combined_2d.shape[1]
+        wpsf_optimized_results = optimize_points_2d(wpsf_combined_array_len, weights_range, mode, wpsf_objective,
+                                                    wpsf_forced_values_dict, search_sample = 1000000)
+        wpsf_preliminary_weights, wpsf_best_x = wpsf_optimized_results
+        wpsf_preliminary_weights[0] = wpsf_preliminary_weights[0] * binding_positive_multiplier
+
+        print(f"\t\tAttempting with only unweighted suboptimal and forbidden scores combined...")
+        sf_forced_values_dict = {idx: 0 for idx in suppress_suboptimals}
+        sf_forced_values_dict = sf_forced_values_dict | {idx + motif_length: 0 for idx in suppress_forbiddens}
+
+        suboptimal_forbidden_2d = np.hstack([self.suboptimal_scores_2d * -1,
+                                             self.forbidden_scores_2d * -1])
+        sf_objective = partial(accuracy_objective, actual_truths = self.actual_truths,
+                               points_2d = suboptimal_forbidden_2d)
+        sf_combined_array_len = suboptimal_forbidden_2d.shape[1]
+
+        sf_optimized_results = optimize_points_2d(sf_combined_array_len, weights_range, mode, sf_objective,
+                                                  sf_forced_values_dict, search_sample = 1000000)
+        sf_preliminary_weights, sf_best_x = sf_optimized_results
+
+        # Select best
+        if psf_best_x > wpsf_best_x and psf_best_x > sf_best_x:
+            print(f"\t\tBest combination: positive, suboptimal, and forbidden scores (x={psf_best_x})")
+            self.best_accuracy_method = "psf"
+            best_objective_output = psf_best_x
+            self.positives_weights = psf_preliminary_weights[:motif_length]
+            self.suboptimals_weights = psf_preliminary_weights[motif_length:2*motif_length]
+            self.forbiddens_weights = psf_preliminary_weights[motif_length*2:]
+        elif wpsf_best_x > psf_best_x and wpsf_best_x > sf_best_x:
+            print(f"\t\tBest combination: pre-weighted positive score sums with suboptimal and forbidden scores",
+                  f"(x={wpsf_best_x})")
+            self.best_accuracy_method = "wpsf"
+            best_objective_output = wpsf_best_x
+            self.positives_weights = self.binding_positive_weights * wpsf_preliminary_weights[0]
+            self.suboptimals_weights = wpsf_preliminary_weights[1:motif_length+1]
+            self.forbiddens_weights = wpsf_preliminary_weights[motif_length+1:]
+        else:
+            print(f"\t\tBest combination: suboptimal and forbidden scores only (x={sf_best_x})")
+            self.best_accuracy_method = "sf"
+            best_objective_output = sf_best_x
+            self.positives_weights = np.zeros(motif_length, dtype=float)
+            self.suboptimals_weights = sf_preliminary_weights[:motif_length]
+            self.forbiddens_weights = sf_preliminary_weights[motif_length:]
+
+        print("\tFound optimal weights:")
+        print("\t\tPositive element score weights: [", self.positives_weights.round(2), "]")
+        print("\t\tSuboptimal element score weights: [", self.suboptimals_weights.round(2), "]")
+        print("\t\tForbidden element score weights: [", self.forbiddens_weights.round(2), "]")
 
         # Apply weights by points type
         self.weighted_positives_2d = np.multiply(self.positive_scores_2d, self.positives_weights)
@@ -310,42 +560,58 @@ class ScoredPeptideResult:
         self.weighted_forbiddens = self.weighted_forbiddens_2d.sum(axis=1)
 
         # Get total raw and standardized scores
-        self.weighted_scores = np.multiply(combined_2d, combined_weights).sum(axis=1)
+        if self.best_accuracy_method == "psf":
+            self.weighted_accuracy_scores = np.multiply(psf_combined_2d, psf_preliminary_weights).sum(axis=1)
+        elif self.best_accuracy_method == "wpsf":
+            self.weighted_accuracy_scores = np.multiply(wpsf_combined_2d, wpsf_preliminary_weights).sum(axis=1)
+        elif self.best_accuracy_method == "sf":
+            self.weighted_accuracy_scores = np.multiply(suboptimal_forbidden_2d, sf_preliminary_weights).sum(axis=1)
+        else:
+            raise ValueError(f"self.best_accuracy_method is set to {self.best_accuracy_method}")
 
-        coefficient_a = self.weighted_scores.min()
-        self.standardized_weighted_scores = self.weighted_scores - coefficient_a
+        coefficient_a = self.weighted_accuracy_scores.min()
+        self.standardized_weighted_scores = self.weighted_accuracy_scores - coefficient_a
         coefficient_b = self.standardized_weighted_scores.max()
         self.standardized_weighted_scores = self.standardized_weighted_scores / coefficient_b
 
         # Plot precisions and recalls for different thresholds
-        precisions, recalls, thresholds = precision_recall_curve(actual_truths, self.standardized_weighted_scores)
+        precisions, recalls, thresholds = precision_recall_curve(self.actual_truths, self.standardized_weighted_scores)
         threshold_predictions = np.greater_equal(self.standardized_weighted_scores, thresholds[:, np.newaxis])
-        accuracies = np.mean(threshold_predictions == actual_truths, axis=1)
+        accuracies = np.mean(threshold_predictions == self.actual_truths, axis=1)
         plot_precision_recall(precisions[:-1], recalls[:-1], accuracies, thresholds, fig_path)
 
         # Also get stratified raw and standardized positive/suboptimal/forbidden scores
         positives_coefficient_a = self.weighted_positives.min()
         self.standardized_weighted_positives = self.weighted_positives - positives_coefficient_a
         positives_coefficient_b = self.standardized_weighted_positives.max()
-        self.standardized_weighted_positives = self.standardized_weighted_positives / positives_coefficient_b
+        if positives_coefficient_b != 0:
+            self.standardized_weighted_positives = self.standardized_weighted_positives / positives_coefficient_b
+        else:
+            positives_coefficient_b = 1
 
         suboptimals_coefficient_a = self.weighted_suboptimals.min()
         self.standardized_weighted_suboptimals = self.weighted_suboptimals - suboptimals_coefficient_a
         suboptimals_coefficient_b = self.standardized_weighted_suboptimals.max()
-        self.standardized_weighted_suboptimals = self.standardized_weighted_suboptimals / suboptimals_coefficient_b
+        if suboptimals_coefficient_b != 0:
+            self.standardized_weighted_suboptimals = self.standardized_weighted_suboptimals / suboptimals_coefficient_b
+        else:
+            suboptimals_coefficient_b = 1
 
         forbiddens_coefficient_a = self.weighted_forbiddens.min()
         self.standardized_weighted_forbiddens = self.weighted_forbiddens - forbiddens_coefficient_a
         forbiddens_coefficient_b = self.standardized_weighted_forbiddens.max()
-        self.standardized_weighted_forbiddens = self.standardized_weighted_forbiddens / forbiddens_coefficient_b
+        if forbiddens_coefficient_b != 0:
+            self.standardized_weighted_forbiddens = self.standardized_weighted_forbiddens / forbiddens_coefficient_b
+        else:
+            forbiddens_coefficient_b = 1
 
         print(f"Done! objective function output = {best_objective_output}", "\n---")
 
         # Save standardization coefficients
         self.standardization_coefficients = (coefficient_a, coefficient_b,
-                                        positives_coefficient_a, positives_coefficient_b,
-                                        suboptimals_coefficient_a, suboptimals_coefficient_b,
-                                        forbiddens_coefficient_a, forbiddens_coefficient_b)
+                                             positives_coefficient_a, positives_coefficient_b,
+                                             suboptimals_coefficient_a, suboptimals_coefficient_b,
+                                             forbiddens_coefficient_a, forbiddens_coefficient_b)
         coefficients_path = os.getcwd().rsplit("/")[0] if coefficients_path is None else coefficients_path
         coefficients_path_pkl = os.path.join(coefficients_path, "standardization_coefficients.pkl")
         with open(coefficients_path_pkl, "wb") as f:
@@ -353,37 +619,43 @@ class ScoredPeptideResult:
 
         # Optimize thresholds
         print(f"Optimizing thresholds for merged binary classification...")
-        thresholds_objective = partial(evaluate_thresholds_accuracy,
-                                       positive_scores = self.standardized_weighted_positives,
-                                       suboptimal_scores = self.standardized_weighted_suboptimals,
-                                       forbidden_scores = self.standardized_weighted_forbiddens,
-                                       total_scores = self.standardized_weighted_scores,
-                                       actual_truths = actual_truths)
+        thres_objective = partial(evaluate_thresholds_accuracy,
+                                  binding_scores = self.standardized_binding_scores,
+                                  total_scores = self.standardized_weighted_scores,
+                                  positive_scores = self.standardized_weighted_positives,
+                                  suboptimal_scores = self.standardized_weighted_suboptimals,
+                                  forbidden_scores = self.standardized_weighted_forbiddens,
+                                  actual_truths = self.actual_truths)
 
         search_sample = 10000000
-        thresholds_optimizer = RandomSearchOptimizer(thresholds_objective, array_len = 4, value_range = (0,1),
-                                                     mode = "maximize")
+        thresholds_optimizer = RandomSearchOptimizer(thres_objective, array_len=4, value_range=(0,1), mode="maximize")
         done = False
         while not done:
             thresholds_optimizer.search(search_sample)
             search_again = input("\tSearch again? (Y/N)  ")
             done = search_again != "Y"
-        self.best_thresholds = thresholds_optimizer.best_array
-        self.thresholds_accuracy = thresholds_optimizer.x
 
-        # Save best thresholds
-        thresholds_path = os.getcwd().rsplit("/")[0] if coefficients_path is None else coefficients_path
-        thresholds_path = os.path.join(thresholds_path, "best_thresholds.pkl")
-        with open(thresholds_path, "wb") as f:
-            pickle.dump(self.best_thresholds, f)
+        self.thresholds_accuracy = thresholds_optimizer.x
+        self.standardized_binding_threshold = thresholds_optimizer.best_array[0]
+        self.standardized_total_threshold = thresholds_optimizer.best_array[1]
+        self.standardized_positive_threshold = thresholds_optimizer.best_array[2]
+        self.standardized_suboptimal_threshold = thresholds_optimizer.best_array[3]
+        self.standardized_forbidden_threshold = 0
 
         # Make boolean calls
-        self.weighted_positives_above = np.greater_equal(self.standardized_weighted_positives, self.best_thresholds[0])
-        self.weighted_suboptimals_below = np.less_equal(self.standardized_weighted_suboptimals, self.best_thresholds[1])
-        self.weighted_forbiddens_below = np.less_equal(self.standardized_weighted_forbiddens, self.best_thresholds[2])
-        self.weighted_scores_above = np.greater_equal(self.standardized_weighted_scores, self.best_thresholds[3])
-        self.combined_bools = np.logical_and(np.logical_and(self.weighted_positives_above,
-                                                            self.weighted_scores_above),
+        self.weighted_binding_above = np.greater_equal(self.standardized_binding_scores,
+                                                       self.standardized_binding_threshold)
+        self.weighted_scores_above = np.greater_equal(self.standardized_weighted_scores,
+                                                      self.standardized_total_threshold)
+        self.weighted_positives_above = np.greater_equal(self.standardized_weighted_positives,
+                                                         self.standardized_positive_threshold)
+        self.weighted_suboptimals_below = np.less_equal(self.standardized_weighted_suboptimals,
+                                                        self.standardized_suboptimal_threshold)
+        self.weighted_forbiddens_below = np.less_equal(self.standardized_weighted_forbiddens,
+                                                       self.standardized_forbidden_threshold)
+        self.combined_bools = np.logical_and(self.weighted_binding_above,
+                                             np.logical_and(self.weighted_scores_above,
+                                                            self.weighted_positives_above),
                                              np.logical_and(self.weighted_suboptimals_below,
                                                             self.weighted_forbiddens_below))
 
@@ -421,31 +693,25 @@ class ScoredPeptideResult:
         # Apply score type weights and obtain total weighted scores
         weighted_points_sums = [self.weighted_positives, self.weighted_suboptimals * -1, self.weighted_forbiddens * -1]
         weighted_points_sums = np.stack(weighted_points_sums, axis=1)
-        self.weighted_scores = np.multiply(weighted_points_sums, self.type_weights).sum(axis=1)
+        self.weighted_accuracy_scores = np.multiply(weighted_points_sums, self.type_weights).sum(axis=1)
 
-    def evaluate_weighted_scores(self, actual_truths):
+    def evaluate_weighted_scores(self):
         '''
         Helper function to evaluate a set of weighted scores against actual truth values
-
-        Args:
-            actual_truths (np.ndarray): array of actual truth values as binary integer-encoded labels
-            weighted_total_scores:      array of summed weighted scores
-
-        Returns:
-            None
         '''
 
         # Find f1 score, precision, recall, and MCC
-        TPs = np.logical_and(self.combined_bools, actual_truths)
-        FPs = np.logical_and(self.combined_bools, ~actual_truths)
-        TNs = np.logical_and(~self.combined_bools, ~actual_truths)
-        FNs = np.logical_and(~self.combined_bools, actual_truths)
+        TPs = np.logical_and(self.combined_bools, self.actual_truths)
+        FPs = np.logical_and(self.combined_bools, ~self.actual_truths)
+        TNs = np.logical_and(~self.combined_bools, ~self.actual_truths)
+        FNs = np.logical_and(~self.combined_bools, self.actual_truths)
         self.weighted_precision = TPs.sum() / (TPs.sum() + FPs.sum())
         self.weighted_recall = TNs.sum() / (TNs.sum() + FNs.sum())
         self.weighted_f1_score = 2 * (self.weighted_precision * self.weighted_recall) / (self.weighted_precision + self.weighted_recall)
-        self.weighted_mcc = matthews_corrcoef(actual_truths, self.combined_bools)
+        self.weighted_mcc = matthews_corrcoef(self.actual_truths, self.combined_bools)
 
         # Generate text report
+        binding_stds = self.binding_standardization_coefficients
         totals_stds = self.standardization_coefficients[0:2]
         pes_stds = self.standardization_coefficients[2:4]
         ses_stds = self.standardization_coefficients[4:6]
@@ -453,21 +719,27 @@ class ScoredPeptideResult:
         self.weights_report = [f"---\n",
                                f"Classification Accuracy Report\n",
                                f"---\n",
+                               f"Binding Positive Score Weights: {self.binding_positive_weights}\n",
+                               f"Binding Positive Score Std Coefficients: a={binding_stds[0]}, b={binding_stds[1]}\n",
+                               f"Binding Weighted Score Exponential R2 = {self.binding_score_r2}\n",
+                               f"Standardized Binding Score Threshold: {self.standardized_binding_threshold}\n",
+                               f"---\n",
                                f"Positive Element Score Weights: {self.positives_weights}\n",
                                f"Positive Element Score Std Coefficients: a={pes_stds[0]}, b={pes_stds[1]}\n",
-                               f"Standardized Weighted Positive Element Score Threshold: {self.best_thresholds[0]}\n",
+                               f"Standardized Positive Score Threshold: {self.standardized_positive_threshold}\n",
                                f"---\n",
                                f"Suboptimal Element Score Weights: {self.suboptimals_weights}\n",
                                f"Suboptimal Element Score Std Coefficients: a={ses_stds[0]}, b={ses_stds[1]}\n",
-                               f"Standardized Weighted Suboptimal Element Score Threshold: {self.best_thresholds[1]}\n",
+                               f"Standardized Suboptimal Score Threshold: {self.standardized_suboptimal_threshold}\n",
                                f"---\n",
                                f"Forbidden Element Score Weights: {self.forbiddens_weights}\n",
                                f"Forbidden Element Score Std Coefficients: a={fes_stds[0]}, b={fes_stds[1]}\n",
-                               f"Standardized Weighted Forbidden Element Score Threshold: {self.best_thresholds[2]}\n",
+                               f"Standardized Forbidden Score Threshold: {self.standardized_forbidden_threshold}\n",
                                f"---\n",
                                f"Total Score Std Coefficients: a={totals_stds[0]}, b={totals_stds[1]}\n",
+                               f"Standardized Total Score Threshold: {self.standardized_total_threshold}\n",
                                f"---\n",
-                               f"Accuracy: {self.thresholds_accuracy}\n",
+                               f"Thresholded Accuracy: {self.thresholds_accuracy}\n",
                                f"MCC={self.weighted_mcc}\n",
                                f"Precision={self.weighted_precision}\n",
                                f"Recall={self.weighted_recall}\n",
@@ -485,7 +757,7 @@ class ScoredPeptideResult:
                        self.weighted_positives.reshape(-1,1),
                        self.weighted_suboptimals.reshape(-1,1),
                        self.weighted_forbiddens.reshape(-1,1),
-                       self.weighted_scores.reshape(-1,1),
+                       self.weighted_accuracy_scores.reshape(-1,1),
                        self.standardized_weighted_scores.reshape(-1,1),
                        self.weighted_scores_above.reshape(-1,1),
                        self.standardized_weighted_positives.reshape(-1,1),

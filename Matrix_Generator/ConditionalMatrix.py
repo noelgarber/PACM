@@ -3,12 +3,14 @@
 import numpy as np
 import pandas as pd
 import os
-import warnings
 import multiprocessing
+import matplotlib.pyplot as plt
 from copy import deepcopy
 from tqdm import trange
 from functools import partial
-from scipy.stats import barnard_exact, ttest_ind
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import r2_score
+from scipy.stats import barnard_exact, mannwhitneyu
 from general_utils.general_utils import unravel_seqs, check_seq_lengths
 from general_utils.matrix_utils import make_empty_matrix, collapse_phospho
 from general_utils.user_helper_functions import get_thresholds
@@ -18,20 +20,24 @@ try:
 except:
     from Matrix_Generator.config import data_params, matrix_params, aa_equivalence_dict, amino_acids_phos
 
-def barnard_disfavoured(test_aa, aa_col_passing, aa_col_failing, equivalent_residues = None, alternative = "less"):
+def barnard_disfavoured(aa_col_passing, aa_col_failing, test_aa = None, equivalent_residues = None, alternative="less"):
     '''
     Helper function that uses Barnard's exact test to determine if a test amino acid appears less often in a sliced col
     of peptide sequences for the passing peptides vs. the failing ones.
 
     Args:
-        test_aa (str):                               single letter code for the amino acid to be tested
         aa_col_passing (np.ndarray):                 sliced col of peptide sequences that bind the target
         aa_col_failing (np.ndarray):                 sliced col of peptide sequences that do not bind the target
+        test_aa (str):                               amino acid to be tested; if None, equivalent_residues must be given
         equivalent_residues (np.ndarray|tuple|list): if given, residues are pooled with test_aa based on similarity
 
     Returns:
-        barnard_pvalue (float): the p-value of the test where the alternative hypothesis is "less"
+        barnard_pvalue (float):           the p-value of the test where the alternative hypothesis is "less"
+        relative_risk_reduction (float):  a measure of effect size where RRR = 1 - RR, the relative risk
     '''
+
+    if test_aa is None and equivalent_residues is None:
+        raise ValueError(f"test_aa and equivalent_residues were both set to None, but at least one must be given")
 
     if equivalent_residues is None:
         aa_passing_count = np.sum(aa_col_passing == test_aa)
@@ -42,32 +48,33 @@ def barnard_disfavoured(test_aa, aa_col_passing, aa_col_failing, equivalent_resi
 
     other_passing_count = len(aa_col_passing) - aa_passing_count
     other_failing_count = len(aa_col_failing) - aa_failing_count
+
+    '''
+                                  Contingency Table Setup
+                            | - - - - - - - - - - - - - - - - |
+                            | current residue : other residue |
+    - - - - - - - - - - - - |-----------------|---------------|
+    Pass (interacting)      |       a         |      b        |
+    - - - - - - - - - - - - |-----------------|---------------|
+    Fail (non-interacting)  |       c         |      d        |
+    - - - - - - - - - - - - |-----------------|---------------|
+    '''
+
     contingency_table = [[aa_passing_count, other_passing_count],
                          [aa_failing_count, other_failing_count]]
 
     barnard_pvalue = barnard_exact(contingency_table, alternative = alternative).pvalue
 
-    return barnard_pvalue
+    # Calculate relative risk reduction (RRR), a measure of effect size ranging from -inf to +1
+    total_passing_count = aa_passing_count + other_passing_count
+    rr_numerator = aa_passing_count / total_passing_count if total_passing_count != 0 else np.inf
+    total_failing_count = aa_failing_count + other_failing_count
+    rr_denominator = aa_failing_count / total_failing_count if total_failing_count != 0 else np.inf
 
-def welch_ttest_catch(a, b, alternative = "less"):
-    # Helper function that performs Welch's t-test on two independent samples where the alternative hypothesis is "less"
+    risk_ratio = rr_numerator / rr_denominator if rr_denominator != 0 else np.inf
+    relative_risk_reduction = 1 - risk_ratio
 
-    with warnings.catch_warnings(record=True) as warning_list:
-        result = ttest_ind(a, b, axis=None, equal_var=False, nan_policy="omit", alternative=alternative)
-        pvalue = result.pvalue
-
-        runtime_warnings = []
-        for warning in warning_list:
-            if issubclass(warning.category, RuntimeWarning):
-                runtime_warnings.append(warning)
-
-        if runtime_warnings and np.isfinite(pvalue):
-                print(f"Welch's t-test gave the following warning: {str(warning.message)}")
-                print(f"\tsample1: mean={a.mean()} | count={len(a)} | finite_count={np.isfinite(a).sum()}")
-                print(f"\tsample2: mean={b.mean()} | count={len(b)} | finite_count={np.isfinite(b).sum()}")
-                print(f"\tp-value: {pvalue}")
-
-    return pvalue, runtime_warnings
+    return (barnard_pvalue, relative_risk_reduction)
 
 class ConditionalMatrix:
     '''
@@ -120,6 +127,15 @@ class ConditionalMatrix:
         filter_position_chars = get_nth_position(sequences)
         qualifying_member_calls = np.isin(filter_position_chars, included_residues)
 
+        # Separate sequences by passing or failing and whether they are qualifying members
+        passing_mask = np.logical_and(pass_calls, qualifying_member_calls)
+        passing_seqs_2d = sequences_2d[passing_mask]
+        passing_signals = mean_signal_values[passing_mask]
+
+        failed_mask = np.logical_and(~pass_calls, qualifying_member_calls)
+        failed_seqs_2d = sequences_2d[failed_mask]
+        failed_signals = mean_signal_values[failed_mask]
+
         '''
         Generate and assign the binding signal prediction matrix
             - To do this, we use signal values from both passing and failing peptides that qualify under the current
@@ -127,12 +143,27 @@ class ConditionalMatrix:
             - Including the failing peptides ensures that residues associated with 
               very low signal values are represented correctly. 
         '''
+        mann_whitney_alpha = matrix_params["mann_whitney_alpha"]
+        min_aa_entries = matrix_params["min_aa_entries"]
         amino_acids = matrix_params.get("amino_acids")
         include_phospho = matrix_params.get("include_phospho")
-        qualifying_seqs_2d = sequences_2d[qualifying_member_calls] # includes both pass and fail
-        qualifying_signals_2d = mean_signal_values[qualifying_member_calls] # includes both pass and fail
+        generate_individual_regressions = matrix_params.get("generate_individual_regressions")
+        ignore_failed_peptides = matrix_params.get("ignore_failed_peptides")
 
-        self.generate_positive_matrix(qualifying_seqs_2d, qualifying_signals_2d, amino_acids, include_phospho)
+        qualifying_seqs_2d = sequences_2d[qualifying_member_calls] # includes both pass and fail
+        qualifying_signals = mean_signal_values[qualifying_member_calls] # includes both pass and fail
+
+        if ignore_failed_peptides:
+            positive_training_seqs_2d = passing_seqs_2d
+            positive_training_signals = passing_signals
+        else:
+            positive_training_seqs_2d = qualifying_seqs_2d
+            positive_training_signals = qualifying_signals
+
+        self.generate_positive_matrix(positive_training_seqs_2d, positive_training_signals, amino_acids,
+                                      include_phospho, aa_equivalence_dict, min_aa_entries,
+                                      generate_individual_regressions, generate_individual_regressions,
+                                      plot_unweighted_points = False)
 
         '''
         Generate and assign the suboptimal and forbidden element matrices for disfavoured residues
@@ -140,18 +171,12 @@ class ConditionalMatrix:
             - We then look for predictors of failure to bind and represent as suboptimal/forbidden element points
         '''
         barnard_alpha = matrix_params["barnard_alpha"]
-        suboptimal_points_mode = matrix_params["suboptimal_points_mode"]
-        min_aa_entries = matrix_params["min_aa_entries"]
+        forbidden_threshold = matrix_params["forbidden_threshold"]
+        always_assign_suboptimal = matrix_params["always_assign_suboptimal"]
 
-        passing_mask = np.logical_and(pass_calls, qualifying_member_calls)
-        passing_seqs_2d = sequences_2d[passing_mask]
-
-        failed_mask = np.logical_and(~pass_calls, qualifying_member_calls)
-        failed_seqs_2d = sequences_2d[failed_mask]
-
-        self.generate_suboptimal_matrix(sequences_2d, mean_signal_values, passing_seqs_2d, failed_seqs_2d, amino_acids,
-                                        aa_equivalence_dict, barnard_alpha, suboptimal_points_mode, min_aa_entries,
-                                        reference_suboptimal_matrix, include_phospho)
+        self.generate_suboptimal_matrix(qualifying_seqs_2d, qualifying_signals, passing_seqs_2d, failed_seqs_2d,
+                                        amino_acids, aa_equivalence_dict, barnard_alpha, min_aa_entries,
+                                        forbidden_threshold, include_phospho, always_assign_suboptimal)
 
     def qualifying_entries_count(self, source_df, seq_col, position_for_filtering, residues_included_at_filter_position):
         # Helper function to get the number of sequences that qualify under the current type-position rule
@@ -186,44 +211,171 @@ class ConditionalMatrix:
 
         return signal_cols
 
-    def generate_positive_matrix(self, all_seqs_2d, all_signal_values, amino_acids, include_phospho):
+    def generate_positive_matrix(self, seqs_2d, signal_values, amino_acids, include_phospho = False,
+                                 aa_equivalence_dict = aa_equivalence_dict, mann_whitney_alpha = 0.1,
+                                 min_aa_entries = 4, generate_multivariate_model = False,
+                                 generate_linear_model = False, plot_unweighted_points = False):
         '''
         This function generates a matrix for predicting the binding signal that would be observed for a given peptide
 
         Args:
-            all_seqs_2d (np.ndarray):                  all peptide sequences tested
-            all_signal_values (np.ndarray):            corresponding signal values for all peptides tested
+            seqs_2d (np.ndarray):               peptide sequences used for training the positive matrix
+            signal_values (np.ndarray):         corresponding signal values for training peptides
+            amino_acids (tuple|list):           amino acid alphabet to use
+            include_phospho (bool):             whether to include phosphorylated residues in the matrix
+            aa_equivalence_dict (dict):         dictionary of amino acid --> tuple of 'equivalent' amino acids
+            mann_whitney_alpha (float):         alpha value to use for Mann-Whitney U test
+            min_aa_entries (int):               min number of qualifying peptides to derive points from
+            generate_multivariate_model (bool): whether to generate a multivariate LinearRegression() model (log signal)
+            generate_linear_model (bool):       whether to generate a point-sum unweighted LinearRegression() model
+            plot_unweighted_points (bool):      whether to plot unweighted positive element points sums against signals
+            ignore_failed_peptides (bool):      whether to only use signals from passing peptides for positive matrix
+            preview_scatter_plot (bool):        whether to show a scatter plot of summed positive points against signals
 
         Returns:
             None; assigns self.positive_matrix
         '''
 
-        motif_length = all_seqs_2d.shape[1]
+        motif_length = seqs_2d.shape[1]
 
         # Generate the positive element matrix for predicting signal values
         positive_matrix = make_empty_matrix(motif_length, amino_acids)
         matrix_cols = list(positive_matrix.columns)
 
-        all_signal_values[all_signal_values < 0] = 0
-        standardized_signal_values = all_signal_values / np.max(all_signal_values)
+        signal_values[signal_values < 0] = 0
+        standardized_signal_values = signal_values / np.max(signal_values)
 
+        # Iterate over columns to assign points
         for col_index, col_name in enumerate(matrix_cols):
-            col_residues = all_seqs_2d[:, col_index]
+            col_residues = seqs_2d[:, col_index]
             unique_residues = np.unique(col_residues)
             for aa in unique_residues:
                 # Generate standardized positive matrix
-                standardized_signals_when = standardized_signal_values[col_residues == aa]
-                standardized_points = np.median(standardized_signals_when)
-                positive_matrix.at[aa, col_name] = standardized_points
+                mask = np.char.equal(col_residues, aa)
+                standardized_signals_when = standardized_signal_values[mask]
+                standardized_signals_other = standardized_signal_values[~mask]
 
-        self.positive_matrix = positive_matrix.astype("float32")
+                # Calculate correlation coefficient from Mann-Whitney U statistic
+                r_alone = 0
+                if len(standardized_signals_when) > min_aa_entries and len(standardized_signals_other) > 0:
+                    u_statistic, pvalue = mannwhitneyu(standardized_signals_when, standardized_signals_other)
+                    n1n2 = len(standardized_signals_when) * len(standardized_signals_other)
+                    r_alone = (u_statistic / n1n2) - ((n1n2 - u_statistic) / n1n2)
+                    if pvalue <= mann_whitney_alpha:
+                        positive_matrix.at[aa, col_name] = r_alone
+                        continue
+
+                # If the individual amino acid failed, group with similar residues and retry
+                equivalent_residues = aa_equivalence_dict[aa]
+                has_equivalent_residue = np.isin(col_residues, equivalent_residues)
+                signals_while_group = standardized_signal_values[has_equivalent_residue]
+                signals_while_nongroup = standardized_signal_values[~has_equivalent_residue]
+
+                # Since the residue did not pass the Mann-Whitney test alone, we group it with similar residues
+                if len(signals_while_group) > 0 and len(signals_while_nongroup) > 0:
+                    group_u_statistic, group_pvalue = mannwhitneyu(signals_while_group, signals_while_nongroup)
+                    group_n1n2 = len(signals_while_group) * len(signals_while_nongroup)
+                    if group_pvalue <= mann_whitney_alpha:
+                        r_group = (group_u_statistic / group_n1n2) - ((group_n1n2 - group_u_statistic) / group_n1n2)
+
+                        # Check that the direction of correlation is the same for the group and the individual residue
+                        both_plus = r_alone > 0, r_group > 0
+                        both_minus = r_alone < 0, r_group < 0
+                        signs_match = both_plus or both_minus
+
+                        if signs_match:
+                            positive_matrix.at[aa, col_name] = r_group
+                            continue
+
+                positive_matrix.at[aa, col_name] = 0 # triggered if no passing conditions are met
+
+        # For unrepresented residue-position groups, fill in zeros using equivalent residues as necessary
+        for col_index, col_name in enumerate(matrix_cols):
+            col_residues = seqs_2d[:,col_index]
+            unique_residues = np.unique(col_residues)
+            unrepresented_residues = [aa for aa in positive_matrix.index if aa not in unique_residues]
+
+            # Iterate over unrepresented amino acids
+            for aa in unrepresented_residues:
+                # Handle suboptimal elements matrix entry
+                current_points = positive_matrix.at[aa, col_name]
+                if current_points == 0:
+                    equivalent_residues = aa_equivalence_dict[aa]
+                    equivalent_points_list = []
+                    for equivalent_aa in equivalent_residues:
+                        if aa != equivalent_aa:
+                            current_equivalent_points = positive_matrix.at[equivalent_aa, col_name]
+                            if current_equivalent_points != 0:
+                                equivalent_points_list.append(current_equivalent_points)
+                    if len(equivalent_points_list) > 0:
+                        new_points = np.mean(equivalent_points_list)
+                        positive_matrix.at[aa, col_name] = new_points
+
+        # Back-calculate positive element scores for input peptides if needed
+        if generate_multivariate_model or generate_linear_model or plot_unweighted_points:
+            log_signal_values = np.log(signal_values + 1)
+            positive_matrix_arr = positive_matrix.to_numpy()
+
+            col_indices = np.tile(np.arange(seqs_2d.shape[1]), seqs_2d.shape[0])
+            row_indices = positive_matrix.index.get_indexer_for(seqs_2d.flatten())
+            flattened_points = positive_matrix_arr[row_indices, col_indices]
+            raw_positive_scores_2d = flattened_points.reshape(seqs_2d.shape)
+        else:
+            raw_positive_scores_2d, log_signal_values = None, None
+
+        # Plot positive score sums against signal values
+        if plot_unweighted_points:
+            print("\t\t\tCurrent rule:", self.rule)
+            plt.scatter(raw_positive_scores_2d.sum(axis=1), standardized_signal_values)
+            plt.xlabel("Unweighted Positive Element Scores")
+            plt.ylabel("Relative Signal Values")
+            plt.show()
+
+        # Check the final R2 correlations for a multivariate log-linear (exponential) model
+        if generate_multivariate_model:
+            model = LinearRegression()
+            model.fit(raw_positive_scores_2d, log_signal_values)
+            self.log_multivariate_positive_model = model
+            predicted_signal_values = model.predict(raw_positive_scores_2d)
+            self.positive_multivariate_r2 = r2_score(log_signal_values, predicted_signal_values)
+        else:
+            self.log_multivariate_positive_model, self.positive_multivariate_r2 = None, None
+
+        # Check the final R2 correlations for an unweighted-sum log-linear (exponential) model
+        if generate_linear_model:
+            model = LinearRegression()
+            model.fit(raw_positive_scores_2d.sum(axis=1).reshape(-1,1), log_signal_values)
+            self.unweighted_positive_model = model
+            predicted_signal_values = model.predict(raw_positive_scores_2d.sum(axis=1).reshape(-1,1))
+            self.unweighted_positive_r2 = r2_score(log_signal_values, predicted_signal_values)
+        else:
+            self.unweighted_positive_model, self.unweighted_positive_r2 = None, None
+
+        # Collapse phospho if necessary
+        positive_matrix = positive_matrix.astype("float32")
+
         if not include_phospho:
-            collapse_phospho(self.positive_matrix, in_place=True)
+            pairs = [("B","S"), ("J","T"), ("O","Y")]
+            for phospho_residue, corresponding_residue in pairs:
+                phospho_points_arr = positive_matrix.loc[phospho_residue].to_numpy()
+                corresponding_points_arr = positive_matrix.loc[corresponding_residue].to_numpy()
 
-    def generate_suboptimal_matrix(self, sequences_2d, signal_values, passing_seqs_2d, failed_seqs_2d,
-                                   amino_acids, aa_equivalence_dict = aa_equivalence_dict, alpha = 0.2,
-                                   suboptimal_points_mode = "counts", min_aa_entries = 4,
-                                   reference_suboptimal_matrix = None, include_phospho = False):
+                # Take larger effect sizes
+                stacked_arr = np.stack([phospho_points_arr, corresponding_points_arr])
+                row_indices = np.nanargmax(np.abs(stacked_arr), axis=0)
+                col_indices = np.arange(len(phospho_points_arr))
+                best_vals = stacked_arr[row_indices,col_indices]
+
+                # Assign back to dataframe
+                positive_matrix.loc[corresponding_residue] = best_vals
+                positive_matrix.drop(phospho_residue)
+
+        # Assign to self
+        self.positive_matrix = positive_matrix
+
+    def generate_suboptimal_matrix(self, sequences_2d, signal_values, passing_seqs_2d, failed_seqs_2d, amino_acids,
+                                   aa_equivalence_dict = aa_equivalence_dict, barnard_alpha = 0.2, min_aa_entries = 4,
+                                   forbidden_threshold = 3, include_phospho = False, always_assign_value = False):
         '''
         This function generates a suboptimal element scoring matrix and a forbidden element matrix
 
@@ -233,11 +385,14 @@ class ConditionalMatrix:
             failed_seqs_2d (np.ndarray):                peptide sequences that do NOT bind the protein of interest
             failed_signal_values (np.ndarray):          corresponding signal values for failing peptides
             aa_equivalence_dict (dict):                 dictionary of amino acid --> tuple of 'equivalent' amino acids
-            alpha (float):                              Barnard exact test threshold to contribute a trend to the matrix
-            suboptimal_points_mode (str):               if "counts", points are assigned as ratio of % positive counts;
-                                                        if "signal", points are assigned as ratio of signal values
-            min_aa_entries (int):                       min number of qualifying peptides to derive suboptimal points
-            reference_suboptimal_matrix (pd.DataFrame): baseline suboptimal element matrix, if known, for default values
+            barnard_alpha (float):                      Barnard exact test threshold to contribute to the matrix
+            min_aa_entries (int):               min number of qualifying peptides to derive points from
+            forbidden_threshold (int):                  number of peptides that must possess a particular residue
+                                                        or group of residues before it can be considered "forbidden"
+            include_phospho (bool):                     whether to include phospho-residues in the matrices
+            always_assign_value (bool):                 if True and individual Barnard p-value > Barnard alpha,
+                                                        then the equivalent residue group RRR value is used,
+                                                        regardless of whether group Barnard p-value < Barnard alpha
 
         Returns:
             None; assigns self.suboptimal_elements_matrix and self.forbidden_elements_matrix
@@ -252,14 +407,6 @@ class ConditionalMatrix:
 
         signal_values[signal_values < 0] = 0
 
-        # Check suboptimal points mode
-        if suboptimal_points_mode == "counts":
-            use_counts = True
-        elif suboptimal_points_mode == "signal" or suboptimal_points_mode == "signals":
-            use_counts = False
-        else:
-            raise ValueError(f"got suboptimal_points_mode = {suboptimal_points_mode}, but must be `counts` or `signal`")
-
         # Loop over the matrix
         for col_index, col_name in enumerate(matrix_cols):
             passing_col = passing_seqs_2d[:,col_index]
@@ -268,112 +415,75 @@ class ConditionalMatrix:
             unique_residues = np.unique(full_col)
 
             for aa in unique_residues:
-                # Test whether peptides with this aa at the current position have significantly lower signal values
-                signals_while = signal_values[full_col == aa]
-                signals_other = signal_values[full_col != aa]
-                ttest_pvalue, _ = welch_ttest_catch(signals_while, signals_other)
-
-                # Determine the signal ratio of peptides with this aa at the current position and peptides without it
-                mean_signal_while = signals_while.mean()
-                mean_signal_other = signals_other.mean()
-                signal_ratio = mean_signal_while / mean_signal_other if mean_signal_other > 0 else np.nan
-
-                # Find the pass rate ratio
-                qualifying_count = np.sum(full_col == aa)
-                if qualifying_count >= min_aa_entries and use_counts:
-                    qualifying_pass_count = np.sum(passing_col == aa)
-                    qualifying_fail_count = np.sum(failing_col == aa)
-                    qualifying_count = qualifying_pass_count + qualifying_fail_count
-                    other_pass_count = len(passing_col) - qualifying_pass_count
-                    other_fail_count = len(failing_col) - qualifying_fail_count
-                    other_count = other_pass_count + other_fail_count
-                    qualifying_pass_rate = qualifying_pass_count / qualifying_count if qualifying_count != 0 else np.nan
-                    other_pass_rate = other_pass_count / other_count if other_count != 0 else np.nan
-                    if other_pass_rate != 0:
-                        pass_rate_ratio = qualifying_pass_rate / other_pass_rate # is less than 1 when aa is disfavoured
-                    else:
-                        pass_rate_ratio = 1
-                    use_default = False
-                else:
-                    pass_rate_ratio = 1 # prevents high variability when only a few example peptides exist
-                    use_default = True
-
                 # Test whether peptides with this aa at the current position are more likely to be classed as passing
-                barnard_pvalue = barnard_disfavoured(aa, passing_col, failing_col)
+                barnard_pvalue, relative_risk_reduction = barnard_disfavoured(passing_col, failing_col, test_aa = aa)
 
-                # Assign values to matrix only if one of the tests passes the alpha; if not, proceed to checking related
-                if ttest_pvalue <= alpha or barnard_pvalue <= alpha:
-                    if use_counts and pass_rate_ratio <= 1:
-                        points_value = 1 - pass_rate_ratio
-                    elif use_counts and use_default:
-                        points_value = reference_suboptimal_matrix.at[aa, col_name]
-                    elif use_counts:
-                        points_value = 0
-                    else:
-                        points_value = 1 - signal_ratio if mean_signal_while < mean_signal_other else 0
-
+                above_min_aa = np.sum(full_col == aa) >= min_aa_entries
+                appears_forbidden = np.sum(passing_col == aa) == 0 and np.sum(failing_col == aa) >= forbidden_threshold
+                if barnard_pvalue <= barnard_alpha and above_min_aa:
+                    '''
+                    Relative Risk Reduction (RRR) is the reduction of "risk" of being classified as passing.
+                    When RRR approaches +1, it means the current residue is disfavoured. If RRR < 0, it is favoured.
+                    '''
+                    points_value = relative_risk_reduction if relative_risk_reduction > 0 else 0
                     suboptimal_elements_matrix.at[aa, col_name] = points_value
-                    if np.sum(passing_col == aa) == 0:
+                    if appears_forbidden:
                         forbidden_elements_matrix.at[aa, col_name] = 1
                     continue
 
                 # Test whether peptides with similar residues at this position have significantly lower signal values
                 equivalent_residues = aa_equivalence_dict[aa]
-                has_equivalent_residue = np.isin(full_col, equivalent_residues)
-                signals_while_group = signal_values[has_equivalent_residue]
-                signals_while_nongroup = signal_values[~has_equivalent_residue]
-                group_ttest_pvalue, _ = welch_ttest_catch(signals_while_group, signals_while_nongroup)
+                group_barnard_pvalue, group_rrr = barnard_disfavoured(passing_col, failing_col,
+                                                                      equivalent_residues = equivalent_residues)
+                group_passes_barnard = group_barnard_pvalue <= barnard_alpha and relative_risk_reduction > 0
 
-                # Determine the signal ratio of peptides with this aa at the current position and peptides without it
-                mean_signal_group = signals_while_group.mean()
-                mean_signal_nongroup = signals_while_nongroup.mean()
-                signal_ratio_group = mean_signal_group / mean_signal_nongroup if mean_signal_nongroup > 0 else np.nan
+                never_passes = np.sum(np.isin(passing_col, equivalent_residues)) == 0
+                fails_exceed_threshold = np.sum(np.isin(failing_col, equivalent_residues)) >= forbidden_threshold
+                group_appears_forbidden = never_passes and fails_exceed_threshold
 
-                # Find the group pass rate ratio
-                group_qualifying_count = np.sum(has_equivalent_residue)
-                if group_qualifying_count >= min_aa_entries and use_counts:
-                    group_passing_count = np.sum(np.isin(passing_col, equivalent_residues))
-                    group_failing_count = np.sum(np.isin(failing_col, equivalent_residues))
-                    group_count = group_passing_count + group_failing_count
-
-                    nongroup_passing_count = len(passing_col) - group_passing_count
-                    nongroup_failing_count = len(failing_col) - group_failing_count
-                    nongroup_count = nongroup_passing_count + nongroup_failing_count
-
-                    group_pass_rate = group_passing_count / group_count if group_count != 0 else np.nan
-                    nongroup_pass_rate = nongroup_passing_count / nongroup_count if nongroup_count != 0 else np.nan
-
-                    # The group rate ratio will be less than 1 when an aa is disfavoured
-                    group_rate_ratio = group_pass_rate / nongroup_pass_rate if nongroup_pass_rate > 0 else np.nan
-                    if not np.isfinite(group_rate_ratio):
-                        group_rate_ratio = 1
-                    group_use_default = False
-
-                else:
-                    group_rate_ratio = 1 # prevents high variability when only a few example peptides exist
-                    group_use_default = True
-
-                # Test whether peptides with similar residues at this position are more likely to be classed as passing
-                group_barnard_pvalue = barnard_disfavoured(aa, passing_col, failing_col, equivalent_residues)
-
-                # Assign values to matrix only if one of the group tests passes alpha
-                if group_ttest_pvalue <= alpha or group_barnard_pvalue <= alpha:
-                    if use_counts and group_rate_ratio <= 1:
-                        both_less = pass_rate_ratio < 1 and group_rate_ratio < 1
-                        less_intense_ratio = np.max([pass_rate_ratio, group_rate_ratio])
-                        points_value = 1 - less_intense_ratio if both_less else 0
-                    elif use_counts and group_use_default:
-                        points_value = reference_suboptimal_matrix.at[aa, col_name]
-                    elif use_counts:
-                        points_value = 0
-                    else:
-                        both_less = mean_signal_while < mean_signal_other and mean_signal_group < mean_signal_nongroup
-                        more_similar_ratio = np.max([signal_ratio, signal_ratio_group])
-                        points_value = 1 - more_similar_ratio if both_less else 0
+                group_above_min_aa = np.sum(np.isin(full_col, equivalent_residues)) >= min_aa_entries
+                if always_assign_value or (group_passes_barnard and group_above_min_aa):
+                    # Checks if relative_risk_reduction > 0 to ensure individual residue is consistent with group
+                    points_value = group_rrr if group_rrr > 0 else 0
                     suboptimal_elements_matrix.at[aa, col_name] = points_value
-                    if np.sum(np.isin(passing_col, equivalent_residues)) == 0:
+                    if group_appears_forbidden:
                         forbidden_elements_matrix.at[aa, col_name] = 1
-                    continue
+
+        # For unrepresented residue-position groups, fill in zeros using equivalent residues as necessary
+        for col_index, col_name in enumerate(matrix_cols):
+            full_col = sequences_2d[:,col_index]
+            unique_residues = np.unique(full_col)
+            unrepresented_residues = [aa for aa in suboptimal_elements_matrix.index if aa not in unique_residues]
+
+            # Iterate over unrepresented amino acids
+            for aa in unrepresented_residues:
+                # Handle suboptimal elements matrix entry
+                current_suboptimal_points = suboptimal_elements_matrix.at[aa, col_name]
+                if current_suboptimal_points == 0:
+                    equivalent_residues = aa_equivalence_dict[aa]
+                    equivalent_points_list = []
+                    for equivalent_aa in equivalent_residues:
+                        if aa != equivalent_aa:
+                            current_equivalent_points = suboptimal_elements_matrix.at[equivalent_aa, col_name]
+                            equivalent_points_list.append(current_equivalent_points)
+                    if len(equivalent_points_list) > 0:
+                        new_points = np.mean(equivalent_points_list)
+                        suboptimal_elements_matrix.at[aa, col_name] = new_points
+
+                # Handle forbidden elements matrix entry
+                current_forbidden_points = forbidden_elements_matrix.at[aa, col_name]
+                if current_forbidden_points == 0:
+                    equivalent_residues = aa_equivalence_dict[aa]
+                    all_equivalent_forbidden = True
+                    for equivalent_aa in equivalent_residues:
+                        if aa != equivalent_aa:
+                            current_equivalent_forbidden = forbidden_elements_matrix.at[equivalent_aa, col_name]
+                            if current_equivalent_forbidden == 0:
+                                all_equivalent_forbidden = False
+                    if all_equivalent_forbidden:
+                        for equivalent_aa in equivalent_residues:
+                            if aa != equivalent_aa:
+                                forbidden_elements_matrix.at[equivalent_aa, col_name] = 1
 
         self.suboptimal_elements_matrix = suboptimal_elements_matrix.astype("float32")
         self.forbidden_elements_matrix = forbidden_elements_matrix.astype("float32")
@@ -484,6 +594,12 @@ class ConditionalMatrices:
             data_params:         same as in ConditionalMatrix()
             matrix_params:       same as in ConditionalMatrix()
         '''
+
+        self.scored_training_data = False # set for later use by self.score_peptides()
+
+        self.suppress_positive_positions = matrix_params["suppress_positive_positions"]
+        self.suppress_suboptimal_positions = matrix_params["suppress_suboptimal_positions"]
+        self.suppress_forbidden_positions = matrix_params["suppress_forbidden_positions"]
 
         self.motif_length = motif_length
 
@@ -617,7 +733,7 @@ class ConditionalMatrices:
 
         desc = "Generating conditional matrices (signal, suboptimal, & forbidden types)..."
         with trange(len(rule_tuples), desc=desc) as pbar:
-            for results in pool.imap_unordered(process_partial, rule_tuples):
+            for results in pool.imap(process_partial, rule_tuples):
                 results_list.append(results)
                 pbar.update()
 
@@ -770,9 +886,8 @@ class ConditionalMatrices:
         # Display saved message
         print(f"Saved unweighted matrices, weighted matrices, and output report to {parent_folder}")
 
-    def score_peptides(self, sequences_2d, actual_truths, signal_values = None, objective_type = "accuracy",
-                       slice_scores_subsets = None, use_weighted = False, precision_recall_path = None,
-                       coefficients_path = None):
+    def score_peptides(self, sequences_2d, actual_truths, signal_values = None, slice_scores_subsets = None,
+                       use_weighted = False, precision_recall_path = None, coefficients_path = None):
         '''
         Vectorized function to score amino acid sequences based on the dictionary of context-aware weighted matrices
 
@@ -780,7 +895,6 @@ class ConditionalMatrices:
             sequences_2d (np.ndarray):                  unravelled peptide sequences to score
             actual_truths (np.ndarray):                 array of boolean calls for whether peptides bind in experiments
             signal_values (np.ndarray):                 array of binding signal values for peptides against protein bait(s)
-            objective_type (str):                       defines the objective function for weight optimization
             conditional_matrices (ConditionalMatrices): conditional weighted matrices for scoring peptides
             slice_scores_subsets (np.ndarray):          array of stretches of positions to stratify results into;
                                                         e.g. [6,7,2] is stratified into scores for positions
@@ -869,7 +983,33 @@ class ConditionalMatrices:
         forbidden_scores_2d = (left_forbidden_2d + right_forbidden_2d) / 2
 
         result = ScoredPeptideResult(sequences_2d, slice_scores_subsets, positive_scores_2d, suboptimal_scores_2d,
-                                     forbidden_scores_2d, actual_truths, signal_values, objective_type,
-                                     fig_path = precision_recall_path, coefficients_path = coefficients_path)
+                                     forbidden_scores_2d, actual_truths, signal_values,
+                                     fig_path = precision_recall_path, coefficients_path = coefficients_path,
+                                     suppress_positives = self.suppress_positive_positions,
+                                     suppress_suboptimals = self.suppress_suboptimal_positions,
+                                     suppress_forbiddens = self.suppress_forbidden_positions)
+
+        if not self.scored_training_data:
+            # Assign ScoredPeptideResult metrics to self; this is done when this method is first called during training
+            self.binding_positive_weights = result.binding_positive_weights
+            self.binding_standardization_coefficients = result.binding_standardization_coefficients
+
+            self.accuracy_positive_weights = result.positives_weights
+            self.accuracy_suboptimal_weights = result.suboptimals_weights
+            self.accuracy_forbidden_weights = result.forbiddens_weights
+
+            self.best_accuracy_method = result.best_accuracy_method
+            self.accuracy_standardization_coefficients = result.standardization_coefficients
+
+            self.thresholds_accuracy = result.thresholds_accuracy
+            self.standardized_binding_threshold = result.standardized_binding_threshold
+            self.standardized_total_threshold = result.standardized_total_threshold
+            self.standardized_positive_threshold = result.standardized_positive_threshold
+            self.standardized_suboptimal_threshold = result.standardized_suboptimal_threshold
+            self.standardized_forbidden_threshold = result.standardized_forbidden_threshold
+
+            self.standardized_binding_exp_params = result.standardized_binding_exp_params
+
+            self.scored_training_data = True
 
         return result

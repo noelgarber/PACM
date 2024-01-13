@@ -13,9 +13,8 @@ except:
     from Matrix_Generator.config import general_params, data_params, matrix_params, aa_equivalence_dict
 
 def apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets = None, actual_truths = None,
-                       signal_values = None, objective_type = "accuracy", seq_col = None, convert_phospho = True,
-                       add_residue_cols = False, in_place = False, sequences_2d = None, precision_recall_path = None,
-                       coefficients_path = None):
+                       signal_values = None, seq_col = None, convert_phospho = True, add_residue_cols = False,
+                       in_place = False, sequences_2d = None, precision_recall_path = None, coefficients_path = None):
     '''
     Function to apply the score_seqs() function to all sequences in the source df and add residue cols for sorting
 
@@ -25,7 +24,6 @@ def apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets = No
         slice_scores_subsets (np.ndarray):          array of frame lengths for stratifying 2D score arrays
         actual_truths (np.ndarray):                 array of experimentally confirmed truth values of input peptides
         signal_values (np.ndarray):                 array of binding signal values for peptides against protein bait(s)
-        objective_type (str):                       defines the objective function as `accuracy`, `f1`, or `r2`
         seq_col (str): 			                    col in input_df with peptide seqs to score
         convert_phospho (bool):                     whether to convert phospho-residues to non-phospho before lookups
         add_residue_cols (bool):                    whether to add columns containing individual residue letters
@@ -51,7 +49,7 @@ def apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets = No
     # Score the input data; the result is an instance of ScoredPeptideResult
     weights_exist = True if matrix_params.get("position_weights") is not None else False
     scored_result = conditional_matrices.score_peptides(sequences_2d, actual_truths, signal_values,
-                                                        objective_type, slice_scores_subsets, weights_exist,
+                                                        slice_scores_subsets, weights_exist,
                                                         precision_recall_path, coefficients_path)
 
     # Construct the output dataframe
@@ -129,17 +127,13 @@ def main(input_df, general_params = general_params, data_params = data_params, m
         pass_values = input_df[pass_col].to_numpy()
         actual_truths = np.equal(pass_values, pass_str)
 
-        objective_mode = matrix_params.get("objective_mode")
-        if objective_mode == "r2" or objective_mode == "R2":
-            bait_signal_cols = list(set([col for cols in data_params["bait_cols_dict"].values() for col in cols]))
-            bait_signal_values = input_df[bait_signal_cols].to_numpy()
-            mean_signal_values = bait_signal_values.mean(axis=1)
-        else:
-            mean_signal_values = None
+        bait_signal_cols = list(set([col for cols in data_params["bait_cols_dict"].values() for col in cols]))
+        bait_signal_values = input_df[bait_signal_cols].to_numpy()
+        mean_signal_values = bait_signal_values.mean(axis=1)
 
         precision_recall_path = os.path.join(output_folder, "precision_recall_graph.pdf")
         scored_result, output_df = apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets,
-                                                      actual_truths, mean_signal_values, objective_mode,
+                                                      actual_truths, mean_signal_values,
                                                       seq_col, convert_phospho, add_residue_cols = True,
                                                       in_place = False, precision_recall_path = precision_recall_path,
                                                       coefficients_path = output_folder)
