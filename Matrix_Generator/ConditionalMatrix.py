@@ -78,17 +78,19 @@ class ConditionalMatrix:
     rule, e.g. position #1 = [D,E]
     '''
     def __init__(self, motif_length, source_df, data_params = data_params, matrix_params = matrix_params,
-                 aa_equivalence_dict = aa_equivalence_dict, reference_suboptimal_matrix = None):
+                 aa_equivalence_dict = aa_equivalence_dict, baseline_matrix = None):
         '''
         Function for initializing unadjusted conditional matrices from source peptide data,
         based on type-position rules (e.g. #1=Acidic)
 
         Args:
-            motif_length (int):                the length of the motif being assessed
-            source_df (pd.DataFrame):          dataframe containing peptide-protein binding data
-            residue_charac_dict:               dict of amino acid chemical characteristics
-            data_params (dict):                dictionary of data-specific params described in config.py
-            matrix_params (dict):              dictionary of matrix-specific params described in config.py
+            motif_length (int):                  length of the motif being assessed
+            source_df (pd.DataFrame):            dataframe containing peptide-protein binding data
+            residue_charac_dict:                 dict of amino acid chemical characteristics
+            data_params (dict):                  dictionary of data-specific params described in config.py
+            matrix_params (dict):                dictionary of matrix-specific params described in config.py
+            baseline_matrix (ConditionalMatrix): baseline unconditional matrix (no filter);
+                                                 used when making the forbidden elements matrix
         '''
         
         # Extract and unravel sequences
@@ -157,7 +159,7 @@ class ConditionalMatrix:
             positive_training_signals = qualifying_signals
 
         self.generate_positive_matrix(positive_training_seqs_2d, positive_training_signals, amino_acids,
-                                      include_phospho, aa_equivalence_dict, min_aa_entries,
+                                      include_phospho, aa_equivalence_dict, mann_whitney_alpha, min_aa_entries,
                                       generate_individual_regressions, generate_individual_regressions,
                                       plot_unweighted_points = False)
 
@@ -172,7 +174,7 @@ class ConditionalMatrix:
 
         self.generate_suboptimal_matrix(qualifying_seqs_2d, qualifying_signals, passing_seqs_2d, failed_seqs_2d,
                                         amino_acids, aa_equivalence_dict, barnard_alpha, min_aa_entries,
-                                        forbidden_threshold, include_phospho, always_assign_suboptimal)
+                                        forbidden_threshold, baseline_matrix, include_phospho, always_assign_suboptimal)
 
     def qualifying_entries_count(self, source_df, seq_col, position_for_filtering, residues_included_at_filter_position):
         # Helper function to get the number of sequences that qualify under the current type-position rule
@@ -371,7 +373,8 @@ class ConditionalMatrix:
 
     def generate_suboptimal_matrix(self, sequences_2d, signal_values, passing_seqs_2d, failed_seqs_2d, amino_acids,
                                    aa_equivalence_dict = aa_equivalence_dict, barnard_alpha = 0.2, min_aa_entries = 4,
-                                   forbidden_threshold = 3, include_phospho = False, always_assign_value = False):
+                                   forbidden_threshold = 3, baseline_matrix = None, include_phospho = False,
+                                   always_assign_value = False):
         '''
         This function generates a suboptimal element scoring matrix and a forbidden element matrix
 
@@ -382,9 +385,10 @@ class ConditionalMatrix:
             failed_signal_values (np.ndarray):          corresponding signal values for failing peptides
             aa_equivalence_dict (dict):                 dictionary of amino acid --> tuple of 'equivalent' amino acids
             barnard_alpha (float):                      Barnard exact test threshold to contribute to the matrix
-            min_aa_entries (int):               min number of qualifying peptides to derive points from
+            min_aa_entries (int):                       min number of qualifying peptides to derive points from
             forbidden_threshold (int):                  number of peptides that must possess a particular residue
                                                         or group of residues before it can be considered "forbidden"
+            baseline_matrix (ConditionalMatrix):        baseline matrix; used for unrepresented residues
             include_phospho (bool):                     whether to include phospho-residues in the matrices
             always_assign_value (bool):                 if True and individual Barnard p-value > Barnard alpha,
                                                         then the equivalent residue group RRR value is used,
@@ -394,6 +398,7 @@ class ConditionalMatrix:
             None; assigns self.suboptimal_elements_matrix and self.forbidden_elements_matrix
         '''
 
+        baseline_matrix_exists = True if baseline_matrix is not None else False
         motif_length = passing_seqs_2d.shape[1]
 
         # Generate the suboptimal and forbidden element matrices
@@ -428,22 +433,22 @@ class ConditionalMatrix:
                         suboptimal_elements_matrix.at[aa, col_name] = points_value
                         if appears_forbidden:
                             forbidden_elements_matrix.at[aa, col_name] = 1
-
-                    continue
+                        continue
 
                 # Test whether peptides with similar residues at this position have significantly lower signal values
                 equivalent_residues = aa_equivalence_dict[aa]
-                group_pvalue, group_q = barnard_yule_q(passing_col, failing_col,
-                                                       equivalent_residues = equivalent_residues, alternative = alt)
-                consistent_sign = (yule_q >= 0 and group_q >= 0) or (yule_q <= 0 and group_q <= 0)
-                group_passes_barnard = group_pvalue <= barnard_alpha and consistent_sign
-
-                never_passes = np.sum(np.isin(passing_col, equivalent_residues)) == 0
-                fails_exceed_threshold = np.sum(np.isin(failing_col, equivalent_residues)) >= forbidden_threshold
-                group_appears_forbidden = never_passes and fails_exceed_threshold
-
                 group_above_min_aa = np.sum(np.isin(full_col, equivalent_residues)) >= min_aa_entries
-                if always_assign_value or group_above_min_aa:
+
+                if group_above_min_aa or always_assign_value:
+                    group_pvalue, group_q = barnard_yule_q(passing_col, failing_col,
+                                                           equivalent_residues=equivalent_residues, alternative=alt)
+                    consistent_sign = (yule_q >= 0 and group_q >= 0) or (yule_q <= 0 and group_q <= 0)
+                    group_passes_barnard = group_pvalue <= barnard_alpha and consistent_sign
+
+                    never_passes = np.sum(np.isin(passing_col, equivalent_residues)) == 0
+                    fails_exceed_threshold = np.sum(np.isin(failing_col, equivalent_residues)) >= forbidden_threshold
+                    group_appears_forbidden = never_passes and fails_exceed_threshold
+
                     if group_passes_barnard:
                         points_value = -group_q
                         suboptimal_elements_matrix.at[aa, col_name] = points_value
@@ -453,6 +458,13 @@ class ConditionalMatrix:
                         points_value = -group_q if np.abs(group_q) < np.abs(yule_q) else -yule_q
                         suboptimal_elements_matrix.at[aa, col_name] = points_value
 
+                elif baseline_matrix_exists:
+                    if aa in baseline_matrix.suboptimal_elements_matrix.index:
+                        suboptimal_val = baseline_matrix.suboptimal_elements_matrix.at[aa, col_name]
+                        suboptimal_elements_matrix.at[aa, col_name] = suboptimal_val
+                        if appears_forbidden:
+                            forbidden_val = baseline_matrix.forbidden_elements_matrix.at[aa, col_name]
+                            forbidden_elements_matrix.at[aa, col_name] = forbidden_val
 
         # For unrepresented residue-position groups, fill in zeros using equivalent residues as necessary
         for col_index, col_name in enumerate(matrix_cols):
@@ -634,7 +646,8 @@ class ConditionalMatrices:
         self.report = ["Conditional Matrix Generation Report\n"]
 
         rule_tuples = self.get_rule_tuples(residue_charac_dict, motif_length)
-        results_list = self.generate_matrices(rule_tuples, motif_length, source_df, data_params, matrix_params)
+        results_list = self.generate_matrices(rule_tuples, motif_length, source_df, data_params, matrix_params,
+                                              self.baseline_matrix)
         replace_forbidden = matrix_params["replace_forbidden"]
         self.substitution_reports = {}
         substitution_report = ["---\n"]
@@ -713,7 +726,7 @@ class ConditionalMatrices:
         # Generate the matrix object and dict key name
         self.baseline_matrix = ConditionalMatrix(motif_length, source_df, data_params, current_matrix_params)
 
-    def generate_matrices(self, rule_tuples, motif_length, source_df, data_params, matrix_params):
+    def generate_matrices(self, rule_tuples, motif_length, source_df, data_params, matrix_params, baseline_matrix):
         '''
         Parallelized application of self.generate_matrix()
 
@@ -723,6 +736,7 @@ class ConditionalMatrices:
             source_df (pd.DataFrame): dataframe of source data for building matrices
             data_params (dict):       user-defined params for accessing source data, as described in ConditionalMatrix()
             matrix_params (dict):     shared dict of matrix params defined by the user as described in ConditionalMatrix()
+            baseline_matrix (ConditionalMatrix): baseline matrix
 
         Returns:
             results_list (list):  list of results tuples of (conditional_matrix, dict_key_name, report_line)
@@ -732,7 +746,8 @@ class ConditionalMatrices:
         pool = multiprocessing.Pool(processes=cpus_to_use)
 
         process_partial = partial(self.generate_matrix, motif_length = motif_length, source_df = source_df,
-                                  data_params = data_params, matrix_params = matrix_params)
+                                  data_params = data_params, matrix_params = matrix_params,
+                                  baseline_matrix = baseline_matrix)
 
         results_list = []
 
@@ -747,17 +762,18 @@ class ConditionalMatrices:
 
         return results_list
 
-    def generate_matrix(self, rule_tuple, motif_length, source_df, data_params, matrix_params):
+    def generate_matrix(self, rule_tuple, motif_length, source_df, data_params, matrix_params, baseline_matrix):
         '''
         Function for generating an individual conditional matrix according to a filter position and member aa list
 
         Args:
-            rule_tuple (tuple):       tuple of (amino acid member list, filter position, chemical characteristic)
-                                      representing the current type/position rule, e.g. #1=Acidic
-            motif_length (int):       length of the motif being studied
-            source_df (pd.DataFrame): dataframe of source data for building matrices
-            data_params (dict):       user-defined params for accessing source data, as described in ConditionalMatrix()
-            matrix_params (dict):     user-defined params for generating matrices, as described in ConditionalMatrix()
+            rule_tuple (tuple):                  tuple of (AA member list, filter position, chemical characteristic)
+                                                 representing the current type/position rule, e.g. #1=Acidic
+            motif_length (int):                  length of the motif being studied
+            source_df (pd.DataFrame):            dataframe of source data for building matrices
+            data_params (dict):                  user-defined params for accessing source data
+            matrix_params (dict):                user-defined params for generating matrices
+            baseline_matrix (ConditionalMatrix): baseline matrix
 
         Returns:
             conditional_matrix (ConditionalMatrix): conditional matrix object for the current type/position rule
@@ -773,7 +789,8 @@ class ConditionalMatrices:
         current_matrix_params["position_for_filtering"] = filter_position
 
         # Generate the matrix object and dict key name
-        conditional_matrix = ConditionalMatrix(motif_length, source_df, data_params, current_matrix_params)
+        conditional_matrix = ConditionalMatrix(motif_length, source_df, data_params, current_matrix_params,
+                                               baseline_matrix = baseline_matrix)
         dict_key_name = "#" + str(filter_position) + "=" + chemical_characteristic
 
         # Display a warning message if insufficient seqs were passed
