@@ -20,7 +20,7 @@ try:
 except:
     from Matrix_Generator.config import data_params, matrix_params, aa_equivalence_dict, amino_acids_phos
 
-def barnard_disfavoured(aa_col_passing, aa_col_failing, test_aa = None, equivalent_residues = None, alternative="less"):
+def barnard_yule_q(aa_col_passing, aa_col_failing, test_aa = None, equivalent_residues = None, alternative="less"):
     '''
     Helper function that uses Barnard's exact test to determine if a test amino acid appears less often in a sliced col
     of peptide sequences for the passing peptides vs. the failing ones.
@@ -33,7 +33,7 @@ def barnard_disfavoured(aa_col_passing, aa_col_failing, test_aa = None, equivale
 
     Returns:
         barnard_pvalue (float):           the p-value of the test where the alternative hypothesis is "less"
-        relative_risk_reduction (float):  a measure of effect size where RRR = 1 - RR, the relative risk
+        yule_q (float):                   Yule's Q coefficient; -1 is perfectly suboptimal, +1 is perfectly optimal
     '''
 
     if test_aa is None and equivalent_residues is None:
@@ -65,16 +65,12 @@ def barnard_disfavoured(aa_col_passing, aa_col_failing, test_aa = None, equivale
 
     barnard_pvalue = barnard_exact(contingency_table, alternative = alternative).pvalue
 
-    # Calculate relative risk reduction (RRR), a measure of effect size ranging from -inf to +1
-    total_passing_count = aa_passing_count + other_passing_count
-    rr_numerator = aa_passing_count / total_passing_count if total_passing_count != 0 else np.inf
-    total_failing_count = aa_failing_count + other_failing_count
-    rr_denominator = aa_failing_count / total_failing_count if total_failing_count != 0 else np.inf
+    # Calculate Yule's Q coefficient; -1 is a perfect negative association and +1 is a perfect positive association
+    yule_numerator = aa_passing_count * other_failing_count - other_passing_count * aa_failing_count
+    yule_denominator = aa_passing_count * other_failing_count + other_passing_count * aa_failing_count
+    yule_q = yule_numerator / yule_denominator if yule_denominator > 0 else 0
 
-    risk_ratio = rr_numerator / rr_denominator if rr_denominator != 0 else np.inf
-    relative_risk_reduction = 1 - risk_ratio
-
-    return (barnard_pvalue, relative_risk_reduction)
+    return (barnard_pvalue, yule_q)
 
 class ConditionalMatrix:
     '''
@@ -416,38 +412,47 @@ class ConditionalMatrix:
 
             for aa in unique_residues:
                 # Test whether peptides with this aa at the current position are more likely to be classed as passing
-                barnard_pvalue, relative_risk_reduction = barnard_disfavoured(passing_col, failing_col, test_aa = aa)
+                alt = "two-sided"
+                pvalue, yule_q = barnard_yule_q(passing_col, failing_col, test_aa = aa, alternative = alt)
 
                 above_min_aa = np.sum(full_col == aa) >= min_aa_entries
                 appears_forbidden = np.sum(passing_col == aa) == 0 and np.sum(failing_col == aa) >= forbidden_threshold
-                if barnard_pvalue <= barnard_alpha and above_min_aa:
-                    '''
-                    Relative Risk Reduction (RRR) is the reduction of "risk" of being classified as passing.
-                    When RRR approaches +1, it means the current residue is disfavoured. If RRR < 0, it is favoured.
-                    '''
-                    points_value = relative_risk_reduction if relative_risk_reduction > 0 else 0
-                    suboptimal_elements_matrix.at[aa, col_name] = points_value
-                    if appears_forbidden:
-                        forbidden_elements_matrix.at[aa, col_name] = 1
+                if above_min_aa:
+                    if pvalue <= barnard_alpha:
+                        '''
+                        Yule's Q coefficient ranges from -1 to +1.
+                        When Q approaches -1, it means the current residue is disfavoured. 
+                        When Q approaches +1, it means the current residue is favoured. 
+                        '''
+                        points_value = -yule_q
+                        suboptimal_elements_matrix.at[aa, col_name] = points_value
+                        if appears_forbidden:
+                            forbidden_elements_matrix.at[aa, col_name] = 1
+
                     continue
 
                 # Test whether peptides with similar residues at this position have significantly lower signal values
                 equivalent_residues = aa_equivalence_dict[aa]
-                group_barnard_pvalue, group_rrr = barnard_disfavoured(passing_col, failing_col,
-                                                                      equivalent_residues = equivalent_residues)
-                group_passes_barnard = group_barnard_pvalue <= barnard_alpha and relative_risk_reduction > 0
+                group_pvalue, group_q = barnard_yule_q(passing_col, failing_col,
+                                                       equivalent_residues = equivalent_residues, alternative = alt)
+                consistent_sign = (yule_q >= 0 and group_q >= 0) or (yule_q <= 0 and group_q <= 0)
+                group_passes_barnard = group_pvalue <= barnard_alpha and consistent_sign
 
                 never_passes = np.sum(np.isin(passing_col, equivalent_residues)) == 0
                 fails_exceed_threshold = np.sum(np.isin(failing_col, equivalent_residues)) >= forbidden_threshold
                 group_appears_forbidden = never_passes and fails_exceed_threshold
 
                 group_above_min_aa = np.sum(np.isin(full_col, equivalent_residues)) >= min_aa_entries
-                if always_assign_value or (group_passes_barnard and group_above_min_aa):
-                    # Checks if relative_risk_reduction > 0 to ensure individual residue is consistent with group
-                    points_value = group_rrr if group_rrr > 0 else 0
-                    suboptimal_elements_matrix.at[aa, col_name] = points_value
-                    if group_appears_forbidden:
-                        forbidden_elements_matrix.at[aa, col_name] = 1
+                if always_assign_value or group_above_min_aa:
+                    if group_passes_barnard:
+                        points_value = -group_q
+                        suboptimal_elements_matrix.at[aa, col_name] = points_value
+                        if group_appears_forbidden:
+                            forbidden_elements_matrix.at[aa, col_name] = 1
+                    elif always_assign_value:
+                        points_value = -group_q if np.abs(group_q) < np.abs(yule_q) else -yule_q
+                        suboptimal_elements_matrix.at[aa, col_name] = points_value
+
 
         # For unrepresented residue-position groups, fill in zeros using equivalent residues as necessary
         for col_index, col_name in enumerate(matrix_cols):
