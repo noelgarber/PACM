@@ -160,7 +160,7 @@ class ConditionalMatrix:
 
         self.generate_positive_matrix(positive_training_seqs_2d, positive_training_signals, amino_acids,
                                       include_phospho, aa_equivalence_dict, mann_whitney_alpha, min_aa_entries,
-                                      generate_individual_regressions, generate_individual_regressions,
+                                      baseline_matrix, generate_individual_regressions, generate_individual_regressions,
                                       plot_unweighted_points = False)
 
         '''
@@ -170,11 +170,13 @@ class ConditionalMatrix:
         '''
         barnard_alpha = matrix_params["barnard_alpha"]
         forbidden_threshold = matrix_params["forbidden_threshold"]
+        forced_required_dict = matrix_params["forced_required_dict"] # forced required residues at defined positions
         always_assign_suboptimal = matrix_params["always_assign_suboptimal"]
 
         self.generate_suboptimal_matrix(qualifying_seqs_2d, qualifying_signals, passing_seqs_2d, failed_seqs_2d,
                                         amino_acids, aa_equivalence_dict, barnard_alpha, min_aa_entries,
-                                        forbidden_threshold, baseline_matrix, include_phospho, always_assign_suboptimal)
+                                        forbidden_threshold, forced_required_dict, baseline_matrix,
+                                        include_phospho, always_assign_suboptimal)
 
     def qualifying_entries_count(self, source_df, seq_col, position_for_filtering, residues_included_at_filter_position):
         # Helper function to get the number of sequences that qualify under the current type-position rule
@@ -211,24 +213,25 @@ class ConditionalMatrix:
 
     def generate_positive_matrix(self, seqs_2d, signal_values, amino_acids, include_phospho = False,
                                  aa_equivalence_dict = aa_equivalence_dict, mann_whitney_alpha = 0.1,
-                                 min_aa_entries = 4, generate_multivariate_model = False,
+                                 min_aa_entries = 4, baseline_matrix = None, generate_multivariate_model = False,
                                  generate_linear_model = False, plot_unweighted_points = False):
         '''
         This function generates a matrix for predicting the binding signal that would be observed for a given peptide
 
         Args:
-            seqs_2d (np.ndarray):               peptide sequences used for training the positive matrix
-            signal_values (np.ndarray):         corresponding signal values for training peptides
-            amino_acids (tuple|list):           amino acid alphabet to use
-            include_phospho (bool):             whether to include phosphorylated residues in the matrix
-            aa_equivalence_dict (dict):         dictionary of amino acid --> tuple of 'equivalent' amino acids
-            mann_whitney_alpha (float):         alpha value to use for Mann-Whitney U test
-            min_aa_entries (int):               min number of qualifying peptides to derive points from
-            generate_multivariate_model (bool): whether to generate a multivariate LinearRegression() model (log signal)
-            generate_linear_model (bool):       whether to generate a point-sum unweighted LinearRegression() model
-            plot_unweighted_points (bool):      whether to plot unweighted positive element points sums against signals
-            ignore_failed_peptides (bool):      whether to only use signals from passing peptides for positive matrix
-            preview_scatter_plot (bool):        whether to show a scatter plot of summed positive points against signals
+            seqs_2d (np.ndarray):                peptide sequences used for training the positive matrix
+            signal_values (np.ndarray):          corresponding signal values for training peptides
+            amino_acids (tuple|list):            amino acid alphabet to use
+            include_phospho (bool):              whether to include phosphorylated residues in the matrix
+            aa_equivalence_dict (dict):          dictionary of amino acid --> tuple of 'equivalent' amino acids
+            mann_whitney_alpha (float):          alpha value to use for Mann-Whitney U test
+            min_aa_entries (int):                min number of qualifying peptides to derive points from
+            baseline_matrix (ConditionalMatrix): baseline matrix to reference for unrepresented residues in subgroup
+            generate_multivariate_model (bool):  whether to generate a multivariate LinearRegression() model (log signal)
+            generate_linear_model (bool):        whether to generate a point-sum unweighted LinearRegression() model
+            plot_unweighted_points (bool):       whether to plot unweighted positive element points sums against signals
+            ignore_failed_peptides (bool):       whether to only use signals from passing peptides for positive matrix
+            preview_scatter_plot (bool):         whether to show a scatter plot of summed positive points against signals
 
         Returns:
             None; assigns self.positive_matrix
@@ -288,16 +291,30 @@ class ConditionalMatrix:
                 positive_matrix.at[aa, col_name] = 0 # triggered if no passing conditions are met
 
         # For unrepresented residue-position groups, fill in zeros using equivalent residues as necessary
+        baseline_exists = True if baseline_matrix is not None else False
+        if baseline_exists:
+            baseline_index = baseline_matrix.positive_matrix.index
+        else:
+            baseline_index = []
+
         for col_index, col_name in enumerate(matrix_cols):
             col_residues = seqs_2d[:,col_index]
             unique_residues = np.unique(col_residues)
-            unrepresented_residues = [aa for aa in positive_matrix.index if aa not in unique_residues]
+            unrepresented_residues = [aa for aa in amino_acids if aa not in unique_residues]
 
             # Iterate over unrepresented amino acids
             for aa in unrepresented_residues:
                 # Handle suboptimal elements matrix entry
                 current_points = positive_matrix.at[aa, col_name]
                 if current_points == 0:
+                    # Check if there is a nonzero value from baseline_matrix to obtain
+                    if baseline_exists and aa in baseline_index:
+                        baseline_points = baseline_matrix.positive_matrix.at[aa, col_name]
+                        if baseline_points != 0:
+                            positive_matrix.at[aa, col_name] = baseline_points
+                            continue
+
+                    # If no nonzero value exists in the baseline matrix, try to infer one from similar residues
                     equivalent_residues = aa_equivalence_dict[aa]
                     equivalent_points_list = []
                     for equivalent_aa in equivalent_residues:
@@ -373,8 +390,8 @@ class ConditionalMatrix:
 
     def generate_suboptimal_matrix(self, sequences_2d, signal_values, passing_seqs_2d, failed_seqs_2d, amino_acids,
                                    aa_equivalence_dict = aa_equivalence_dict, barnard_alpha = 0.2, min_aa_entries = 4,
-                                   forbidden_threshold = 3, baseline_matrix = None, include_phospho = False,
-                                   always_assign_value = False):
+                                   forbidden_threshold = 3, forced_required_dict = None, baseline_matrix = None,
+                                   include_phospho = False, always_assign_value = False):
         '''
         This function generates a suboptimal element scoring matrix and a forbidden element matrix
 
@@ -388,6 +405,7 @@ class ConditionalMatrix:
             min_aa_entries (int):                       min number of qualifying peptides to derive points from
             forbidden_threshold (int):                  number of peptides that must possess a particular residue
                                                         or group of residues before it can be considered "forbidden"
+            forced_required_dict (dict):                dictionary of position indices --> specified required residues
             baseline_matrix (ConditionalMatrix):        baseline matrix; used for unrepresented residues
             include_phospho (bool):                     whether to include phospho-residues in the matrices
             always_assign_value (bool):                 if True and individual Barnard p-value > Barnard alpha,
@@ -501,6 +519,13 @@ class ConditionalMatrix:
                         for equivalent_aa in equivalent_residues:
                             if aa != equivalent_aa:
                                 forbidden_elements_matrix.at[equivalent_aa, col_name] = 1
+
+        # Apply forced_required_dict to forbidden elements matrix
+        if forced_required_dict is not None:
+            for position_idx, required_residues in forced_required_dict.items():
+                col_name = matrix_cols[position_idx]
+                forbidden_residues = [aa for aa in amino_acids if aa not in required_residues]
+                forbidden_elements_matrix.loc[forbidden_residues, col_name] = 1
 
         self.suboptimal_elements_matrix = suboptimal_elements_matrix.astype("float32")
         self.forbidden_elements_matrix = forbidden_elements_matrix.astype("float32")
@@ -1023,12 +1048,8 @@ class ConditionalMatrices:
             self.best_accuracy_method = result.best_accuracy_method
             self.accuracy_standardization_coefficients = result.standardization_coefficients
 
-            self.thresholds_accuracy = result.thresholds_accuracy
-            self.standardized_binding_threshold = result.standardized_binding_threshold
-            self.standardized_total_threshold = result.standardized_total_threshold
-            self.standardized_positive_threshold = result.standardized_positive_threshold
-            self.standardized_suboptimal_threshold = result.standardized_suboptimal_threshold
-            self.standardized_forbidden_threshold = result.standardized_forbidden_threshold
+            self.standardized_weighted_threshold = result.standardized_weighted_threshold
+            self.standardized_threshold_accuracy = result.standardized_threshold_accuracy
 
             self.standardized_binding_exp_params = result.standardized_binding_exp_params
 
