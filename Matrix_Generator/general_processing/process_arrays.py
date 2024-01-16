@@ -159,10 +159,14 @@ def one_passes(input_df, bait_cols_dict, bait_pass_cols, control_probe_name, con
     passes_control = np.any(bait_signal_means_stacked > control_multiplier * control_signal_means_stacked, axis=0)
 
     # Use a boolean mask that requires that at least 1 bait to pass the call_index test
-    pass_conditions = []
-    for pass_col in bait_pass_cols.values():
-        pass_conditions.append(output_df[pass_col] == "Pass")
-    call_index_mask = np.logical_or.reduce(pass_conditions)
+    control_pass_conditions = []
+    bait_pass_conditions = []
+    for bait, pass_col in bait_pass_cols.items():
+        if bait == control_probe_name:
+            control_pass_conditions.append(output_df[pass_col] == "Pass")
+        else:
+            bait_pass_conditions.append(output_df[pass_col] == "Pass")
+    call_index_mask = np.logical_or.reduce(bait_pass_conditions)
 
     # Combine the two conditions with an 'and' operator
     mask = np.logical_and(passes_control, call_index_mask)
