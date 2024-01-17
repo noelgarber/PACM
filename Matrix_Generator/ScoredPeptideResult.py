@@ -264,7 +264,8 @@ class ScoredPeptideResult:
             # Optimize weights for combining sets of scores
             save_path = fig_path.rsplit("/", 1)[0]
             self.optimize_positive_weights(suppress_positives, ignore_failed_peptides, preview_scatter_plot, save_path)
-            self.optimize_total_weights(fig_path, coefficients_path, suppress_suboptimals, suppress_forbiddens)
+            self.optimize_total_weights(fig_path, coefficients_path,
+                                        suppress_positives, suppress_suboptimals, suppress_forbiddens)
             self.evaluate_weighted_scores()
         elif predefined_weights is not None:
             # Apply predefined weights and assess them
@@ -392,8 +393,8 @@ class ScoredPeptideResult:
             plt.savefig(scatter_path, format="pdf") if scatter_path is not None else None
             plt.show()
 
-    def optimize_total_weights(self, fig_path = None, coefficients_path = None, suppress_suboptimals = None,
-                               suppress_forbiddens = None):
+    def optimize_total_weights(self, fig_path = None, coefficients_path = None, suppress_positives = None,
+                               suppress_suboptimals = None, suppress_forbiddens = None):
         '''
         Function that applies random search optimization to find ideal position and score weights to maximize f1-score
 
@@ -414,10 +415,32 @@ class ScoredPeptideResult:
         # Optimize weights; first value is a multiplier of summed weighted positive scores
         print(f"\tOptimizing final score values to maximize accuracy in binary calls...")
 
+        # Generate forced values dicts
+        psf_forced_values_dict = {}
+        wpsf_forced_values_dict = {}
+        sf_forced_values_dict = {}
+        for idx in suppress_positives:
+            # Suppressed positive score positions
+            psf_forced_values_dict[idx] = 0
+        for idx in suppress_suboptimals:
+            # Suppressed suboptimal score positions
+            psf_forced_values_dict[idx + motif_length] = 0
+            wpsf_forced_values_dict[idx + 1] = 0
+            sf_forced_values_dict[idx] = 0
+        for idx in np.arange(motif_length):
+            if idx in suppress_forbiddens:
+                # Suppressed forbidden score positions
+                psf_forced_values_dict[idx + motif_length*2] = 0
+                wpsf_forced_values_dict[idx + motif_length + 1] = 0
+                sf_forced_values_dict[idx + motif_length] = 0
+            else:
+                # Use unweighted allowed forbidden positions
+                psf_forced_values_dict[idx + motif_length*2] = 1
+                wpsf_forced_values_dict[idx + motif_length + 1] = 1
+                sf_forced_values_dict[idx + motif_length] = 1
+
         # Attempt accuracy optimization with and without positive element scores, then use the better option
         print(f"\t\tAttempting with unweighted positive, suboptimal, and forbidden scores combined...")
-        psf_forced_values_dict = {idx + motif_length: 0 for idx in suppress_suboptimals}
-        psf_forced_values_dict = psf_forced_values_dict | {idx + 2*motif_length : 0 for idx in suppress_forbiddens}
         psf_combined_2d = np.hstack([self.positive_scores_2d,
                                      self.suboptimal_scores_2d * -1,
                                      self.forbidden_scores_2d * -1])
@@ -431,9 +454,6 @@ class ScoredPeptideResult:
 
         print(f"\t\tAttempting with pre-weighted positive, unweighted suboptimal, and unweighted forbidden scores...")
         # Note that weighted positive score sums are multiplied by the motif length to prevent under-weighting
-        wpsf_forced_values_dict = {idx + 1: 0 for idx in suppress_suboptimals}
-        wpsf_forced_values_dict = wpsf_forced_values_dict | {idx + motif_length + 1: 0 for idx in suppress_forbiddens}
-
         binding_positive_multiplier = self.suboptimal_scores_2d.shape[1] # scales to prevent underrepresentation
         wpsf_combined_2d = np.hstack([self.binding_positive_scores.reshape(-1, 1) * binding_positive_multiplier,
                                       self.suboptimal_scores_2d * -1,
@@ -447,9 +467,6 @@ class ScoredPeptideResult:
         wpsf_preliminary_weights[0] = wpsf_preliminary_weights[0] * binding_positive_multiplier
 
         print(f"\t\tAttempting with only unweighted suboptimal and forbidden scores combined...")
-        sf_forced_values_dict = {idx: 0 for idx in suppress_suboptimals}
-        sf_forced_values_dict = sf_forced_values_dict | {idx + motif_length: 0 for idx in suppress_forbiddens}
-
         suboptimal_forbidden_2d = np.hstack([self.suboptimal_scores_2d * -1,
                                              self.forbidden_scores_2d * -1])
         sf_objective = partial(accuracy_objective, actual_truths = self.actual_truths,
