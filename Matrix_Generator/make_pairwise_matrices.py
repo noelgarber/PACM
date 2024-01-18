@@ -47,9 +47,9 @@ def apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets = No
         motif_length = sequences_2d.shape[1]
         
     # Score the input data; the result is an instance of ScoredPeptideResult
-    weights_exist = True if matrix_params.get("position_weights") is not None else False
+    predefined_weights_exist = True if matrix_params.get("position_weights") is not None else False
     scored_result = conditional_matrices.score_peptides(sequences_2d, actual_truths, signal_values,
-                                                        slice_scores_subsets, weights_exist,
+                                                        slice_scores_subsets, predefined_weights_exist,
                                                         precision_recall_path, coefficients_path)
 
     # Construct the output dataframe
@@ -115,8 +115,8 @@ def main(input_df, general_params = general_params, data_params = data_params, m
         aa_charac_dict = general_params.get("aa_charac_dict")
         conditional_matrices = ConditionalMatrices(motif_length, input_df, percentiles_dict, aa_charac_dict,
                                                    data_params, matrix_params)
-        weights_exist = True if matrix_params.get("position_weights") is not None else False
-        conditional_matrices.save(output_folder, save_weighted = weights_exist)
+        predefined_weights_exist = True if matrix_params.get("position_weights") is not None else False
+        conditional_matrices.save(output_folder, save_weighted = predefined_weights_exist)
 
         # Score the input data
         seq_col = data_params.get("seq_col")
