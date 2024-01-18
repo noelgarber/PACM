@@ -78,7 +78,7 @@ def apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets = No
     elif add_residue_cols and in_place:
         raise Exception("apply_motif_scores error: in_place cannot be set to True when add_residue_cols is True")
 
-    return scored_result, output_df
+    return (scored_result, output_df, conditional_matrices)
 
 def main(input_df, general_params = general_params, data_params = data_params, matrix_params = matrix_params):
     '''
@@ -132,15 +132,15 @@ def main(input_df, general_params = general_params, data_params = data_params, m
         mean_signal_values = bait_signal_values.mean(axis=1)
 
         precision_recall_path = os.path.join(output_folder, "precision_recall_graph.pdf")
-        scored_result, output_df = apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets,
-                                                      actual_truths, mean_signal_values,
-                                                      seq_col, convert_phospho, add_residue_cols = True,
-                                                      in_place = False, precision_recall_path = precision_recall_path,
-                                                      coefficients_path = output_folder)
+        scoring_output_tuple = apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets, actual_truths,
+                                                  mean_signal_values, seq_col, convert_phospho, add_residue_cols = True,
+                                                  in_place = False, precision_recall_path = precision_recall_path,
+                                                  coefficients_path = output_folder)
+        scored_result, output_df, conditional_matrices = scoring_output_tuple
 
         # Cache the data
         with open(cached_path, "wb") as f:
-            print(f"Cached conditional matrices were dumpted to {cached_path}")
+            print(f"Cached conditional matrices were dumped to {cached_path}")
             pickle.dump((conditional_matrices, scored_result, output_df), f)
 
     # Save ConditionalMatrices object for later use in motif_predictor

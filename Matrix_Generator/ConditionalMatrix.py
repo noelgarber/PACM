@@ -1097,7 +1097,10 @@ class ConditionalMatrices:
             self.standardized_threshold_accuracy = result.standardized_threshold_accuracy
 
             # Assign binding exponential function params to self, where y = ae^b(x-c) + d, and params = (a,b,c,d)
+            self.binding_exp_params = result.binding_exp_params
             self.standardized_binding_exp_params = result.standardized_binding_exp_params
+            self.binding_score_r2 = result.binding_score_r2
+            self.standardized_binding_r2 = result.standardized_binding_r2
 
             self.scored_training_data = True
 

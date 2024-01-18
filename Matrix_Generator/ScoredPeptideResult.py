@@ -335,29 +335,35 @@ class ScoredPeptideResult:
         if ignore_failed_peptides:
             weighted_summed_points = weighted_summed_points[self.actual_truths]
 
-        params, _ = curve_fit(exp_func, weighted_summed_points, signal_values, p0=[1, 1, 1, 1])
-        predicted_signal_values = exp_func(weighted_summed_points, *params)
+        params, _ = curve_fit(exp_func, weighted_summed_points, signal_values, p0=[1,1,1,1])
+        self.binding_exp_params = params
 
+        predicted_signal_values = exp_func(weighted_summed_points, *params)
         self.binding_score_r2 = r2_score(signal_values, predicted_signal_values)
 
         # Also fit a curve to standardized binding scores and save the params to self (for future use)
         if ignore_failed_peptides:
             standardized_weighted_points = standardized_weighted_points[self.actual_truths]
-        standardized_params, _ = curve_fit(exp_func, standardized_weighted_points, signal_values,
-                                           p0=[0.5, 0.5, 0.5, 0.5])
+
+        std_signals = signal_values / np.max(signal_values)
+
+        standardized_params, _ = curve_fit(exp_func, standardized_weighted_points, std_signals, p0=[0.5,0.5,0.5,0.5])
         self.standardized_binding_exp_params = standardized_params
+
+        predicted_standardized_signal_values = exp_func(standardized_weighted_points, *standardized_params)
+        self.standardized_binding_r2 = r2_score(std_signals, predicted_standardized_signal_values)
 
         # Show post-weighting scatter plot if necessary
         if preview_scatter_plot:
             print(f"\tPreviewing weighted positive element score sum correlation with signal values...")
-            r2 = round(self.binding_score_r2, 2)
+            r2 = round(self.standardized_binding_r2, 2)
 
-            a,b,c,d = params
+            a,b,c,d = standardized_params
             c_sign = "+" if c >= 0 else "-"
             d_sign = "+" if d >= 0 else "-"
             equation_text = f"y = {a:.2f}e^({b:.2f}(x{c_sign}{np.abs(c):.2f})) {d_sign}{np.abs(d):.2f}"
 
-            sorted_order = np.argsort(weighted_summed_points)
+            sorted_order = np.argsort(standardized_weighted_points)
 
             if save_path is not None:
                 if not os.path.exists(save_path):
@@ -370,25 +376,27 @@ class ScoredPeptideResult:
                 # Also plot failed peptides in a different color
                 weighted_points_failed = np.sum(np.multiply(self.positive_scores_2d, positive_weights), axis=1)
                 weighted_points_failed = weighted_points_failed[~self.actual_truths]
+                standardized_weighted_failed = weighted_points_failed - coefficient_a
+                standardized_weighted_failed = standardized_weighted_failed / coefficient_b
 
                 plt.figure(figsize=(8, 6))
-                plt.scatter(weighted_points_failed, self.failing_signal_values,
+                plt.scatter(standardized_weighted_failed, self.failing_signal_values / np.max(signal_values),
                             label = "non-interacting peptides (weighted)", color = "red", alpha = 0.5)
-                plt.scatter(weighted_summed_points, signal_values,
+                plt.scatter(standardized_weighted_points, std_signals,
                             label = "interacting peptides (weighted)", color = "blue", alpha = 0.5)
             else:
                 plt.figure(figsize=(8, 6))
-                plt.scatter(weighted_summed_points, signal_values,
+                plt.scatter(standardized_weighted_points, std_signals,
                             label = "data (weighted)", color = "blue", alpha = 0.5)
 
-            plt.plot(weighted_summed_points[sorted_order], predicted_signal_values[sorted_order],
+            plt.plot(standardized_weighted_points[sorted_order], predicted_standardized_signal_values[sorted_order],
                      label = equation_text, color = "black")
             plt.annotate(f"R2 = {r2}", xy=(0, 1), xycoords="axes fraction", xytext=(10, -10),
                          textcoords="offset points", ha="left", va="top", fontsize = "large")
 
             plt.legend()
-            plt.xlabel("Positive Element Score (Weighted Sum)", fontsize = "large")
-            plt.ylabel("Signal Value (arbitrary units)", fontsize = "large")
+            plt.xlabel("Positive Element Score (standardized weighted sum)", fontsize = "large")
+            plt.ylabel("Signal intensity (relative)", fontsize = "large")
 
             plt.savefig(scatter_path, format="pdf") if scatter_path is not None else None
             plt.show()
