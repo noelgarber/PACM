@@ -12,7 +12,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
 from scipy.stats import barnard_exact, mannwhitneyu
 from general_utils.general_utils import unravel_seqs, check_seq_lengths
-from general_utils.matrix_utils import make_empty_matrix, collapse_phospho
+from general_utils.matrix_utils import make_empty_matrix
 from general_utils.user_helper_functions import get_thresholds
 from Matrix_Generator.ScoredPeptideResult import ScoredPeptideResult
 try:
@@ -383,7 +383,7 @@ class ConditionalMatrix:
 
                 # Assign back to dataframe
                 positive_matrix.loc[corresponding_residue] = best_vals
-                positive_matrix.drop(phospho_residue)
+                positive_matrix.drop(phospho_residue, axis=0, inplace=True)
 
         # Assign to self
         self.positive_matrix = positive_matrix
@@ -527,11 +527,25 @@ class ConditionalMatrix:
                 forbidden_residues = [aa for aa in amino_acids if aa not in required_residues]
                 forbidden_elements_matrix.loc[forbidden_residues, col_name] = 1
 
+        # Collapse phospho if necessary
+        if not include_phospho:
+            for phospho_residue, corresponding_residue in [("B","S"), ("J","T"), ("O","Y")]:
+                for col_idx, col_name in enumerate(matrix_cols):
+                    phospho_suboptimal_points = suboptimal_elements_matrix.at[phospho_residue, col_name]
+                    corresponding_suboptimal_points = suboptimal_elements_matrix.at[corresponding_residue, col_name]
+                    phospho_smaller_effect = np.abs(phospho_suboptimal_points) < np.abs(corresponding_suboptimal_points)
+                    if corresponding_suboptimal_points == 0 or phospho_smaller_effect:
+                        suboptimal_elements_matrix.at[corresponding_residue, col_name] = phospho_suboptimal_points
+
+                    phospho_forbidden_points = forbidden_elements_matrix.at[phospho_residue, col_name]
+                    if phospho_forbidden_points == 0:
+                        forbidden_elements_matrix.at[corresponding_residue, col_name] = 0
+
+            suboptimal_elements_matrix.drop(["B","J","O"], axis=0, inplace=True)
+            forbidden_elements_matrix.drop(["B","J","O"], axis=0, inplace=True)
+
         self.suboptimal_elements_matrix = suboptimal_elements_matrix.astype("float32")
         self.forbidden_elements_matrix = forbidden_elements_matrix.astype("float32")
-        if not include_phospho:
-            collapse_phospho(self.suboptimal_elements_matrix, in_place=True)
-            collapse_phospho(self.forbidden_elements_matrix, in_place=True)
 
     def copy_matrix_col(self, col_idx):
         # User-initiated function for copying a specific column from each sub-matrix
@@ -715,12 +729,10 @@ class ConditionalMatrices:
         # Make array representations of the signal, suboptimal, and forbidden matrices
         self.make_unweighted_dicts(self.conditional_matrix_dict)
 
-        # Apply weights
+        # Apply weights if given
         weights_array = matrix_params.get("position_weights")
         if weights_array is not None:
-            self.apply_weights(weights_array, only_3d = False)
-        else:
-            self.apply_weights(np.ones(motif_length), only_3d = False)
+            self.apply_weights(weights_array, weights_array, weights_array, weights_array, only_3d = False)
 
     def get_rule_tuples(self, residue_charac_dict, motif_length):
         # Helper function that generates a list of rule tuples to be used by generate_matrices()
@@ -837,39 +849,65 @@ class ConditionalMatrices:
     def make_unweighted_dicts(self, conditional_matrix_dict):
         # Helper function to make dataframe and array representations of the signal, suboptimal, and forbidden matrices
 
-        self.unweighted_matrices_dicts = {"signal": {}, "suboptimal": {}, "forbidden": {}}
-        self.unweighted_arrays_dicts = {"signal": {}, "suboptimal": {}, "forbidden": {}}
+        self.unweighted_matrices_dicts = {"positive": {}, "suboptimal": {}, "forbidden": {}}
+        self.unweighted_arrays_dicts = {"positive": {}, "suboptimal": {}, "forbidden": {}}
 
         for key, conditional_matrix in conditional_matrix_dict.items():
-            self.unweighted_matrices_dicts["signal"][key] = conditional_matrix.positive_matrix
-            self.unweighted_arrays_dicts["signal"][key] = conditional_matrix.positive_matrix.to_numpy()
+            self.unweighted_matrices_dicts["positive"][key] = conditional_matrix.positive_matrix
+            self.unweighted_arrays_dicts["positive"][key] = conditional_matrix.positive_matrix.to_numpy()
             self.unweighted_matrices_dicts["suboptimal"][key] = conditional_matrix.suboptimal_elements_matrix
             self.unweighted_arrays_dicts["suboptimal"][key] = conditional_matrix.suboptimal_elements_matrix.to_numpy()
             self.unweighted_matrices_dicts["forbidden"][key] = conditional_matrix.forbidden_elements_matrix
             self.unweighted_arrays_dicts["forbidden"][key] = conditional_matrix.forbidden_elements_matrix.to_numpy()
 
-    def apply_weights(self, weights, only_3d = True):
+    def apply_weights(self, binding_weights, positive_weights, suboptimal_weights, forbidden_weights, only_3d = True):
         # Method for assigning weights to the 3D matrix of matrices
 
         # Apply weights to 3D representations of matrices for rapid scoring
-        self.stacked_positive_weighted = self.stacked_positive_matrices * weights
-        self.stacked_suboptimal_weighted = self.stacked_suboptimal_matrices * weights
-        self.stacked_forbidden_weighted = self.stacked_forbidden_matrices * weights
-        self.weights_array = weights
+        self.stacked_binding_weighted = self.stacked_positive_matrices * binding_weights
+        self.stacked_positive_weighted = self.stacked_positive_matrices * positive_weights
+        self.stacked_suboptimal_weighted = self.stacked_suboptimal_matrices * suboptimal_weights
+        self.stacked_forbidden_weighted = self.stacked_forbidden_matrices * forbidden_weights
+
+        # Assign weights to self
+        self.binding_positive_weights = binding_weights
+        self.accuracy_positive_weights = positive_weights
+        self.accuracy_suboptimal_weights = suboptimal_weights
+        self.accuracy_forbidden_weights = forbidden_weights
 
         # Optionally also apply weights to the other formats
         if not only_3d:
             self.weighted_matrices_dicts = {}
             self.weighted_arrays_dicts = {}
 
-            for matrix_type, matrix_dict in self.unweighted_matrices_dicts.items():
-                weighted_matrix_dict = {}
-                weighted_array_dict = {}
-                for key, matrix_df in matrix_dict.items():
-                    weighted_matrix_dict[key] = matrix_df * weights
-                    weighted_array_dict[key] = matrix_df.to_numpy() * weights
-                self.weighted_matrices_dicts[matrix_type] = weighted_matrix_dict
-                self.weighted_arrays_dicts[matrix_type] = weighted_array_dict
+            # Handle positive matrices (used for both classification and binding strength prediction)
+            binding_positive_matrix_dict, binding_positive_array_dict = {}, {}
+            accuracy_positive_matrix_dict, accuracy_positive_array_dict = {}, {}
+            for key, positive_matrix_df in self.unweighted_matrices_dicts["positive"].items():
+                binding_positive_matrix_dict[key] = positive_matrix_df * binding_weights
+                binding_positive_array_dict[key] = positive_matrix_df.to_numpy() * binding_weights
+                accuracy_positive_matrix_dict[key] = positive_matrix_df * positive_weights
+                accuracy_positive_array_dict[key] = positive_matrix_df.to_numpy() * positive_weights
+
+            self.weighted_matrices_dicts["binding_positive"] = binding_positive_matrix_dict
+            self.weighted_matrices_dicts["accuracy_positive"] = accuracy_positive_matrix_dict
+            self.weighted_arrays_dicts["binding_positive"] = binding_positive_array_dict
+            self.weighted_arrays_dicts["accuracy_positive"] = accuracy_positive_array_dict
+
+            # Handle suboptimal and forbidden matrices (used only for classification prediction)
+            accuracy_suboptimal_matrix_dict, accuracy_suboptimal_array_dict = {}, {}
+            for key, suboptimal_matrix_df in self.unweighted_matrices_dicts["suboptimal"].items():
+                accuracy_suboptimal_matrix_dict[key] = suboptimal_matrix_df * suboptimal_weights
+                accuracy_suboptimal_array_dict[key] = suboptimal_matrix_df.to_numpy() * suboptimal_weights
+            self.weighted_matrices_dicts["accuracy_suboptimal"] = accuracy_suboptimal_matrix_dict
+            self.weighted_arrays_dicts["accuracy_suboptimal"] = accuracy_suboptimal_array_dict
+
+            accuracy_forbidden_matrix_dict, accuracy_forbidden_array_dict = {}, {}
+            for key, forbidden_matrix_df in self.unweighted_matrices_dicts["forbidden"].items():
+                accuracy_forbidden_matrix_dict[key] = forbidden_matrix_df * forbidden_weights
+                accuracy_forbidden_array_dict[key] = forbidden_matrix_df.to_numpy() * forbidden_weights
+            self.weighted_matrices_dicts["accuracy_forbidden"] = accuracy_forbidden_matrix_dict
+            self.weighted_arrays_dicts["accuracy_forbidden"] = accuracy_forbidden_array_dict
 
     def save(self, output_folder, save_weighted = True):
         # User-called function to save the conditional matrices as CSVs to folders for both unweighted and weighted
@@ -879,7 +917,8 @@ class ConditionalMatrices:
         # Define unweighted matrix output paths
         unweighted_folder_paths = {}
         unweighted_parent = os.path.join(parent_folder, "Unweighted")
-        unweighted_folder_paths["signal"] = os.path.join(unweighted_parent, "Signal_Matrices")
+
+        unweighted_folder_paths["positive"] = os.path.join(unweighted_parent, "Positive_Matrices")
         unweighted_folder_paths["suboptimal"] = os.path.join(unweighted_parent, "Suboptimal_Matrices")
         unweighted_folder_paths["forbidden"] = os.path.join(unweighted_parent, "Forbidden_Matrices")
         for path in unweighted_folder_paths.values():
@@ -908,9 +947,10 @@ class ConditionalMatrices:
             # Define weighted matrix output paths
             weighted_folder_paths = {}
             weighted_parent = os.path.join(parent_folder, "Weighted")
-            weighted_folder_paths["signal"] = os.path.join(weighted_parent, "Weighted_Signal_Matrices")
-            weighted_folder_paths["suboptimal"] = os.path.join(weighted_parent, "Weighted_Suboptimal_Matrices")
-            weighted_folder_paths["forbidden"] = os.path.join(weighted_parent, "Weighted_Forbidden_Matrices")
+            weighted_folder_paths["binding_positive"] = os.path.join(weighted_parent, "Binding_Positive_Matrices")
+            weighted_folder_paths["accuracy_positive"] = os.path.join(weighted_parent, "Weighted_Positive_Matrices")
+            weighted_folder_paths["accuracy_suboptimal"] = os.path.join(weighted_parent, "Weighted_Suboptimal_Matrices")
+            weighted_folder_paths["accuracy_forbidden"] = os.path.join(weighted_parent, "Weighted_Forbidden_Matrices")
             for path in weighted_folder_paths.values():
                 os.makedirs(path) if not os.path.exists(path) else None
 
@@ -1036,21 +1076,27 @@ class ConditionalMatrices:
                                      suppress_suboptimals = self.suppress_suboptimal_positions,
                                      suppress_forbiddens = self.suppress_forbidden_positions)
 
-        if not self.scored_training_data:
-            # Assign ScoredPeptideResult metrics to self; this is done when this method is first called during training
-            self.binding_positive_weights = result.binding_positive_weights
-            self.binding_standardization_coefficients = result.binding_standardization_coefficients
+        # Update weights and other information
+        if self.scored_training_data:
+            update_weights = input("f\t\tWeights have already been set previously. Overwrite? (Y/N)  ") == "Y"
+        else:
+            update_weights = True
 
-            self.accuracy_positive_weights = result.positives_weights
-            self.accuracy_suboptimal_weights = result.suboptimals_weights
-            self.accuracy_forbidden_weights = result.forbiddens_weights
-
+        if update_weights:
+            # Apply optimized weights
+            self.apply_weights(result.binding_positive_weights, result.positives_weights,
+                               result.suboptimals_weights, result.forbiddens_weights, only_3d=False)
             self.best_accuracy_method = result.best_accuracy_method
+
+            # Assign standardization coefficients to self
+            self.binding_standardization_coefficients = result.binding_standardization_coefficients
             self.accuracy_standardization_coefficients = result.standardization_coefficients
 
+            # Assign thresholds to self
             self.standardized_weighted_threshold = result.standardized_weighted_threshold
             self.standardized_threshold_accuracy = result.standardized_threshold_accuracy
 
+            # Assign binding exponential function params to self, where y = ae^b(x-c) + d, and params = (a,b,c,d)
             self.standardized_binding_exp_params = result.standardized_binding_exp_params
 
             self.scored_training_data = True
