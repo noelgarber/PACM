@@ -14,7 +14,7 @@ except:
 
 def apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets = None, actual_truths = None,
                        signal_values = None, seq_col = None, convert_phospho = True, add_residue_cols = False,
-                       in_place = False, sequences_2d = None, precision_recall_path = None, coefficients_path = None):
+                       in_place = False, seqs_2d = None, precision_recall_path = None, coefficients_path = None):
     '''
     Function to apply the score_seqs() function to all sequences in the source df and add residue cols for sorting
 
@@ -28,7 +28,7 @@ def apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets = No
         convert_phospho (bool):                     whether to convert phospho-residues to non-phospho before lookups
         add_residue_cols (bool):                    whether to add columns containing individual residue letters
         in_place (bool):                            whether to apply operations in-place; add_residue_cols not supported
-        sequences_2d (np.ndarray):                  unravelled peptide sequences; optionally provide this upfront for
+        seqs_2d (np.ndarray):                  unravelled peptide sequences; optionally provide this upfront for
                                                     performance improvement in loops
         precision_recall_path (str):                output file path for saving the precision/recall graph
         coefficients_path (str):                    output file path for saving score standardization coefficients into
@@ -38,23 +38,21 @@ def apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets = No
         output_df (pd.DataFrame):                   input dataframe with scores and calls added
     '''
 
-    # Get sequences only if needed; if sequences_2d is already provided, then sequences is not necessary
-    if sequences_2d is None:
+    # Get sequences only if needed; if seqs_2d is already provided, then sequences is not necessary
+    if seqs_2d is None:
         seqs = input_df[seq_col].values.astype("<U")
         motif_length = len(seqs[0]) # assumes all sequences are the same length
-        sequences_2d = unravel_seqs(seqs, motif_length, convert_phospho)
+        seqs_2d = unravel_seqs(seqs, motif_length, convert_phospho)
     else:
-        motif_length = sequences_2d.shape[1]
+        motif_length = seqs_2d.shape[1]
         
     # Score the input data; the result is an instance of ScoredPeptideResult
-    predefined_weights_exist = True if matrix_params.get("position_weights") is not None else False
-    scored_result = conditional_matrices.score_peptides(sequences_2d, actual_truths, signal_values,
-                                                        slice_scores_subsets, predefined_weights_exist,
-                                                        precision_recall_path, coefficients_path)
+    result = conditional_matrices.optimize_scoring_weights(seqs_2d, actual_truths, signal_values, slice_scores_subsets,
+                                                           precision_recall_path, coefficients_path)
 
     # Construct the output dataframe
     output_df = input_df if in_place else input_df.copy()
-    output_df = pd.concat([output_df, scored_result.scored_df], axis=1)
+    output_df = pd.concat([output_df, result.scored_df], axis=1)
 
     # Optionally add position residue columns
     if add_residue_cols and not in_place:
@@ -64,7 +62,7 @@ def apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets = No
 
         # Assign residue columns
         residue_cols = ["#" + str(i) for i in np.arange(1, motif_length + 1)]
-        residues_df = pd.DataFrame(sequences_2d, columns=residue_cols)
+        residues_df = pd.DataFrame(seqs_2d, columns=residue_cols)
         output_df = pd.concat([output_df, residues_df], axis=1)
 
         # Define list of columns in the desired order
@@ -78,7 +76,7 @@ def apply_motif_scores(input_df, conditional_matrices, slice_scores_subsets = No
     elif add_residue_cols and in_place:
         raise Exception("apply_motif_scores error: in_place cannot be set to True when add_residue_cols is True")
 
-    return (scored_result, output_df, conditional_matrices)
+    return (result, output_df, conditional_matrices)
 
 def main(input_df, general_params = general_params, data_params = data_params, matrix_params = matrix_params):
     '''
@@ -110,13 +108,12 @@ def main(input_df, general_params = general_params, data_params = data_params, m
             conditional_matrices, scored_result, output_df = pickle.load(f)
     else:
         # Generate the conditional position-weighted matrices
+        predefined_weights_exist = True if matrix_params.get("position_weights") is not None else False
         percentiles_dict = general_params.get("percentiles_dict")
         motif_length = general_params.get("motif_length")
         aa_charac_dict = general_params.get("aa_charac_dict")
         conditional_matrices = ConditionalMatrices(motif_length, input_df, percentiles_dict, aa_charac_dict,
                                                    data_params, matrix_params)
-        predefined_weights_exist = True if matrix_params.get("position_weights") is not None else False
-        conditional_matrices.save(output_folder, save_weighted = predefined_weights_exist)
 
         # Score the input data
         seq_col = data_params.get("seq_col")
@@ -137,6 +134,8 @@ def main(input_df, general_params = general_params, data_params = data_params, m
                                                   in_place = False, precision_recall_path = precision_recall_path,
                                                   coefficients_path = output_folder)
         scored_result, output_df, conditional_matrices = scoring_output_tuple
+
+        conditional_matrices.save(output_folder, save_weighted = True)
 
         # Cache the data
         with open(cached_path, "wb") as f:

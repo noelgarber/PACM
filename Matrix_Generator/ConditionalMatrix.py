@@ -651,8 +651,6 @@ class ConditionalMatrices:
             matrix_params:       same as in ConditionalMatrix()
         '''
 
-        self.scored_training_data = False # set for later use by self.score_peptides()
-
         self.suppress_positive_positions = matrix_params["suppress_positive_positions"]
         self.suppress_suboptimal_positions = matrix_params["suppress_suboptimal_positions"]
         self.suppress_forbidden_positions = matrix_params["suppress_forbidden_positions"]
@@ -973,25 +971,18 @@ class ConditionalMatrices:
         # Display saved message
         print(f"Saved unweighted matrices, weighted matrices, and output report to {parent_folder}")
 
-    def score_peptides(self, sequences_2d, actual_truths, signal_values = None, slice_scores_subsets = None,
-                       use_weighted = False, precision_recall_path = None, coefficients_path = None):
+    def score_seqs_2d(self, sequences_2d, use_weighted = False):
         '''
         Vectorized function to score amino acid sequences based on the dictionary of context-aware weighted matrices
 
         Args:
-            sequences_2d (np.ndarray):                  unravelled peptide sequences to score
-            actual_truths (np.ndarray):                 array of boolean calls for whether peptides bind in experiments
-            signal_values (np.ndarray):                 array of binding signal values for peptides against protein bait(s)
-            conditional_matrices (ConditionalMatrices): conditional weighted matrices for scoring peptides
-            slice_scores_subsets (np.ndarray):          array of stretches of positions to stratify results into;
-                                                        e.g. [6,7,2] is stratified into scores for positions
-                                                        1-6, 7-13, & 14-15
-            use_weighted (bool):                        whether to use conditional_matrices.stacked_weighted_matrices
-            precision_recall_path (str):                desired file path for saving the precision/recall graph
-            coefficients_path (str):                    path to save score standardization coefficients to for later use
+            sequences_2d (np.ndarray):           unravelled peptide sequences to score
+            use_weighted (bool):                 whether to use conditional_matrices.stacked_weighted_matrices
 
         Returns:
-            result (ScoredPeptideResult):               signal, suboptimal, and forbidden score values in 1D and 2D
+            positive_scores_2d (np.ndarray):     positive element scores; shape is (peptide_count, peptide_length)
+            suboptimal_scores_2d (np.ndarray):   suboptimal element scores; shape is (peptide_count, peptide_length)
+            forbidden_scores_2d (np.ndarray):    forbidden element scores; shape is (peptide_count, peptide_length)
         '''
 
         motif_length = sequences_2d.shape[1]
@@ -1069,6 +1060,31 @@ class ConditionalMatrices:
         right_forbidden_2d = stacked_forbidden_matrices[right_dim1, dim2, dim3].reshape(shape_2d)
         forbidden_scores_2d = (left_forbidden_2d + right_forbidden_2d) / 2
 
+        return (positive_scores_2d, suboptimal_scores_2d, forbidden_scores_2d)
+
+    def optimize_scoring_weights(self, sequences_2d, actual_truths, signal_values = None, slice_scores_subsets = None,
+                                 precision_recall_path = None, coefficients_path = None):
+        '''
+        Vectorized function to score amino acid sequences based on the dictionary of context-aware weighted matrices
+
+        Args:
+            sequences_2d (np.ndarray):                  unravelled peptide sequences to score
+            actual_truths (np.ndarray):                 array of boolean calls for whether peptides bind in experiments
+            signal_values (np.ndarray):                 array of binding signal values for peptides against protein bait(s)
+            conditional_matrices (ConditionalMatrices): conditional weighted matrices for scoring peptides
+            slice_scores_subsets (np.ndarray):          array of stretches of positions to stratify results into;
+                                                        e.g. [6,7,2] is stratified into scores for positions
+                                                        1-6, 7-13, & 14-15
+            precision_recall_path (str):                desired file path for saving the precision/recall graph
+            coefficients_path (str):                    path to save score standardization coefficients to for later use
+
+        Returns:
+            result (ScoredPeptideResult):               signal, suboptimal, and forbidden score values in 1D and 2D
+        '''
+
+        scored_arrays = self.score_seqs_2d(sequences_2d, use_weighted = False)
+        positive_scores_2d, suboptimal_scores_2d, forbidden_scores_2d = scored_arrays
+
         result = ScoredPeptideResult(sequences_2d, slice_scores_subsets, positive_scores_2d, suboptimal_scores_2d,
                                      forbidden_scores_2d, actual_truths, signal_values,
                                      fig_path = precision_recall_path, coefficients_path = coefficients_path,
@@ -1076,32 +1092,23 @@ class ConditionalMatrices:
                                      suppress_suboptimals = self.suppress_suboptimal_positions,
                                      suppress_forbiddens = self.suppress_forbidden_positions)
 
-        # Update weights and other information
-        if self.scored_training_data:
-            update_weights = input("f\t\tWeights have already been set previously. Overwrite? (Y/N)  ") == "Y"
-        else:
-            update_weights = True
+        # Assign weights and other information to self
+        self.apply_weights(result.binding_positive_weights, result.positives_weights,
+                           result.suboptimals_weights, result.forbiddens_weights, only_3d=False)
+        self.best_accuracy_method = result.best_accuracy_method
 
-        if update_weights:
-            # Apply optimized weights
-            self.apply_weights(result.binding_positive_weights, result.positives_weights,
-                               result.suboptimals_weights, result.forbiddens_weights, only_3d=False)
-            self.best_accuracy_method = result.best_accuracy_method
+        # Assign standardization coefficients to self
+        self.binding_standardization_coefficients = result.binding_standardization_coefficients
+        self.accuracy_standardization_coefficients = result.standardization_coefficients
 
-            # Assign standardization coefficients to self
-            self.binding_standardization_coefficients = result.binding_standardization_coefficients
-            self.accuracy_standardization_coefficients = result.standardization_coefficients
+        # Assign thresholds to self
+        self.standardized_weighted_threshold = result.standardized_weighted_threshold
+        self.standardized_threshold_accuracy = result.standardized_threshold_accuracy
 
-            # Assign thresholds to self
-            self.standardized_weighted_threshold = result.standardized_weighted_threshold
-            self.standardized_threshold_accuracy = result.standardized_threshold_accuracy
-
-            # Assign binding exponential function params to self, where y = ae^b(x-c) + d, and params = (a,b,c,d)
-            self.binding_exp_params = result.binding_exp_params
-            self.standardized_binding_exp_params = result.standardized_binding_exp_params
-            self.binding_score_r2 = result.binding_score_r2
-            self.standardized_binding_r2 = result.standardized_binding_r2
-
-            self.scored_training_data = True
+        # Assign binding exponential function params to self, where y = ae^b(x-c) + d, and params = (a,b,c,d)
+        self.binding_exp_params = result.binding_exp_params
+        self.standardized_binding_exp_params = result.standardized_binding_exp_params
+        self.binding_score_r2 = result.binding_score_r2
+        self.standardized_binding_r2 = result.standardized_binding_r2
 
         return result
