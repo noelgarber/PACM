@@ -1028,16 +1028,6 @@ class ConditionalMatrices:
         column_indices = np.arange(motif_length)
         column_indices_tiled = np.tile(column_indices, len(sequences_2d))
 
-        # Assign matrices to use for scoring
-        if use_weighted:
-            stacked_positive_matrices = self.stacked_positive_weighted
-            stacked_suboptimal_matrices = self.stacked_suboptimal_weighted
-            stacked_forbidden_matrices = self.stacked_forbidden_weighted
-        else:
-            stacked_positive_matrices = self.stacked_positive_matrices
-            stacked_suboptimal_matrices = self.stacked_suboptimal_matrices
-            stacked_forbidden_matrices = self.stacked_forbidden_matrices
-
         # Define dimensions for 3D matrix indexing
         shape_2d = sequences_2d.shape
         left_dim1 = left_encoded_matrix_refs_flattened
@@ -1045,7 +1035,27 @@ class ConditionalMatrices:
         dim2 = aa_row_indices_flattened
         dim3 = column_indices_tiled
 
-        # Calculate predicted signal values
+        # Assign matrices to use for scoring
+        if use_weighted:
+            # Calculate predicted binding strength if specified
+            stacked_binding_matrices = self.stacked_binding_weighted
+            left_binding_2d = stacked_binding_matrices[left_dim1, dim2, dim3].reshape(shape_2d)
+            right_binding_2d = stacked_binding_matrices[right_dim1, dim2, dim3].reshape(shape_2d)
+            binding_scores_2d = (left_binding_2d + right_binding_2d) / 2
+
+            # Assign other matrices as well
+            stacked_positive_matrices = self.stacked_positive_weighted
+            stacked_suboptimal_matrices = self.stacked_suboptimal_weighted
+            stacked_forbidden_matrices = self.stacked_forbidden_weighted
+
+        else:
+            # Assign unweighted matrices
+            stacked_positive_matrices = self.stacked_positive_matrices
+            stacked_suboptimal_matrices = self.stacked_suboptimal_matrices
+            stacked_forbidden_matrices = self.stacked_forbidden_matrices
+            binding_scores_2d = None
+
+        # Calculate predicted positive element scores
         left_positive_2d = stacked_positive_matrices[left_dim1, dim2, dim3].reshape(shape_2d)
         right_positive_2d = stacked_positive_matrices[right_dim1, dim2, dim3].reshape(shape_2d)
         positive_scores_2d = (left_positive_2d + right_positive_2d) / 2
@@ -1060,7 +1070,7 @@ class ConditionalMatrices:
         right_forbidden_2d = stacked_forbidden_matrices[right_dim1, dim2, dim3].reshape(shape_2d)
         forbidden_scores_2d = (left_forbidden_2d + right_forbidden_2d) / 2
 
-        return (positive_scores_2d, suboptimal_scores_2d, forbidden_scores_2d)
+        return (binding_scores_2d, positive_scores_2d, suboptimal_scores_2d, forbidden_scores_2d)
 
     def optimize_scoring_weights(self, sequences_2d, actual_truths, signal_values = None, slice_scores_subsets = None,
                                  precision_recall_path = None, coefficients_path = None):
@@ -1083,7 +1093,7 @@ class ConditionalMatrices:
         '''
 
         scored_arrays = self.score_seqs_2d(sequences_2d, use_weighted = False)
-        positive_scores_2d, suboptimal_scores_2d, forbidden_scores_2d = scored_arrays
+        positive_scores_2d, suboptimal_scores_2d, forbidden_scores_2d = scored_arrays[1:]
 
         result = ScoredPeptideResult(sequences_2d, slice_scores_subsets, positive_scores_2d, suboptimal_scores_2d,
                                      forbidden_scores_2d, actual_truths, signal_values,
