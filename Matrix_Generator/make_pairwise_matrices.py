@@ -108,7 +108,6 @@ def main(input_df, general_params = general_params, data_params = data_params, m
             conditional_matrices, scored_result, output_df = pickle.load(f)
     else:
         # Generate the conditional position-weighted matrices
-        predefined_weights_exist = True if matrix_params.get("position_weights") is not None else False
         percentiles_dict = general_params.get("percentiles_dict")
         motif_length = general_params.get("motif_length")
         aa_charac_dict = general_params.get("aa_charac_dict")
