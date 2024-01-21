@@ -671,8 +671,6 @@ class ConditionalMatrices:
         # For generating a 3D matrix, create an empty list to hold the matrices to stack, and the mapping
         self.residue_charac_dict = residue_charac_dict
         self.chemical_class_count = len(residue_charac_dict.keys())
-        self.encoded_chemical_classes = {}
-        self.chemical_class_decoder = {}
         positive_matrices_list = []
         suboptimal_matrices_list = []
         forbidden_matrices_list = []
@@ -735,6 +733,9 @@ class ConditionalMatrices:
     def get_rule_tuples(self, residue_charac_dict, motif_length):
         # Helper function that generates a list of rule tuples to be used by generate_matrices()
 
+        self.encoded_chemical_classes = {}
+        self.chemical_class_decoder = {}
+
         rule_tuples = []
         for i, (chemical_characteristic, member_list) in enumerate(residue_charac_dict.items()):
             # Map the encodings for the chemical classes
@@ -748,6 +749,29 @@ class ConditionalMatrices:
                 rule_tuples.append(rule_tuple)
 
         return rule_tuples
+
+    def encode_seqs_2d(self, seqs_2d):
+        '''
+        This function finds dim1 coords in stacked conditional matrices matching residues in the given seqs_2d array
+
+        Args:
+            seqs_2d (np.ndarray): 2D array where rows are individual peptide sequences as arrays of residues
+
+        Returns:
+            stacked_coords_2d (np.ndarray): 2D array of dim1 coordinate references matching stacked matrices lists
+        '''
+
+        motif_length = seqs_2d.shape[1]
+        stacked_coords_2d = np.full(shape=seqs_2d.shape, fill_value=-1, dtype=int)
+
+        for aa, encoded_chemical_class in self.encoded_chemical_classes.items():
+            displacement = encoded_chemical_class * motif_length
+            for i in np.arange(motif_length):
+                stacked_coordinate = displacement + i
+                col_seqs = seqs_2d[:,i]
+                stacked_coords_2d[col_seqs == aa, i] = stacked_coordinate
+
+        return stacked_coords_2d
 
     def generate_baseline_matrix(self, motif_length, source_df, data_params, matrix_params,
                                  amino_acids = amino_acids_phos):
@@ -1001,21 +1025,10 @@ class ConditionalMatrices:
         for unique_residue, row_index in zip(unique_residues, unique_residue_indices):
             aa_row_indices_2d[sequences_2d == unique_residue] = row_index
 
-        # Define residues flanking either side of the residues of interest; for out-of-bounds cases, use opposite side
-        flanking_left_2d = np.concatenate((sequences_2d[:, 0:1], sequences_2d[:, 0:-1]), axis=1)
-        flanking_right_2d = np.concatenate((sequences_2d[:, 1:], sequences_2d[:, -1:]), axis=1)
-
-        # Get integer-encoded chemical classes for each residue
-        left_encoded_classes_2d = np.zeros(flanking_left_2d.shape, dtype=int)
-        right_encoded_classes_2d = np.zeros(flanking_right_2d.shape, dtype=int)
-        for member_aa, encoded_class in self.encoded_chemical_classes.items():
-            left_encoded_classes_2d[flanking_left_2d == member_aa] = encoded_class
-            right_encoded_classes_2d[flanking_right_2d == member_aa] = encoded_class
-
-        # Find the matrix identifier number (1st dim of 3D matrix) for each encoded class, depending on seq position
-        encoded_positions = np.arange(motif_length) * self.chemical_class_count
-        left_encoded_matrix_refs = left_encoded_classes_2d + encoded_positions
-        right_encoded_matrix_refs = right_encoded_classes_2d + encoded_positions
+        # Find the matrix identifier numbers (1st dim of 3D matrix) for flanking left and right residues of each residue
+        encoded_matrix_refs = self.encode_seqs_2d(sequences_2d)
+        left_encoded_matrix_refs = np.concatenate((encoded_matrix_refs[:, 0:1], encoded_matrix_refs[:, 0:-1]), axis=1)
+        right_encoded_matrix_refs = np.concatenate((encoded_matrix_refs[:, 1:], encoded_matrix_refs[:, -1:]), axis=1)
 
         # Flatten the encoded matrix refs, which serve as the 1st dimension referring to 3D matrices
         left_encoded_matrix_refs_flattened = left_encoded_matrix_refs.flatten()
