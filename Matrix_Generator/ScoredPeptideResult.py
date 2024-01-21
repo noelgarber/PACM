@@ -22,18 +22,19 @@ except:
                       Define optimization functions for determining position and score weights
     ---------------------------------------------------------------------------------------------------------------- '''
 
-def accuracy_objective(weights, actual_truths, points_2d, invert_points = False):
+def accuracy_objective(weights, actual_truths, points_2d, disqualified_forbidden = None, invert_points = False):
     '''
     Objective function for optimizing 2D points array weights based on absolute accuracy
 
     Args:
-        weights (np.ndarray):       array of weights of shape (positions_count,)
-        actual_truths (np.ndarray): array of actual truth values as binary integer-encoded labels
-        points_2d (np.ndarray):     2D array of points values, where axis=1 represents positions
-        invert_points (bool):       set to True if lower points values are better, otherwise set to False
+        weights (np.ndarray):                 array of weights of shape (positions_count,)
+        actual_truths (np.ndarray):           array of actual truth values as binary integer-encoded labels
+        points_2d (np.ndarray):               2D array of points values, where axis=1 represents positions
+        disqualified_forbidden (np.ndarray):  bools of whether each row of points_2d has any forbidden residues
+        invert_points (bool):                 set to True if lower points values are better, otherwise set to False
 
     Returns:
-        max_accuracy (float):       best accuracy
+        max_accuracy (float):           best accuracy
     '''
 
     if points_2d.shape[1] != len(weights):
@@ -43,10 +44,14 @@ def accuracy_objective(weights, actual_truths, points_2d, invert_points = False)
     if invert_points:
         weighted_points = weighted_points * -1
 
+    if disqualified_forbidden is not None:
+        weighted_points[disqualified_forbidden] = np.nan
+
     points_copy = weighted_points.copy()
     points_copy.sort()
     thresholds = (points_copy[:-1] + points_copy[1:]) / 2
     predicted = np.greater_equal(weighted_points, thresholds[:, np.newaxis])
+
     accuracies = np.mean(predicted == actual_truths, axis=1)
     max_accuracy = np.nanmax(accuracies)
 
@@ -424,90 +429,84 @@ class ScoredPeptideResult:
         print(f"\tOptimizing final score values to maximize accuracy in binary calls...")
 
         # Generate forced values dicts
-        psf_forced_values_dict = {}
-        wpsf_forced_values_dict = {}
-        sf_forced_values_dict = {}
+        ps_forced = {}
+        wps_forced = {}
+        suboptimal_forced = {}
         for idx in suppress_positives:
             # Suppressed positive score positions
-            psf_forced_values_dict[idx] = 0
+            ps_forced[idx] = 0
         for idx in suppress_suboptimals:
             # Suppressed suboptimal score positions
-            psf_forced_values_dict[idx + motif_length] = 0
-            wpsf_forced_values_dict[idx + 1] = 0
-            sf_forced_values_dict[idx] = 0
-        for idx in np.arange(motif_length):
-            if idx in suppress_forbiddens:
-                # Suppressed forbidden score positions
-                psf_forced_values_dict[idx + motif_length*2] = 0
-                wpsf_forced_values_dict[idx + motif_length + 1] = 0
-                sf_forced_values_dict[idx + motif_length] = 0
-            else:
-                # Use unweighted allowed forbidden positions
-                psf_forced_values_dict[idx + motif_length*2] = 1
-                wpsf_forced_values_dict[idx + motif_length + 1] = 1
-                sf_forced_values_dict[idx + motif_length] = 1
+            ps_forced[idx + motif_length] = 0
+            wps_forced[idx + 1] = 0
+            suboptimal_forced[idx] = 0
+
+        # Find disqualified peptides that have forbidden residues
+        forbidden_2d = self.forbidden_scores_2d.copy()
+        forbidden_2d[:,suppress_forbiddens] = 0
+        disqualified_forbidden = np.any(forbidden_2d > 0, axis=1)
 
         # Attempt accuracy optimization with and without positive element scores, then use the better option
         print(f"\t\tAttempting with unweighted positive, suboptimal, and forbidden scores combined...")
-        psf_combined_2d = np.hstack([self.positive_scores_2d,
-                                     self.suboptimal_scores_2d * -1,
-                                     self.forbidden_scores_2d * -1])
+        positive_suboptimal_2d = np.hstack([self.positive_scores_2d,
+                                            self.suboptimal_scores_2d * -1])
 
-        psf_objective = partial(accuracy_objective, actual_truths = self.actual_truths, points_2d = psf_combined_2d)
-        combined_array_len = psf_combined_2d.shape[1]
+        positive_suboptimal_objective = partial(accuracy_objective, actual_truths = self.actual_truths,
+                                points_2d = positive_suboptimal_2d, disqualified_forbidden = disqualified_forbidden)
+        combined_array_len = positive_suboptimal_2d.shape[1]
 
-        psf_optimized_results = optimize_points_2d(combined_array_len, weights_range, mode, psf_objective,
-                                                   psf_forced_values_dict, search_sample = 500000)
-        psf_preliminary_weights, psf_best_x = psf_optimized_results
+        ps_optimized_results = optimize_points_2d(combined_array_len, weights_range, mode,
+                                                   positive_suboptimal_objective, ps_forced,
+                                                   search_sample = 500000)
+        ps_preliminary_weights, ps_best_x = ps_optimized_results
 
         print(f"\t\tAttempting with pre-weighted positive, unweighted suboptimal, and unweighted forbidden scores...")
         # Note that weighted positive score sums are multiplied by the motif length to prevent under-weighting
         binding_positive_multiplier = self.suboptimal_scores_2d.shape[1] # scales to prevent underrepresentation
-        wpsf_combined_2d = np.hstack([self.binding_positive_scores.reshape(-1, 1) * binding_positive_multiplier,
-                                      self.suboptimal_scores_2d * -1,
-                                      self.forbidden_scores_2d * -1])
-        wpsf_objective = partial(accuracy_objective, actual_truths = self.actual_truths, points_2d = wpsf_combined_2d)
+        wps_combined_2d = np.hstack([self.binding_positive_scores.reshape(-1, 1) * binding_positive_multiplier,
+                                     self.suboptimal_scores_2d * -1])
+        wps_objective = partial(accuracy_objective, actual_truths = self.actual_truths, points_2d = wps_combined_2d,
+                                disqualified_forbidden = disqualified_forbidden)
 
-        wpsf_combined_array_len = wpsf_combined_2d.shape[1]
-        wpsf_optimized_results = optimize_points_2d(wpsf_combined_array_len, weights_range, mode, wpsf_objective,
-                                                    wpsf_forced_values_dict, search_sample = 1000000)
-        wpsf_preliminary_weights, wpsf_best_x = wpsf_optimized_results
-        wpsf_preliminary_weights[0] = wpsf_preliminary_weights[0] * binding_positive_multiplier
+        wps_combined_array_len = wps_combined_2d.shape[1]
+        wps_optimized_results = optimize_points_2d(wps_combined_array_len, weights_range, mode, wps_objective,
+                                                   wps_forced, search_sample = 1000000)
+        wps_preliminary_weights, wps_best_x = wps_optimized_results
+        wps_preliminary_weights[0] = wps_preliminary_weights[0] * binding_positive_multiplier
 
-        print(f"\t\tAttempting with only unweighted suboptimal and forbidden scores combined...")
-        suboptimal_forbidden_2d = np.hstack([self.suboptimal_scores_2d * -1,
-                                             self.forbidden_scores_2d * -1])
-        sf_objective = partial(accuracy_objective, actual_truths = self.actual_truths,
-                               points_2d = suboptimal_forbidden_2d)
-        sf_combined_array_len = suboptimal_forbidden_2d.shape[1]
+        print(f"\t\tAttempting with only suboptimal scores...")
+        inverted_suboptimal_2d = self.suboptimal_scores_2d * -1
+        suboptimal_objective = partial(accuracy_objective, actual_truths = self.actual_truths,
+                                       points_2d = inverted_suboptimal_2d,
+                                       disqualified_forbidden = disqualified_forbidden)
 
-        sf_optimized_results = optimize_points_2d(sf_combined_array_len, weights_range, mode, sf_objective,
-                                                  sf_forced_values_dict, search_sample = 1000000)
-        sf_preliminary_weights, sf_best_x = sf_optimized_results
+        suboptimal_optimized_results = optimize_points_2d(motif_length, weights_range, mode, suboptimal_objective,
+                                                          suboptimal_forced, search_sample = 1000000)
+        suboptimal_preliminary_weights, suboptimal_best_x = suboptimal_optimized_results
 
         # Select best
-        if psf_best_x > wpsf_best_x and psf_best_x > sf_best_x:
-            print(f"\t\tBest combination: positive, suboptimal, and forbidden scores (x={psf_best_x})")
-            self.best_accuracy_method = "psf"
-            best_objective_output = psf_best_x
-            self.positives_weights = psf_preliminary_weights[:motif_length]
-            self.suboptimals_weights = psf_preliminary_weights[motif_length:2*motif_length]
-            self.forbiddens_weights = psf_preliminary_weights[motif_length*2:]
-        elif wpsf_best_x > psf_best_x and wpsf_best_x > sf_best_x:
+        if ps_best_x > wps_best_x and ps_best_x > suboptimal_best_x:
+            print(f"\t\tBest combination: positive, suboptimal, and forbidden scores (x={ps_best_x})")
+            self.best_accuracy_method = "ps"
+            best_objective_output = ps_best_x
+            self.positives_weights = ps_preliminary_weights[:motif_length]
+            self.suboptimals_weights = ps_preliminary_weights[motif_length:2*motif_length]
+            self.forbiddens_weights = np.zeros(motif_length, dtype=float)
+        elif wps_best_x > ps_best_x and wps_best_x > suboptimal_best_x:
             print(f"\t\tBest combination: pre-weighted positive score sums with suboptimal and forbidden scores",
-                  f"(x={wpsf_best_x})")
-            self.best_accuracy_method = "wpsf"
-            best_objective_output = wpsf_best_x
-            self.positives_weights = self.binding_positive_weights * wpsf_preliminary_weights[0]
-            self.suboptimals_weights = wpsf_preliminary_weights[1:motif_length+1]
-            self.forbiddens_weights = wpsf_preliminary_weights[motif_length+1:]
+                  f"(x={wps_best_x})")
+            self.best_accuracy_method = "wps"
+            best_objective_output = wps_best_x
+            self.positives_weights = self.binding_positive_weights * wps_preliminary_weights[0]
+            self.suboptimals_weights = wps_preliminary_weights[1:motif_length+1]
+            self.forbiddens_weights = np.zeros(motif_length, dtype=float)
         else:
-            print(f"\t\tBest combination: suboptimal and forbidden scores only (x={sf_best_x})")
-            self.best_accuracy_method = "sf"
-            best_objective_output = sf_best_x
+            print(f"\t\tBest combination: suboptimal only (x={suboptimal_best_x})")
+            self.best_accuracy_method = "suboptimal"
+            best_objective_output = suboptimal_best_x
             self.positives_weights = np.zeros(motif_length, dtype=float)
-            self.suboptimals_weights = sf_preliminary_weights[:motif_length]
-            self.forbiddens_weights = sf_preliminary_weights[motif_length:]
+            self.suboptimals_weights = suboptimal_preliminary_weights
+            self.forbiddens_weights = np.zeros(motif_length, dtype=float)
 
         print("\tFound optimal weights:")
         print("\t\tPositive element score weights: [", self.positives_weights.round(2), "]")
@@ -524,12 +523,12 @@ class ScoredPeptideResult:
         self.weighted_forbiddens = self.weighted_forbiddens_2d.sum(axis=1)
 
         # Get total raw and standardized scores
-        if self.best_accuracy_method == "psf":
-            self.weighted_accuracy_scores = np.multiply(psf_combined_2d, psf_preliminary_weights).sum(axis=1)
-        elif self.best_accuracy_method == "wpsf":
-            self.weighted_accuracy_scores = np.multiply(wpsf_combined_2d, wpsf_preliminary_weights).sum(axis=1)
-        elif self.best_accuracy_method == "sf":
-            self.weighted_accuracy_scores = np.multiply(suboptimal_forbidden_2d, sf_preliminary_weights).sum(axis=1)
+        if self.best_accuracy_method == "ps":
+            self.weighted_accuracy_scores = np.multiply(positive_suboptimal_2d, ps_preliminary_weights).sum(axis=1)
+        elif self.best_accuracy_method == "wps":
+            self.weighted_accuracy_scores = np.multiply(wps_combined_2d, wps_preliminary_weights).sum(axis=1)
+        elif self.best_accuracy_method == "suboptimal":
+            self.weighted_accuracy_scores = np.multiply(inverted_suboptimal_2d, suboptimal_preliminary_weights).sum(axis=1)
         else:
             raise ValueError(f"self.best_accuracy_method is set to {self.best_accuracy_method}")
 
