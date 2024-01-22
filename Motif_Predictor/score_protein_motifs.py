@@ -224,11 +224,6 @@ def scan_protein_seq(protein_seq, conditional_matrices, predictor_params = predi
             with open(standardization_coefficients_path, "rb") as f:
                 standardization_coefficients = pickle.load(f)
 
-            # Get the optimized thresholds for converting sets of scores to binary classifications
-            optimized_thresholds_path = predictor_params["optimized_thresholds_path"]
-            with open(optimized_thresholds_path, "rb") as f:
-                optimized_thresholds = pickle.load(f)
-
             # Score the protein sequence chunks
             output_lists = score_sliced_protein(cleaned_sliced_2d, conditional_matrices, return_count,
                                                 standardization_coefficients)
