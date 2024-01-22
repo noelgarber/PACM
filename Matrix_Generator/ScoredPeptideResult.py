@@ -488,6 +488,7 @@ class ScoredPeptideResult:
         _, trained_ps_optimal_threshold = accuracy_objective(trained_ps_weights, train_actual_truths, train_ps_2d,
                                                              train_disqualified_forbidden, return_threshold = True)
         test_ps_weighted_scores = np.multiply(test_ps_2d, trained_ps_weights).sum(axis=1)
+        test_ps_weighted_scores[test_disqualified_forbidden] = np.nan
         test_ps_predicted = np.greater_equal(test_ps_weighted_scores, trained_ps_optimal_threshold)
         test_ps_accuracy = np.mean(test_ps_predicted == test_actual_truths)
         print(f"\t\t\tTraining accuracy: {trained_ps_best_x*100:.1f}%")
@@ -514,6 +515,7 @@ class ScoredPeptideResult:
         _, trained_wps_optimal_threshold = accuracy_objective(trained_wps_weights, train_actual_truths, train_wps_2d,
                                                               train_disqualified_forbidden, return_threshold = True)
         test_wps_weighted_scores = np.multiply(test_wps_2d, trained_wps_weights).sum(axis=1)
+        test_wps_weighted_scores[test_disqualified_forbidden] = np.nan
         test_wps_predicted = np.greater_equal(test_wps_weighted_scores, trained_wps_optimal_threshold)
         test_wps_accuracy = np.mean(test_wps_predicted == test_actual_truths)
         print(f"\t\t\tTraining accuracy: {trained_wps_best_x*100:.1f}%")
@@ -536,6 +538,7 @@ class ScoredPeptideResult:
                                                              train_inverted_suboptimal_2d, train_disqualified_forbidden,
                                                              return_threshold = True)
         test_suboptimal_scores = np.multiply(test_inverted_suboptimal_2d, trained_suboptimal_weights).sum(axis=1)
+        test_suboptimal_scores[test_disqualified_forbidden] = np.nan
         test_suboptimal_predicted = np.greater_equal(test_suboptimal_scores, trained_suboptimal_threshold)
         test_suboptimal_accuracy = np.mean(test_suboptimal_predicted == test_actual_truths)
         print(f"\t\t\tTraining accuracy: {trained_suboptimal_best_x*100:.1f}%")
