@@ -1134,4 +1134,8 @@ class ConditionalMatrices:
         self.binding_score_r2 = result.binding_score_r2
         self.standardized_binding_r2 = result.standardized_binding_r2
 
+        # Assign training and testing accuracies to self
+        self.training_accuracy = result.training_accuracy
+        self.test_accuracy = result.test_accuracy
+
         return result

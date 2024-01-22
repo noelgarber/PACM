@@ -553,16 +553,22 @@ class ScoredPeptideResult:
         # Assign best to self
         if self.best_accuracy_method == "ps":
             best_objective_output = trained_ps_best_x
+            self.training_accuracy = trained_ps_best_x
+            self.test_accuracy = test_ps_accuracy
             self.positives_weights = trained_ps_weights[:motif_length]
             self.suboptimals_weights = trained_ps_weights[motif_length:2*motif_length]
             self.forbiddens_weights = np.zeros(motif_length, dtype=float)
         elif self.best_accuracy_method == "wps":
             best_objective_output = trained_wps_best_x
+            self.training_accuracy = trained_wps_best_x
+            self.test_accuracy = test_wps_accuracy
             self.positives_weights = self.binding_positive_weights * trained_wps_weights[0]
             self.suboptimals_weights = trained_wps_weights[1:motif_length+1]
             self.forbiddens_weights = np.zeros(motif_length, dtype=float)
         elif self.best_accuracy_method == "suboptimal":
             best_objective_output = trained_suboptimal_best_x
+            self.training_accuracy = trained_suboptimal_best_x
+            self.test_accuracy = test_suboptimal_accuracy
             self.positives_weights = np.zeros(motif_length, dtype=float)
             self.suboptimals_weights = trained_suboptimal_weights
             self.forbiddens_weights = np.zeros(motif_length, dtype=float)
