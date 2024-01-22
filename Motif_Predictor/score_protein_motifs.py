@@ -7,7 +7,7 @@ import multiprocessing
 from tqdm import trange
 from functools import partial
 from Matrix_Generator.ConditionalMatrix import ConditionalMatrices
-from general_utils.general_utils import finite_sorted_indices, add_number_suffix
+from general_utils.general_utils import add_number_suffix
 
 # Import the user-specified params, either from a local version or the git-linked version
 try:
@@ -312,7 +312,7 @@ def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
         weights_tuple = pickle.load(f)
 
     scan_seq_partial = partial(scan_protein_seq, conditional_matrices = conditional_matrices,
-                               weights_tuple = weights_tuple, predictor_params = predictor_params)
+                               predictor_params = predictor_params)
 
     # Loop over the protein sequences to score them
     for i, protein_seq in enumerate(protein_seqs_list):
