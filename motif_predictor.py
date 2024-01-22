@@ -62,7 +62,7 @@ def main(predictor_params = predictor_params):
 
             chunk_df = results[0]
             novel_motif_cols = results[1]
-            classical_motif_cols = results[7]
+            classical_motif_cols = results[8]
 
             all_motif_cols = novel_motif_cols.copy()
             all_motif_cols.extend(classical_motif_cols)
