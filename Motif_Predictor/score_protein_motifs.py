@@ -19,7 +19,7 @@ except:
 if predictor_params["compare_classical_method"]:
     from Motif_Predictor.classical_method import classical_protein_method
 
-def score_sliced_protein(sequences_2d, conditional_matrices, return_count = 3, std_coefs = None):
+def score_sliced_protein(sequences_2d, conditional_matrices, return_count = 3):
     '''
     Vectorized function to score amino acid sequences based on the dictionary of context-aware weighted matrices
 
@@ -60,7 +60,12 @@ def score_sliced_protein(sequences_2d, conditional_matrices, return_count = 3, s
         raise ValueError(f"conditional_matrices.best_accuracy_method is {conditional_matrices.best_accuracy_method}")
 
     # Standardization of the scores
-    if isinstance(std_coefs, tuple) or isinstance(std_coefs, list) or isinstance(std_coefs, np.ndarray):
+    binding_std_coefs = conditional_matrices.binding_standardization_coefficients
+    if binding_std_coefs is not None:
+        binding_weighted_scores = (binding_weighted_scores - binding_std_coefs[0]) / binding_std_coefs[1]
+
+    std_coefs = conditional_matrices.accuracy_standardization_coefficients
+    if std_coefs is not None:
         total_scores = (total_scores - std_coefs[0]) / std_coefs[1]
         positive_weighted_scores = (positive_weighted_scores - std_coefs[2]) / std_coefs[3]
         suboptimal_weighted_scores = (suboptimal_weighted_scores - std_coefs[4]) / std_coefs[5]
@@ -219,14 +224,8 @@ def scan_protein_seq(protein_seq, conditional_matrices, predictor_params = predi
 
         # Calculate motif scores
         if len(cleaned_sliced_2d) > 0:
-            # Get the standardization coefficients to convert raw scores to floats between 0 and 1
-            standardization_coefficients_path = predictor_params["standardization_coefficients_path"]
-            with open(standardization_coefficients_path, "rb") as f:
-                standardization_coefficients = pickle.load(f)
-
             # Score the protein sequence chunks
-            output_lists = score_sliced_protein(cleaned_sliced_2d, conditional_matrices, return_count,
-                                                standardization_coefficients)
+            output_lists = score_sliced_protein(cleaned_sliced_2d, conditional_matrices, return_count)
             motifs, total_scores = output_lists[0:2]
             binding_scores, positive_scores, suboptimal_scores, forbidden_scores, final_calls = output_lists[2:]
 
