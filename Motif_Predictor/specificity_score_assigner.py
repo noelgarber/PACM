@@ -133,14 +133,14 @@ def apply_specificity_scores(protein_seqs_df, motif_cols, predictor_params=predi
                 motif_col_idx = cols.get_loc(motif_col)
                 if "homolog" in motif_col:
                     if "Classical" in motif_col:
-                        cols = cols.insert(motif_col_idx+8, specificity_score_col)
+                        cols = cols.insert(motif_col_idx+9, specificity_score_col)
                     else:
-                        cols = cols.insert(motif_col_idx+8, specificity_score_col)
+                        cols = cols.insert(motif_col_idx+9, specificity_score_col)
                 else:
                     if "Classical" in motif_col:
                         cols = cols.insert(motif_col_idx+2, specificity_score_col)
                     else:
-                        cols = cols.insert(motif_col_idx+5, specificity_score_col)
+                        cols = cols.insert(motif_col_idx+6, specificity_score_col)
 
         # Apply dataframe reordering
         protein_seqs_df = protein_seqs_df[cols]
