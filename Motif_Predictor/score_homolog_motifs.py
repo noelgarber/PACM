@@ -19,8 +19,7 @@ except:
 if predictor_params["compare_classical_method"]:
     from Motif_Predictor.classical_method import classical_motif_method
 
-def score_motifs(seqs_2d, conditional_matrices, std_coefs = None, filters = None,
-                 selenocysteine_substitute = "C", gap_substitute = "G"):
+def score_motifs(seqs_2d, conditional_matrices, filters = None, selenocysteine_substitute = "C", gap_substitute = "G"):
     '''
     Vectorized function to score homolog motif seqs based on the dictionary of context-aware weighted matrices
 
@@ -69,7 +68,12 @@ def score_motifs(seqs_2d, conditional_matrices, std_coefs = None, filters = None
         raise ValueError(f"conditional_matrices.best_accuracy_method is {conditional_matrices.best_accuracy_method}")
 
     # Standardization of the scores
-    if isinstance(std_coefs, tuple) or isinstance(std_coefs, list) or isinstance(std_coefs, np.ndarray):
+    binding_std_coefs = conditional_matrices.binding_standardization_coefficients
+    if binding_std_coefs is not None:
+        binding_weighted_scores = (binding_weighted_scores - binding_std_coefs[0]) / binding_std_coefs[1]
+
+    std_coefs = conditional_matrices.accuracy_standardization_coefficients
+    if std_coefs is not None:
         total_scores = (total_scores - std_coefs[0]) / std_coefs[1]
         positive_weighted_scores = (positive_weighted_scores - std_coefs[2]) / std_coefs[3]
         suboptimal_weighted_scores = (suboptimal_weighted_scores - std_coefs[4]) / std_coefs[5]
@@ -98,8 +102,8 @@ def seqs_chunk_generator(seqs_2d, chunk_size):
     for i in range(0, len(seqs_2d), chunk_size):
         yield seqs_2d[i:i+chunk_size]
 
-def score_motifs_parallel(seqs_2d, conditional_matrices, standardization_coefficients = None, chunk_size = 10000,
-                          filters = None, selenocysteine_substitute = "C", gap_substitute = "G"):
+def score_motifs_parallel(seqs_2d, conditional_matrices, chunk_size = 10000, filters = None,
+                          selenocysteine_substitute = "C", gap_substitute = "G"):
     '''
     Parallelized function for scoring sequences using a ConditionalMatrices object
 
@@ -115,8 +119,7 @@ def score_motifs_parallel(seqs_2d, conditional_matrices, standardization_coeffic
         total_scores (list):                        list of matching scores for each motif
     '''
 
-    partial_function = partial(score_motifs, conditional_matrices = conditional_matrices,
-                               std_coefs = standardization_coefficients, filters = filters,
+    partial_function = partial(score_motifs, conditional_matrices = conditional_matrices, filters = filters,
                                selenocysteine_substitute = selenocysteine_substitute, gap_substitute = gap_substitute)
 
     chunk_motifs = []
@@ -182,10 +185,6 @@ def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, 
 
     verbose = predictor_params["homolog_scoring_verbose"]
 
-    standardization_coefficients_path = predictor_params["standardization_coefficients_path"]
-    with open(standardization_coefficients_path, "rb") as f:
-        standardization_coefficients = pickle.load(f)
-
     # Load ConditionalMatrices object to be used in scoring
     conditional_matrices_path = predictor_params["conditional_matrices_path"]
     with open(conditional_matrices_path, "rb") as f:
@@ -210,7 +209,7 @@ def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, 
     gap_substitute = predictor_params["gap_substitute"]
     chunk_size = predictor_params["homolog_score_chunk_size"]
 
-    results = score_motifs_parallel(motif_seqs_2d, conditional_matrices, standardization_coefficients, chunk_size,
+    results = score_motifs_parallel(motif_seqs_2d, conditional_matrices, chunk_size,
                                     filters, selenocysteine_substitute, gap_substitute)
 
     print(f"\t\tParsing results into motif-score dicts...") if verbose else None
