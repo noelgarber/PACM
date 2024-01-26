@@ -277,8 +277,12 @@ class ScoredPeptideResult:
             # Optimize weights for combining sets of scores
             save_path = fig_path.rsplit("/", 1)[0]
             self.optimize_positive_weights(suppress_positives, ignore_failed_peptides, preview_scatter_plot, save_path)
-            self.optimize_total_weights(fig_path, coefficients_path,
-                                        suppress_positives, suppress_suboptimals, suppress_forbiddens)
+            self.optimize_total_weights(fig_path, coefficients_path, suppress_positives, suppress_suboptimals,
+                                        suppress_forbiddens, split_data=True)
+            retrain_full_dataset = input("\tRetrain on entire dataset to improve generalizability? (Y/N)  ") == "Y"
+            if retrain_full_dataset:
+                self.optimize_total_weights(fig_path, coefficients_path, suppress_positives, suppress_suboptimals,
+                                            suppress_forbiddens, split_data=False)
             self.evaluate_weighted_scores()
         elif predefined_weights is not None:
             # Apply predefined weights and assess them
@@ -415,7 +419,7 @@ class ScoredPeptideResult:
             plt.show()
 
     def optimize_total_weights(self, fig_path = None, coefficients_path = None, suppress_positives = None,
-                               suppress_suboptimals = None, suppress_forbiddens = None):
+                               suppress_suboptimals = None, suppress_forbiddens = None, split_data = True):
         '''
         Function that applies random search optimization to find ideal position and score weights to maximize f1-score
 
@@ -424,6 +428,7 @@ class ScoredPeptideResult:
             coefficients_path (str):           path to save the standardization coefficients to
             suppress_suboptimals (np.ndarray): position indices to suppress suboptimal elements at
             suppress_forbiddens (np.ndarray):  position indices to suppress forbidden elements at
+            split_data (bool):                 whether to perform a train/test split
 
         Returns:
             None
@@ -438,19 +443,33 @@ class ScoredPeptideResult:
 
         # Split into training and testing data
         score_row_indices = np.arange(len(self.positive_scores_2d))
-        train_indices, test_indices = train_test_split(score_row_indices, test_size=0.25)
-
-        train_actual_truths = self.actual_truths[train_indices]
-        train_binding_scores = self.binding_positive_scores[train_indices]
-        train_positive_2d = self.positive_scores_2d[train_indices,:]
-        train_suboptimal_2d = self.suboptimal_scores_2d[train_indices,:]
-        train_forbidden_2d = self.forbidden_scores_2d[train_indices,:]
-
-        test_actual_truths = self.actual_truths[test_indices]
-        test_binding_scores = self.binding_positive_scores[test_indices]
-        test_positive_2d = self.positive_scores_2d[test_indices,:]
-        test_suboptimal_2d = self.suboptimal_scores_2d[test_indices,:]
-        test_forbidden_2d = self.forbidden_scores_2d[test_indices,:]
+        if split_data: 
+            train_indices, test_indices = train_test_split(score_row_indices, test_size=0.25)
+    
+            train_actual_truths = self.actual_truths[train_indices]
+            train_binding_scores = self.binding_positive_scores[train_indices]
+            train_positive_2d = self.positive_scores_2d[train_indices,:]
+            train_suboptimal_2d = self.suboptimal_scores_2d[train_indices,:]
+            train_forbidden_2d = self.forbidden_scores_2d[train_indices,:]
+    
+            test_actual_truths = self.actual_truths[test_indices]
+            test_binding_scores = self.binding_positive_scores[test_indices]
+            test_positive_2d = self.positive_scores_2d[test_indices,:]
+            test_suboptimal_2d = self.suboptimal_scores_2d[test_indices,:]
+            test_forbidden_2d = self.forbidden_scores_2d[test_indices,:]
+        
+        else: 
+            train_indices = score_row_indices
+            test_indices = None
+            
+            train_actual_truths = self.actual_truths
+            train_binding_scores = self.binding_positive_scores
+            train_positive_2d = self.positive_scores_2d
+            train_suboptimal_2d = self.suboptimal_scores_2d
+            train_forbidden_2d = self.forbidden_scores_2d
+            
+            test_actual_truths, test_binding_scores = None, None
+            test_positive_2d, test_suboptimal_2d, test_forbidden_2d = None, None, None
 
         # Generate forced values dicts
         ps_forced = {}
@@ -470,12 +489,14 @@ class ScoredPeptideResult:
         forbidden_2d[:,suppress_forbiddens] = 0
         disqualified_forbidden = np.any(forbidden_2d > 0, axis=1)
         train_disqualified_forbidden = disqualified_forbidden[train_indices]
-        test_disqualified_forbidden = disqualified_forbidden[test_indices]
+        if split_data: 
+            test_disqualified_forbidden = disqualified_forbidden[test_indices]
+        else: 
+            test_disqualified_forbidden = None
 
         # Attempt accuracy optimization with and without positive element scores, then use the better option
         print(f"\t\tAttempting with unweighted positive, suboptimal, and forbidden scores combined...")
         train_ps_2d = np.hstack([train_positive_2d, train_suboptimal_2d * -1])
-        test_ps_2d = np.hstack([test_positive_2d, test_suboptimal_2d * -1])
         complete_ps_2d = np.hstack([self.positive_scores_2d, self.suboptimal_scores_2d * -1])
 
         train_ps_objective = partial(accuracy_objective, actual_truths = train_actual_truths, points_2d = train_ps_2d,
@@ -487,20 +508,23 @@ class ScoredPeptideResult:
 
         _, trained_ps_optimal_threshold = accuracy_objective(trained_ps_weights, train_actual_truths, train_ps_2d,
                                                              train_disqualified_forbidden, return_threshold = True)
-        test_ps_weighted_scores = np.multiply(test_ps_2d, trained_ps_weights).sum(axis=1)
-        test_ps_weighted_scores[test_disqualified_forbidden] = np.nan
-        test_ps_predicted = np.greater_equal(test_ps_weighted_scores, trained_ps_optimal_threshold)
-        test_ps_accuracy = np.mean(test_ps_predicted == test_actual_truths)
+
         print(f"\t\t\tTraining accuracy: {trained_ps_best_x*100:.1f}%")
-        print(f"\t\t\tTest accuracy: {test_ps_accuracy*100:.1f}%")
+        if split_data:
+            test_ps_2d = np.hstack([test_positive_2d, test_suboptimal_2d * -1])
+            test_ps_weighted_scores = np.multiply(test_ps_2d, trained_ps_weights).sum(axis=1)
+            test_ps_weighted_scores[test_disqualified_forbidden] = np.nan
+            test_ps_predicted = np.greater_equal(test_ps_weighted_scores, trained_ps_optimal_threshold)
+            test_ps_accuracy = np.mean(test_ps_predicted == test_actual_truths)
+            print(f"\t\t\tTest accuracy: {test_ps_accuracy*100:.1f}%")
+        else:
+            test_ps_accuracy = None
 
         print(f"\t\tAttempting with pre-weighted positive, unweighted suboptimal, and unweighted forbidden scores...")
         # Note that weighted positive score sums are multiplied by the motif length to prevent under-weighting
         binding_positive_multiplier = self.suboptimal_scores_2d.shape[1] # scales to prevent underrepresentation
         train_wps_2d = np.hstack([train_binding_scores.reshape(-1,1) * binding_positive_multiplier,
                                   train_suboptimal_2d * -1])
-        test_wps_2d = np.hstack([test_binding_scores.reshape(-1,1) * binding_positive_multiplier,
-                                 test_suboptimal_2d * -1])
         complete_wps_2d = np.hstack([self.binding_positive_scores.reshape(-1, 1) * binding_positive_multiplier,
                                      self.suboptimal_scores_2d * -1])
 
@@ -514,17 +538,22 @@ class ScoredPeptideResult:
 
         _, trained_wps_optimal_threshold = accuracy_objective(trained_wps_weights, train_actual_truths, train_wps_2d,
                                                               train_disqualified_forbidden, return_threshold = True)
-        test_wps_weighted_scores = np.multiply(test_wps_2d, trained_wps_weights).sum(axis=1)
-        test_wps_weighted_scores[test_disqualified_forbidden] = np.nan
-        test_wps_predicted = np.greater_equal(test_wps_weighted_scores, trained_wps_optimal_threshold)
-        test_wps_accuracy = np.mean(test_wps_predicted == test_actual_truths)
+
         print(f"\t\t\tTraining accuracy: {trained_wps_best_x*100:.1f}%")
-        print(f"\t\t\tTest accuracy: {test_wps_accuracy*100:.1f}%")
+        if split_data:
+            test_wps_2d = np.hstack([test_binding_scores.reshape(-1, 1) * binding_positive_multiplier,
+                                     test_suboptimal_2d * -1])
+            test_wps_weighted_scores = np.multiply(test_wps_2d, trained_wps_weights).sum(axis=1)
+            test_wps_weighted_scores[test_disqualified_forbidden] = np.nan
+            test_wps_predicted = np.greater_equal(test_wps_weighted_scores, trained_wps_optimal_threshold)
+            test_wps_accuracy = np.mean(test_wps_predicted == test_actual_truths)
+            print(f"\t\t\tTest accuracy: {test_wps_accuracy*100:.1f}%")
+        else:
+            test_wps_accuracy = None
 
         print(f"\t\tAttempting with only suboptimal scores...")
         inverted_suboptimal_2d = self.suboptimal_scores_2d * -1
         train_inverted_suboptimal_2d = train_suboptimal_2d * -1
-        test_inverted_suboptimal_2d = test_suboptimal_2d * -1
 
         train_suboptimal_objective = partial(accuracy_objective, actual_truths = train_actual_truths,
                                              points_2d = train_inverted_suboptimal_2d,
@@ -537,12 +566,17 @@ class ScoredPeptideResult:
         _, trained_suboptimal_threshold = accuracy_objective(trained_suboptimal_weights, train_actual_truths,
                                                              train_inverted_suboptimal_2d, train_disqualified_forbidden,
                                                              return_threshold = True)
-        test_suboptimal_scores = np.multiply(test_inverted_suboptimal_2d, trained_suboptimal_weights).sum(axis=1)
-        test_suboptimal_scores[test_disqualified_forbidden] = np.nan
-        test_suboptimal_predicted = np.greater_equal(test_suboptimal_scores, trained_suboptimal_threshold)
-        test_suboptimal_accuracy = np.mean(test_suboptimal_predicted == test_actual_truths)
+
         print(f"\t\t\tTraining accuracy: {trained_suboptimal_best_x*100:.1f}%")
-        print(f"\t\t\tTest accuracy: {test_suboptimal_accuracy*100:.1f}%")
+        if split_data:
+            test_inverted_suboptimal_2d = test_suboptimal_2d * -1
+            test_suboptimal_scores = np.multiply(test_inverted_suboptimal_2d, trained_suboptimal_weights).sum(axis=1)
+            test_suboptimal_scores[test_disqualified_forbidden] = np.nan
+            test_suboptimal_predicted = np.greater_equal(test_suboptimal_scores, trained_suboptimal_threshold)
+            test_suboptimal_accuracy = np.mean(test_suboptimal_predicted == test_actual_truths)
+            print(f"\t\t\tTest accuracy: {test_suboptimal_accuracy*100:.1f}%")
+        else:
+            test_suboptimal_accuracy = None
 
         # Select best
         while True:
@@ -556,25 +590,37 @@ class ScoredPeptideResult:
         # Assign best to self
         if self.best_accuracy_method == "ps":
             best_objective_output = trained_ps_best_x
-            self.training_accuracy = trained_ps_best_x
-            self.test_accuracy = test_ps_accuracy
             self.positives_weights = trained_ps_weights[:motif_length]
             self.suboptimals_weights = trained_ps_weights[motif_length:2*motif_length]
             self.forbiddens_weights = np.zeros(motif_length, dtype=float)
+            if split_data:
+                self.training_accuracy = trained_ps_best_x
+                self.test_accuracy = test_ps_accuracy
+            else:
+                self.retrained_accuracy = trained_ps_best_x
+
         elif self.best_accuracy_method == "wps":
             best_objective_output = trained_wps_best_x
-            self.training_accuracy = trained_wps_best_x
-            self.test_accuracy = test_wps_accuracy
             self.positives_weights = self.binding_positive_weights * trained_wps_weights[0]
             self.suboptimals_weights = trained_wps_weights[1:motif_length+1]
             self.forbiddens_weights = np.zeros(motif_length, dtype=float)
+            if split_data:
+                self.training_accuracy = trained_wps_best_x
+                self.test_accuracy = test_wps_accuracy
+            else:
+                self.retrained_accuracy = trained_wps_best_x
+
         elif self.best_accuracy_method == "suboptimal":
             best_objective_output = trained_suboptimal_best_x
-            self.training_accuracy = trained_suboptimal_best_x
-            self.test_accuracy = test_suboptimal_accuracy
             self.positives_weights = np.zeros(motif_length, dtype=float)
             self.suboptimals_weights = trained_suboptimal_weights
             self.forbiddens_weights = np.zeros(motif_length, dtype=float)
+            if split_data:
+                self.training_accuracy = trained_suboptimal_best_x
+                self.test_accuracy = test_suboptimal_accuracy
+            else:
+                self.retrained_accuracy = trained_suboptimal_best_x
+
         else:
             raise ValueError(f"self.best_accuracy_method is not valid: {self.best_accuracy_method}")
 

@@ -637,7 +637,7 @@ class ConditionalMatrices:
     '''
     Class that contains a set of conditional matrices defined using ConditionalMatrix()
     '''
-    def __init__(self, motif_length, source_df, percentiles_dict, residue_charac_dict,
+    def __init__(self, motif_length, source_df, percentiles_dict, residue_charac_dict, output_folder,
                  data_params = data_params, matrix_params = matrix_params):
         '''
         Initialization function for generating conditional matrices properties, dict, and 3D representation
@@ -729,6 +729,24 @@ class ConditionalMatrices:
         weights_array = matrix_params.get("position_weights")
         if weights_array is not None:
             self.apply_weights(weights_array, weights_array, weights_array, weights_array, only_3d = False)
+
+        # Optimize weights and apply scores to source data
+        slice_scores_subsets = matrix_params.get("slice_scores_subsets")
+        pass_values = source_df[data_params["bait_pass_col"]].to_numpy()
+        actual_truths = np.equal(pass_values, data_params["pass_str"])
+
+        bait_signal_cols = list(set([col for cols in data_params["bait_cols_dict"].values() for col in cols]))
+        mean_signal_values = source_df[bait_signal_cols].values.mean(axis=1)
+
+        seq_col = data_params["seq_col"]
+        seqs = source_df[seq_col].values.astype("<U")
+        seqs_2d = unravel_seqs(seqs, motif_length, convert_phospho = not matrix_params.get("include_phospho"))
+
+        precision_recall_path = os.path.join(output_folder, "precision_recall_graph.pdf")
+        self.scored_result = self.optimize_scoring_weights(seqs_2d, actual_truths, mean_signal_values,
+                                                           slice_scores_subsets, precision_recall_path,
+                                                           coefficients_path = output_folder)
+        self.output_df = self.make_output_df(source_df, seqs_2d, seq_col, self.scored_result, assign_residue_cols=True)
 
     def get_rule_tuples(self, residue_charac_dict, motif_length):
         # Helper function that generates a list of rule tuples to be used by generate_matrices()
@@ -1137,5 +1155,43 @@ class ConditionalMatrices:
         # Assign training and testing accuracies to self
         self.training_accuracy = result.training_accuracy
         self.test_accuracy = result.test_accuracy
+        self.retrained_accuracy = result.retrained_accuracy
 
         return result
+
+    def make_output_df(self, source_df, seqs_2d, seq_col, scored_result, assign_residue_cols = True):
+        '''
+        Function to generate the output dataframe with scoring results
+
+        Args:
+            source_df (pd.DataFrame):            the source peptide dataframe
+            seqs_2d (np.ndarray):                2D array of motif sequences where each row represents a peptide
+            seq_col (str):                       column containing sequences
+            scored_result (ScoredPeptideResult): output from optimize_conditional_weights()
+            assign_residue_cols (bool):          whether to assign individual cols for motif positions for sortability
+
+        Returns:
+            output_df (pd.DataFrame):            output dataframe with new scores added
+        '''
+
+        output_df = source_df.copy()
+        output_df = pd.concat([output_df, scored_result.scored_df], axis=1)
+
+        current_cols = list(output_df.columns)
+        insert_index = current_cols.index(seq_col) + 1
+
+        # Assign residue columns
+        if assign_residue_cols:
+            residue_cols = ["#" + str(i) for i in np.arange(1, seqs_2d.shape[1] + 1)]
+            residues_df = pd.DataFrame(seqs_2d, columns=residue_cols)
+            output_df = pd.concat([output_df, residues_df], axis=1)
+
+            # Define list of columns in the desired order
+            final_columns = current_cols[0:insert_index]
+            final_columns.extend(residue_cols)
+            final_columns.extend(current_cols[insert_index:])
+
+            # Reassign the output df with the ordered columns
+            output_df = output_df[final_columns]
+
+        return output_df
