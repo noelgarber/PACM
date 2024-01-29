@@ -5,6 +5,7 @@ import pandas as pd
 import os
 import pickle
 from Matrix_Generator.ConditionalMatrix import ConditionalMatrices
+from sklearn.model_selection import train_test_split
 try:
     from Matrix_Generator.config_local import general_params, data_params, matrix_params, aa_equivalence_dict
 except:
@@ -44,8 +45,22 @@ def main(input_df, general_params = general_params, data_params = data_params, m
         motif_length = general_params.get("motif_length")
         aa_charac_dict = general_params.get("aa_charac_dict")
 
-        conditional_matrices = ConditionalMatrices(motif_length, input_df, percentiles_dict, aa_charac_dict,
-                                                   output_folder, data_params, matrix_params)
+        split_data = matrix_params["train_test_split"]
+        retrain_with_all = matrix_params["retrain_with_all"]
+
+        if split_data:
+            train_df, test_df = train_test_split(input_df, test_size=0.1)
+            train_df = train_df.reset_index(drop=True)
+            test_df = test_df.reset_index(drop=True)
+            conditional_matrices = ConditionalMatrices(motif_length, train_df, percentiles_dict, aa_charac_dict,
+                                                       output_folder, data_params, matrix_params, test_df=test_df)
+            if retrain_with_all:
+                conditional_matrices = ConditionalMatrices(motif_length, input_df, percentiles_dict, aa_charac_dict,
+                                                           output_folder, data_params, matrix_params)
+        else:
+            conditional_matrices = ConditionalMatrices(motif_length, input_df, percentiles_dict, aa_charac_dict,
+                                                       output_folder, data_params, matrix_params)
+
         scored_result = conditional_matrices.scored_result
         output_df = conditional_matrices.output_df
 

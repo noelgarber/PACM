@@ -447,7 +447,7 @@ class ConditionalMatrix:
                         When Q approaches -1, it means the current residue is disfavoured. 
                         When Q approaches +1, it means the current residue is favoured. 
                         '''
-                        points_value = -yule_q
+                        points_value = -yule_q if yule_q <= 0 else 0
                         suboptimal_elements_matrix.at[aa, col_name] = points_value
                         if appears_forbidden:
                             forbidden_elements_matrix.at[aa, col_name] = 1
@@ -468,12 +468,13 @@ class ConditionalMatrix:
                     group_appears_forbidden = never_passes and fails_exceed_threshold
 
                     if group_passes_barnard:
-                        points_value = -group_q
+                        points_value = -group_q if group_q <= 0 else 0
                         suboptimal_elements_matrix.at[aa, col_name] = points_value
                         if group_appears_forbidden:
                             forbidden_elements_matrix.at[aa, col_name] = 1
                     elif always_assign_value:
                         points_value = -group_q if np.abs(group_q) < np.abs(yule_q) else -yule_q
+                        points_value = points_value if points_value >= 0 else 0
                         suboptimal_elements_matrix.at[aa, col_name] = points_value
 
                 elif baseline_matrix_exists:
@@ -638,7 +639,7 @@ class ConditionalMatrices:
     Class that contains a set of conditional matrices defined using ConditionalMatrix()
     '''
     def __init__(self, motif_length, source_df, percentiles_dict, residue_charac_dict, output_folder,
-                 data_params = data_params, matrix_params = matrix_params):
+                 data_params = data_params, matrix_params = matrix_params, test_df = None):
         '''
         Initialization function for generating conditional matrices properties, dict, and 3D representation
 
@@ -740,12 +741,25 @@ class ConditionalMatrices:
 
         seq_col = data_params["seq_col"]
         seqs = source_df[seq_col].values.astype("<U")
-        seqs_2d = unravel_seqs(seqs, motif_length, convert_phospho = not matrix_params.get("include_phospho"))
+        convert_phospho = not matrix_params.get("include_phospho")
+        seqs_2d = unravel_seqs(seqs, motif_length, convert_phospho = convert_phospho)
 
         precision_recall_path = os.path.join(output_folder, "precision_recall_graph.pdf")
-        self.scored_result = self.optimize_scoring_weights(seqs_2d, actual_truths, mean_signal_values,
-                                                           slice_scores_subsets, precision_recall_path,
-                                                           coefficients_path = output_folder)
+        if test_df is not None:
+            test_seqs = test_df[seq_col].values.astype("<U")
+            test_seqs_2d = unravel_seqs(test_seqs, motif_length, convert_phospho = convert_phospho)
+            test_pass_values = test_df[data_params["bait_pass_col"]].to_numpy()
+            test_actual_truths = np.equal(test_pass_values, data_params["pass_str"])
+            test_mean_signals = test_df[bait_signal_cols].values.mean(axis=1)
+            self.scored_result = self.optimize_scoring_weights(seqs_2d, actual_truths, mean_signal_values,
+                                                               slice_scores_subsets, precision_recall_path,
+                                                               output_folder, test_seqs_2d,
+                                                               test_actual_truths, test_mean_signals)
+        else:
+            self.scored_result = self.optimize_scoring_weights(seqs_2d, actual_truths, mean_signal_values,
+                                                               slice_scores_subsets, precision_recall_path,
+                                                               output_folder)
+
         self.output_df = self.make_output_df(source_df, seqs_2d, seq_col, self.scored_result, assign_residue_cols=True)
 
     def get_rule_tuples(self, residue_charac_dict, motif_length):
@@ -828,7 +842,7 @@ class ConditionalMatrices:
 
         results_list = []
 
-        desc = "Generating conditional matrices (signal, suboptimal, & forbidden types)..."
+        desc = "Generating conditional matrices (positive, suboptimal, & forbidden element types)..."
         with trange(len(rule_tuples), desc=desc) as pbar:
             for results in pool.imap(process_partial, rule_tuples):
                 results_list.append(results)
@@ -1103,35 +1117,71 @@ class ConditionalMatrices:
 
         return (binding_scores_2d, positive_scores_2d, suboptimal_scores_2d, forbidden_scores_2d)
 
-    def optimize_scoring_weights(self, sequences_2d, actual_truths, signal_values = None, slice_scores_subsets = None,
-                                 precision_recall_path = None, coefficients_path = None):
+    def optimize_scoring_weights(self, training_seqs_2d, training_actual_truths, signal_values = None, slice_scores_subsets = None,
+                                 precision_recall_path = None, coefficients_path = None,
+                                 test_seqs_2d = None, test_actual_truths = None, test_signal_values = None):
         '''
         Vectorized function to score amino acid sequences based on the dictionary of context-aware weighted matrices
 
         Args:
-            sequences_2d (np.ndarray):                  unravelled peptide sequences to score
-            actual_truths (np.ndarray):                 array of boolean calls for whether peptides bind in experiments
-            signal_values (np.ndarray):                 array of binding signal values for peptides against protein bait(s)
+            training_seqs_2d (np.ndarray):              unravelled peptide sequences to score
+            training_actual_truths (np.ndarray):        arr of boolean calls for whether peptides bind in experiments
+            signal_values (np.ndarray):                 arr of binding signal vals for peptides against protein bait(s)
             conditional_matrices (ConditionalMatrices): conditional weighted matrices for scoring peptides
             slice_scores_subsets (np.ndarray):          array of stretches of positions to stratify results into;
                                                         e.g. [6,7,2] is stratified into scores for positions
                                                         1-6, 7-13, & 14-15
             precision_recall_path (str):                desired file path for saving the precision/recall graph
             coefficients_path (str):                    path to save score standardization coefficients to for later use
+            test_seqs_2d (np.ndarray):                  if a train/test split was performed, include test sequences
+            test_actual_truths (np.ndarray):            if a train/test split was performed, include test seq bools
+            test_signal_values (np.ndarray):            if a train/test split was performed, include test signal values
 
         Returns:
             result (ScoredPeptideResult):               signal, suboptimal, and forbidden score values in 1D and 2D
         '''
 
-        scored_arrays = self.score_seqs_2d(sequences_2d, use_weighted = False)
+        scored_arrays = self.score_seqs_2d(training_seqs_2d, use_weighted = False)
         positive_scores_2d, suboptimal_scores_2d, forbidden_scores_2d = scored_arrays[1:]
 
-        result = ScoredPeptideResult(sequences_2d, slice_scores_subsets, positive_scores_2d, suboptimal_scores_2d,
-                                     forbidden_scores_2d, actual_truths, signal_values,
-                                     fig_path = precision_recall_path, coefficients_path = coefficients_path,
+        result = ScoredPeptideResult(training_seqs_2d, slice_scores_subsets, positive_scores_2d, suboptimal_scores_2d,
+                                     forbidden_scores_2d, training_actual_truths, signal_values,
+                                     fig_path = precision_recall_path, coefs_path = coefficients_path,
                                      suppress_positives = self.suppress_positive_positions,
                                      suppress_suboptimals = self.suppress_suboptimal_positions,
                                      suppress_forbiddens = self.suppress_forbidden_positions)
+
+        if test_seqs_2d is not None and test_actual_truths is not None:
+            scored_test_arrays = self.score_seqs_2d(test_seqs_2d, use_weighted = False)
+            test_positives_2d, test_suboptimals_2d, test_forbiddens_2d = scored_test_arrays[1:]
+            predefined_trained_weights = (result.binding_positive_weights, result.positives_weights,
+                                          result.suboptimals_weights, result.forbiddens_weights)
+            predefined_binding_std_coefs = result.binding_standardization_coefficients
+            predefined_binding_exp_params = result.binding_exp_params
+            predefined_standardized_threshold = result.standardized_weighted_threshold
+
+            test_result = ScoredPeptideResult(test_seqs_2d, slice_scores_subsets, test_positives_2d,
+                                              test_suboptimals_2d, test_forbiddens_2d,
+                                              test_actual_truths, test_signal_values,
+                                              make_df = False, coefs_path = coefficients_path,
+                                              suppress_positives = self.suppress_positive_positions,
+                                              suppress_suboptimals = self.suppress_suboptimal_positions,
+                                              suppress_forbiddens = self.suppress_forbidden_positions,
+                                              predefined_weights = predefined_trained_weights,
+                                              predefined_binding_std_coefs = predefined_binding_std_coefs,
+                                              predefined_binding_exp_params = predefined_binding_exp_params,
+                                              predefined_std_threshold = predefined_standardized_threshold)
+
+            self.training_accuracy = result.standardized_threshold_accuracy
+            self.test_accuracy = test_result.standardized_threshold_accuracy
+
+            print(f"Final classification accuracy:",
+                  f"train={self.training_accuracy*100:.1f}%, test={self.test_accuracy*100:.1f}%")
+
+        elif test_seqs_2d is not None:
+            print(f"Caution: optimize_scoring_weights() was given test_seqs_2d but not test_actual_truths; ignoring.")
+        elif test_actual_truths is not None:
+            print(f"Caution: optimize_scoring_weights() was given test_actual_truths but not test_seqs_2d; ignoring.")
 
         # Assign weights and other information to self
         self.apply_weights(result.binding_positive_weights, result.positives_weights,
@@ -1151,11 +1201,6 @@ class ConditionalMatrices:
         self.standardized_binding_exp_params = result.standardized_binding_exp_params
         self.binding_score_r2 = result.binding_score_r2
         self.standardized_binding_r2 = result.standardized_binding_r2
-
-        # Assign training and testing accuracies to self
-        self.training_accuracy = result.training_accuracy
-        self.test_accuracy = result.test_accuracy
-        self.retrained_accuracy = result.retrained_accuracy
 
         return result
 
