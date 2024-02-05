@@ -10,7 +10,7 @@ from tqdm import trange
 from functools import partial
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
-from scipy.stats import barnard_exact, mannwhitneyu
+from scipy.stats import mannwhitneyu
 from general_utils.general_utils import unravel_seqs, check_seq_lengths
 from general_utils.matrix_utils import make_empty_matrix
 from general_utils.user_helper_functions import get_thresholds
@@ -20,10 +20,9 @@ try:
 except:
     from Matrix_Generator.config import data_params, matrix_params, aa_equivalence_dict, amino_acids_phos
 
-def barnard_yule_q(aa_col_passing, aa_col_failing, test_aa = None, equivalent_residues = None, alternative="less"):
+def get_yule_q(aa_col_passing, aa_col_failing, test_aa = None, equivalent_residues = None):
     '''
-    Helper function that uses Barnard's exact test to determine if a test amino acid appears less often in a sliced col
-    of peptide sequences for the passing peptides vs. the failing ones.
+    Helper function that constructs a contingency table to calculate Yule's Q coefficient
 
     Args:
         aa_col_passing (np.ndarray):                 sliced col of peptide sequences that bind the target
@@ -32,12 +31,19 @@ def barnard_yule_q(aa_col_passing, aa_col_failing, test_aa = None, equivalent_re
         equivalent_residues (np.ndarray|tuple|list): if given, residues are pooled with test_aa based on similarity
 
     Returns:
-        barnard_pvalue (float):           the p-value of the test where the alternative hypothesis is "less"
         yule_q (float):                   Yule's Q coefficient; -1 is perfectly suboptimal, +1 is perfectly optimal
     '''
 
-    if test_aa is None and equivalent_residues is None:
-        raise ValueError(f"test_aa and equivalent_residues were both set to None, but at least one must be given")
+    '''
+                                  Contingency Table Setup
+                            |--------------------------------------------|
+                            |     Current AA     :       Other AAs       |
+    - - - - - - - - - - - - |--------------------|-----------------------|
+    Pass (interacting)      |  aa_passing_count  |  other_passing_count  |
+    - - - - - - - - - - - - |--------------------|-----------------------|
+    Fail (non-interacting)  |  aa_failing_count  |  other_failing_count  |
+    - - - - - - - - - - - - |--------------------|-----------------------|
+    '''
 
     if equivalent_residues is None:
         aa_passing_count = np.sum(aa_col_passing == test_aa)
@@ -49,28 +55,12 @@ def barnard_yule_q(aa_col_passing, aa_col_failing, test_aa = None, equivalent_re
     other_passing_count = len(aa_col_passing) - aa_passing_count
     other_failing_count = len(aa_col_failing) - aa_failing_count
 
-    '''
-                                  Contingency Table Setup
-                            | - - - - - - - - - - - - - - - - |
-                            | current residue : other residue |
-    - - - - - - - - - - - - |-----------------|---------------|
-    Pass (interacting)      |       a         |      b        |
-    - - - - - - - - - - - - |-----------------|---------------|
-    Fail (non-interacting)  |       c         |      d        |
-    - - - - - - - - - - - - |-----------------|---------------|
-    '''
-
-    contingency_table = [[aa_passing_count, other_passing_count],
-                         [aa_failing_count, other_failing_count]]
-
-    barnard_pvalue = barnard_exact(contingency_table, alternative = alternative).pvalue
-
     # Calculate Yule's Q coefficient; -1 is a perfect negative association and +1 is a perfect positive association
     yule_numerator = aa_passing_count * other_failing_count - other_passing_count * aa_failing_count
     yule_denominator = aa_passing_count * other_failing_count + other_passing_count * aa_failing_count
     yule_q = yule_numerator / yule_denominator if yule_denominator > 0 else 0
 
-    return (barnard_pvalue, yule_q)
+    return yule_q
 
 class ConditionalMatrix:
     '''
@@ -168,15 +158,13 @@ class ConditionalMatrix:
             - To do this, we first segregate passing and failing peptides
             - We then look for predictors of failure to bind and represent as suboptimal/forbidden element points
         '''
-        barnard_alpha = matrix_params["barnard_alpha"]
         forbidden_threshold = matrix_params["forbidden_threshold"]
         forced_required_dict = matrix_params["forced_required_dict"] # forced required residues at defined positions
-        always_assign_suboptimal = matrix_params["always_assign_suboptimal"]
+        always_assign_sub = matrix_params["always_assign_suboptimal"]
 
         self.generate_suboptimal_matrix(qualifying_seqs_2d, qualifying_signals, passing_seqs_2d, failed_seqs_2d,
-                                        amino_acids, aa_equivalence_dict, barnard_alpha, min_aa_entries,
-                                        forbidden_threshold, forced_required_dict, baseline_matrix,
-                                        include_phospho, always_assign_suboptimal)
+                                        amino_acids, aa_equivalence_dict, min_aa_entries, forbidden_threshold,
+                                        forced_required_dict, baseline_matrix, include_phospho, always_assign_sub)
 
     def qualifying_entries_count(self, source_df, seq_col, position_for_filtering, residues_included_at_filter_position):
         # Helper function to get the number of sequences that qualify under the current type-position rule
@@ -389,7 +377,7 @@ class ConditionalMatrix:
         self.positive_matrix = positive_matrix
 
     def generate_suboptimal_matrix(self, sequences_2d, signal_values, passing_seqs_2d, failed_seqs_2d, amino_acids,
-                                   aa_equivalence_dict = aa_equivalence_dict, barnard_alpha = 0.2, min_aa_entries = 4,
+                                   aa_equivalence_dict = aa_equivalence_dict, min_aa_entries = 4,
                                    forbidden_threshold = 3, forced_required_dict = None, baseline_matrix = None,
                                    include_phospho = False, always_assign_value = False):
         '''
@@ -401,16 +389,13 @@ class ConditionalMatrix:
             failed_seqs_2d (np.ndarray):                peptide sequences that do NOT bind the protein of interest
             failed_signal_values (np.ndarray):          corresponding signal values for failing peptides
             aa_equivalence_dict (dict):                 dictionary of amino acid --> tuple of 'equivalent' amino acids
-            barnard_alpha (float):                      Barnard exact test threshold to contribute to the matrix
             min_aa_entries (int):                       min number of qualifying peptides to derive points from
             forbidden_threshold (int):                  number of peptides that must possess a particular residue
                                                         or group of residues before it can be considered "forbidden"
             forced_required_dict (dict):                dictionary of position indices --> specified required residues
             baseline_matrix (ConditionalMatrix):        baseline matrix; used for unrepresented residues
             include_phospho (bool):                     whether to include phospho-residues in the matrices
-            always_assign_value (bool):                 if True and individual Barnard p-value > Barnard alpha,
-                                                        then the equivalent residue group RRR value is used,
-                                                        regardless of whether group Barnard p-value < Barnard alpha
+            always_assign_value (bool):                 if True, then the equivalent residue group Q value is used
 
         Returns:
             None; assigns self.suboptimal_elements_matrix and self.forbidden_elements_matrix
@@ -435,39 +420,35 @@ class ConditionalMatrix:
 
             for aa in unique_residues:
                 # Test whether peptides with this aa at the current position are more likely to be classed as passing
-                alt = "two-sided"
-                pvalue, yule_q = barnard_yule_q(passing_col, failing_col, test_aa = aa, alternative = alt)
-
+                yule_q = get_yule_q(passing_col, failing_col, test_aa = aa)
                 above_min_aa = np.sum(full_col == aa) >= min_aa_entries
                 appears_forbidden = np.sum(passing_col == aa) == 0 and np.sum(failing_col == aa) >= forbidden_threshold
+
                 if above_min_aa:
-                    if pvalue <= barnard_alpha:
-                        '''
-                        Yule's Q coefficient ranges from -1 to +1.
-                        When Q approaches -1, it means the current residue is disfavoured. 
-                        When Q approaches +1, it means the current residue is favoured. 
-                        '''
-                        points_value = -yule_q if yule_q <= 0 else 0
-                        suboptimal_elements_matrix.at[aa, col_name] = points_value
-                        if appears_forbidden:
-                            forbidden_elements_matrix.at[aa, col_name] = 1
-                        continue
+                    '''
+                    Yule's Q coefficient ranges from -1 to +1.
+                    When Q approaches -1, it means the current residue is disfavoured. 
+                    When Q approaches +1, it means the current residue is favoured. 
+                    '''
+                    points_value = -yule_q if yule_q <= 0 else 0
+                    suboptimal_elements_matrix.at[aa, col_name] = points_value
+                    if appears_forbidden:
+                        forbidden_elements_matrix.at[aa, col_name] = 1
+                    continue
 
                 # Test whether peptides with similar residues at this position have significantly lower signal values
                 equivalent_residues = aa_equivalence_dict[aa]
                 group_above_min_aa = np.sum(np.isin(full_col, equivalent_residues)) >= min_aa_entries
 
                 if group_above_min_aa or always_assign_value:
-                    group_pvalue, group_q = barnard_yule_q(passing_col, failing_col,
-                                                           equivalent_residues=equivalent_residues, alternative=alt)
+                    group_q = get_yule_q(passing_col, failing_col, equivalent_residues = equivalent_residues)
                     consistent_sign = (yule_q >= 0 and group_q >= 0) or (yule_q <= 0 and group_q <= 0)
-                    group_passes_barnard = group_pvalue <= barnard_alpha and consistent_sign
 
                     never_passes = np.sum(np.isin(passing_col, equivalent_residues)) == 0
                     fails_exceed_threshold = np.sum(np.isin(failing_col, equivalent_residues)) >= forbidden_threshold
                     group_appears_forbidden = never_passes and fails_exceed_threshold
 
-                    if group_passes_barnard:
+                    if consistent_sign:
                         points_value = -group_q if group_q <= 0 else 0
                         suboptimal_elements_matrix.at[aa, col_name] = points_value
                         if group_appears_forbidden:
@@ -744,6 +725,9 @@ class ConditionalMatrices:
         convert_phospho = not matrix_params.get("include_phospho")
         seqs_2d = unravel_seqs(seqs, motif_length, convert_phospho = convert_phospho)
 
+        # Get predefined weights if they exist
+        predefined_weights = matrix_params.get("predefined_weights")
+
         precision_recall_path = os.path.join(output_folder, "precision_recall_graph.pdf")
         if test_df is not None:
             test_seqs = test_df[seq_col].values.astype("<U")
@@ -753,12 +737,12 @@ class ConditionalMatrices:
             test_mean_signals = test_df[bait_signal_cols].values.mean(axis=1)
             self.scored_result = self.optimize_scoring_weights(seqs_2d, actual_truths, mean_signal_values,
                                                                slice_scores_subsets, precision_recall_path,
-                                                               output_folder, test_seqs_2d,
-                                                               test_actual_truths, test_mean_signals)
+                                                               output_folder, test_seqs_2d, test_actual_truths,
+                                                               test_mean_signals, predefined_weights)
         else:
             self.scored_result = self.optimize_scoring_weights(seqs_2d, actual_truths, mean_signal_values,
                                                                slice_scores_subsets, precision_recall_path,
-                                                               output_folder)
+                                                               output_folder, predefined_weights = predefined_weights)
 
         self.output_df = self.make_output_df(source_df, seqs_2d, seq_col, self.scored_result, assign_residue_cols=True)
 
@@ -1117,9 +1101,10 @@ class ConditionalMatrices:
 
         return (binding_scores_2d, positive_scores_2d, suboptimal_scores_2d, forbidden_scores_2d)
 
-    def optimize_scoring_weights(self, training_seqs_2d, training_actual_truths, signal_values = None, slice_scores_subsets = None,
-                                 precision_recall_path = None, coefficients_path = None,
-                                 test_seqs_2d = None, test_actual_truths = None, test_signal_values = None):
+    def optimize_scoring_weights(self, training_seqs_2d, training_actual_truths, signal_values = None,
+                                 slice_scores_subsets = None, precision_recall_path = None, coefficients_path = None,
+                                 test_seqs_2d = None, test_actual_truths = None, test_signal_values = None,
+                                 predefined_weights = None):
         '''
         Vectorized function to score amino acid sequences based on the dictionary of context-aware weighted matrices
 
@@ -1136,6 +1121,8 @@ class ConditionalMatrices:
             test_seqs_2d (np.ndarray):                  if a train/test split was performed, include test sequences
             test_actual_truths (np.ndarray):            if a train/test split was performed, include test seq bools
             test_signal_values (np.ndarray):            if a train/test split was performed, include test signal values
+            predefined_weights (tuple):                 tuple of (binding_positive_weights, positive_weights,
+                                                        suboptimal_weights, forbidden_weights)
 
         Returns:
             result (ScoredPeptideResult):               signal, suboptimal, and forbidden score values in 1D and 2D
@@ -1149,16 +1136,17 @@ class ConditionalMatrices:
                                      fig_path = precision_recall_path, coefs_path = coefficients_path,
                                      suppress_positives = self.suppress_positive_positions,
                                      suppress_suboptimals = self.suppress_suboptimal_positions,
-                                     suppress_forbiddens = self.suppress_forbidden_positions)
+                                     suppress_forbiddens = self.suppress_forbidden_positions,
+                                     predefined_weights = predefined_weights)
 
         if test_seqs_2d is not None and test_actual_truths is not None:
             scored_test_arrays = self.score_seqs_2d(test_seqs_2d, use_weighted = False)
             test_positives_2d, test_suboptimals_2d, test_forbiddens_2d = scored_test_arrays[1:]
             predefined_trained_weights = (result.binding_positive_weights, result.positives_weights,
                                           result.suboptimals_weights, result.forbiddens_weights)
-            predefined_binding_std_coefs = result.binding_standardization_coefficients
-            predefined_binding_exp_params = result.binding_exp_params
-            predefined_standardized_threshold = result.standardized_weighted_threshold
+            trained_binding_std_coefs = result.binding_standardization_coefficients
+            trained_binding_exp_params = result.binding_exp_params
+            trained_standardized_threshold = result.standardized_weighted_threshold
 
             test_result = ScoredPeptideResult(test_seqs_2d, slice_scores_subsets, test_positives_2d,
                                               test_suboptimals_2d, test_forbiddens_2d,
@@ -1168,9 +1156,9 @@ class ConditionalMatrices:
                                               suppress_suboptimals = self.suppress_suboptimal_positions,
                                               suppress_forbiddens = self.suppress_forbidden_positions,
                                               predefined_weights = predefined_trained_weights,
-                                              predefined_binding_std_coefs = predefined_binding_std_coefs,
-                                              predefined_binding_exp_params = predefined_binding_exp_params,
-                                              predefined_std_threshold = predefined_standardized_threshold)
+                                              predefined_binding_std_coefs = trained_binding_std_coefs,
+                                              predefined_binding_exp_params = trained_binding_exp_params,
+                                              predefined_std_threshold = trained_standardized_threshold)
 
             self.training_accuracy = result.standardized_threshold_accuracy
             self.test_accuracy = test_result.standardized_threshold_accuracy

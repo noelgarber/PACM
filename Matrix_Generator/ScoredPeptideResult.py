@@ -292,7 +292,7 @@ class ScoredPeptideResult:
 
         if self.actual_truths is not None and predefined_weights is None:
             # Optimize weights for combining sets of scores
-            save_path = fig_path.rsplit("/", 1)[0]
+            save_path = fig_path.rsplit("/", 1)[0] if fig_path is not None else None
             self.optimize_positive_weights(suppress_positives, ignore_failed_peptides, preview_scatter_plot, save_path)
             if split_data:
                 self.optimize_total_weights(fig_path, coefficients_path, suppress_positives, suppress_suboptimals,
@@ -312,7 +312,7 @@ class ScoredPeptideResult:
             self.apply_predefined_binding(binding_weights, predefined_binding_std_coefs, predefined_binding_exp_params,
                                           ignore_failed_peptides)
             # Apply predefined weights for binary classification
-            self.apply_predefined_weights(positive_weights, suboptimal_weights, forbidden_weights,
+            self.apply_predefined_weights(positive_weights, suboptimal_weights, forbidden_weights, fig_path,
                                           predefined_std_threshold, coefficients_path, suppress_forbiddens)
             # Evaluate weighted scores
             if self.actual_truths is not None:
@@ -322,7 +322,7 @@ class ScoredPeptideResult:
             positions_count = self.positive_scores_2d.shape[1]
             position_weights = np.ones(positions_count, dtype=float)
             self.apply_predefined_binding(position_weights, (0,1), None, ignore_failed_peptides)
-            self.apply_predefined_weights(position_weights, position_weights, position_weights,
+            self.apply_predefined_weights(position_weights, position_weights, position_weights, fig_path,
                                           coefficients_path=coefficients_path, suppress_forbiddens=suppress_forbiddens)
             if self.actual_truths is not None:
                 self.evaluate_weighted_scores()
@@ -351,8 +351,13 @@ class ScoredPeptideResult:
         if binding_standardization_coefs is not None:
             self.binding_standardization_coefficients = binding_standardization_coefs
             binding_coef_a, binding_coef_b = binding_standardization_coefs
-            standardized_weighted_points = (weighted_summed_points - binding_coef_a) / binding_coef_b
-            self.standardized_binding_scores = standardized_weighted_points
+        else:
+            binding_coef_a = np.min(weighted_summed_points)
+            binding_coef_b = np.max(weighted_summed_points - binding_coef_a)
+            self.binding_standardization_coefficients = (binding_coef_a, binding_coef_b)
+
+        standardized_weighted_points = (weighted_summed_points - binding_coef_a) / binding_coef_b
+        self.standardized_binding_scores = standardized_weighted_points
 
         # Calculate R2
         if ignore_failed_peptides:
@@ -365,8 +370,30 @@ class ScoredPeptideResult:
             self.binding_exp_params = binding_exp_params
             predicted_signal_values = exp_func(weighted_summed_points, *binding_exp_params)
             self.binding_score_r2 = r2_score(signal_values, predicted_signal_values)
+        else:
+            params, _ = curve_fit(exp_func, weighted_summed_points, signal_values, p0=[1,1,1,1])
+            self.binding_exp_params = params
 
-    def apply_predefined_weights(self, positives_weights, suboptimals_weights, forbiddens_weights,
+            predicted_signal_values = exp_func(weighted_summed_points, *params)
+            self.binding_score_r2 = r2_score(signal_values, predicted_signal_values)
+
+            if binding_standardization_coefs is not None:
+                # Also fit a curve to standardized binding scores and save the params to self (for future use)
+                standardized_weighted_points = self.standardized_binding_scores.copy()
+                if ignore_failed_peptides:
+                    standardized_weighted_points = standardized_weighted_points[self.actual_truths]
+
+                std_signals = signal_values / np.max(signal_values)
+                std_params, _ = curve_fit(exp_func, standardized_weighted_points, std_signals, p0=[0.5,0.5,0.5,0.5])
+                self.standardized_binding_exp_params = std_params
+
+                predicted_standardized_signal_values = exp_func(standardized_weighted_points, *std_params)
+                self.standardized_binding_r2 = r2_score(std_signals, predicted_standardized_signal_values)
+
+            else:
+                self.standardized_binding_exp_params, self.standardized_binding_r2 = None, None
+
+    def apply_predefined_weights(self, positives_weights, suboptimals_weights, forbiddens_weights, fig_path = None,
                                  std_points_threshold = None, coefficients_path = None, suppress_forbiddens = None):
         '''
         Function that applies predefined classification score weights
@@ -375,6 +402,7 @@ class ScoredPeptideResult:
             positives_weights (np.ndarray):    positive element weights for classification
             suboptimals_weights (np.ndarray):  suboptimal element weights for classification
             forbiddens_weights (np.ndarray):   forbidden element weights for classification
+            fig_path (str):                    path to save the precision/recall/accuracy plot to
             std_points_threshold (float):      threshold of weighted scores above which a peptide is predicted positive
             coefficients_path (str):           path to save the standardization coefficients to
             suppress_forbiddens (np.ndarray):  position indices to suppress forbidden elements at
@@ -424,7 +452,16 @@ class ScoredPeptideResult:
             predicted = np.greater_equal(self.standardized_weighted_scores, std_points_threshold)
             self.standardized_threshold_accuracy = np.mean(predicted == self.actual_truths)
         else:
-            self.standardized_threshold_accuracy = None
+            standardized_weighted_scores = self.standardized_weighted_scores.copy()
+            basement_val = np.nanmin(standardized_weighted_scores)
+            basement_val = basement_val - (0.01 * basement_val)
+            standardized_weighted_scores[np.isnan(standardized_weighted_scores)] = basement_val
+            precisions, recalls, thresholds = precision_recall_curve(self.actual_truths,
+                                                                     standardized_weighted_scores)
+            threshold_predictions = np.greater_equal(standardized_weighted_scores, thresholds[:, np.newaxis])
+            accuracies = np.mean(threshold_predictions == self.actual_truths, axis=1)
+            top_vals = plot_precision_recall(precisions[:-1], recalls[:-1], accuracies, thresholds, fig_path)
+            self.standardized_weighted_threshold, self.standardized_threshold_accuracy = top_vals
 
     def optimize_positive_weights(self, suppress_positives = None, ignore_failed_peptides = True,
                                   preview_scatter_plot = True, save_path = None):
