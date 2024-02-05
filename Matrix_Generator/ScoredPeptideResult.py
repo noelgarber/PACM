@@ -9,7 +9,6 @@ import warnings
 from scipy.optimize import curve_fit, OptimizeWarning
 from functools import partial
 from sklearn.metrics import precision_recall_curve, matthews_corrcoef, r2_score
-from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import train_test_split
 from Matrix_Generator.random_search import RandomSearchOptimizer
 from visualization_tools.precision_recall import plot_precision_recall
@@ -64,59 +63,6 @@ def accuracy_objective(weights, actual_truths, points_2d, disqualified_forbidden
         max_accuracy_idx = np.nanargmax(accuracies)
         optimal_threshold = thresholds[max_accuracy_idx]
         return (max_accuracy, optimal_threshold)
-
-def f1_objective(weights, actual_truths, points_2d, invert_points = False):
-    '''
-    Objective function for optimizing 2D points array weights based on f1-score (harmonic mean of precision and recall)
-
-    Args:
-        weights (np.ndarray):       array of weights of shape (positions_count,)
-        actual_truths (np.ndarray): array of actual truth values as binary integer-encoded labels
-        points_2d (np.ndarray):     2D array of points values, where axis=1 represents positions
-        invert_points (bool):       set to True if lower points values are better, otherwise set to False
-
-    Returns:
-        max_f1_score (float):       best f1 score
-    '''
-
-    weighted_points = np.multiply(points_2d, weights).sum(axis=1)
-    if invert_points:
-        weighted_points = weighted_points * -1
-
-    precision, recall, thresholds = precision_recall_curve(actual_truths, weighted_points)
-    precision_recall_products = precision * recall
-    precision_recall_sums = precision + recall
-    valid_f1_scores = 2 * np.divide(precision_recall_products[precision_recall_sums != 0],
-                                    precision_recall_sums[precision_recall_sums != 0])
-    max_f1_score = np.nanmax(valid_f1_scores)
-
-    return max_f1_score
-
-def r2_objective(weights, signal_values, points_2d, invert_points = False):
-    '''
-    Objective function for optimizing 2D points array weights based on linear regression R2
-
-    Args:
-        weights (np.ndarray):       array of weights of shape (positions_count,)
-        signal_values (np.ndarray): array of binding signal values
-        points_2d (np.ndarray):     2D array of points values, where axis=1 represents positions
-        invert_points (bool):       set to True if lower points values are better, otherwise set to False
-
-    Returns:
-        max_f1_score (float):       best f1 score
-    '''
-
-    weighted_points = np.multiply(points_2d, weights).sum(axis=1)
-    if invert_points:
-        weighted_points = weighted_points * -1
-
-    model = LinearRegression()
-    model.fit(weighted_points.reshape(-1,1), signal_values.reshape(-1,1))
-
-    predicted_signals = model.predict(weighted_points.reshape(-1,1))
-    r2 = r2_score(signal_values, predicted_signals)
-
-    return r2
 
 def exp_func(x, a, b, c, d):
     # Basic exponential function, where y = ae^(b*(x-c))-d
