@@ -921,8 +921,11 @@ class ScoredPeptideResult:
         _, trained_ps_optimal_threshold = accuracy_objective(trained_ps_weights, self.actual_truths, train_ps_2d,
                                                              train_disqualified_forbidden, return_threshold = True)
 
-        print(f"\t\t\tPositive/Suboptimal Optimization Accuracy:",
-              f"train={trained_ps_best_x*100:.1f}%, test={test_ps_best_x*100:.1f}%")
+        if self.test_set_exists:
+            print(f"\t\t\tPositive/Suboptimal Optimization Accuracy:",
+                  f"train={trained_ps_best_x*100:.1f}%, test={test_ps_best_x*100:.1f}%")
+        else:
+            print(f"\t\t\tPositive/Suboptimal Optimization Accuracy: {trained_ps_best_x*100:.1f}%")
 
         return (trained_ps_weights, trained_ps_optimal_threshold, trained_ps_best_x, test_ps_best_x, complete_ps_2d)
     
