@@ -728,6 +728,7 @@ class ConditionalMatrices:
         # Get predefined weights if they exist
         predefined_weights = matrix_params.get("predefined_weights")
 
+        # Extract test set info if test_df exists
         precision_recall_path = os.path.join(output_folder, "precision_recall_graph.pdf")
         if test_df is not None:
             test_seqs = test_df[seq_col].values.astype("<U")
@@ -735,16 +736,16 @@ class ConditionalMatrices:
             test_pass_values = test_df[data_params["bait_pass_col"]].to_numpy()
             test_actual_truths = np.equal(test_pass_values, data_params["pass_str"])
             test_mean_signals = test_df[bait_signal_cols].values.mean(axis=1)
-            self.scored_result = self.optimize_scoring_weights(seqs_2d, actual_truths, mean_signal_values,
-                                                               slice_scores_subsets, precision_recall_path,
-                                                               output_folder, test_seqs_2d, test_actual_truths,
-                                                               test_mean_signals, predefined_weights)
         else:
-            self.scored_result = self.optimize_scoring_weights(seqs_2d, actual_truths, mean_signal_values,
-                                                               slice_scores_subsets, precision_recall_path,
-                                                               output_folder, predefined_weights = predefined_weights)
+            test_seqs_2d, test_actual_truths, test_mean_signals = None, None, None
 
-        self.output_df = self.make_output_df(source_df, seqs_2d, seq_col, self.scored_result, assign_residue_cols=True)
+        # Optimize scoring weights
+        self.scored_result = self.optimize_scoring_weights(seqs_2d, actual_truths, mean_signal_values,
+                                                           slice_scores_subsets, precision_recall_path,
+                                                           output_folder, test_seqs_2d, test_actual_truths,
+                                                           test_mean_signals, predefined_weights)
+
+        self.output_df = self.make_output_df(source_df, seqs_2d, seq_col, self.scored_result, test_df, test_seqs_2d, assign_residue_cols=True)
 
     def get_rule_tuples(self, residue_charac_dict, motif_length):
         # Helper function that generates a list of rule tuples to be used by generate_matrices()
@@ -1101,7 +1102,7 @@ class ConditionalMatrices:
 
         return (binding_scores_2d, positive_scores_2d, suboptimal_scores_2d, forbidden_scores_2d)
 
-    def optimize_scoring_weights(self, training_seqs_2d, training_actual_truths, signal_values = None,
+    def optimize_scoring_weights(self, training_seqs_2d, training_actual_truths, training_signal_values = None,
                                  slice_scores_subsets = None, precision_recall_path = None, coefficients_path = None,
                                  test_seqs_2d = None, test_actual_truths = None, test_signal_values = None,
                                  predefined_weights = None):
@@ -1111,7 +1112,7 @@ class ConditionalMatrices:
         Args:
             training_seqs_2d (np.ndarray):              unravelled peptide sequences to score
             training_actual_truths (np.ndarray):        arr of boolean calls for whether peptides bind in experiments
-            signal_values (np.ndarray):                 arr of binding signal vals for peptides against protein bait(s)
+            training_signal_values (np.ndarray):        arr of binding signal vals for peptides against protein bait(s)
             conditional_matrices (ConditionalMatrices): conditional weighted matrices for scoring peptides
             slice_scores_subsets (np.ndarray):          array of stretches of positions to stratify results into;
                                                         e.g. [6,7,2] is stratified into scores for positions
@@ -1128,48 +1129,33 @@ class ConditionalMatrices:
             result (ScoredPeptideResult):               signal, suboptimal, and forbidden score values in 1D and 2D
         '''
 
-        scored_arrays = self.score_seqs_2d(training_seqs_2d, use_weighted = False)
-        positive_scores_2d, suboptimal_scores_2d, forbidden_scores_2d = scored_arrays[1:]
+        scored_training_arrays = self.score_seqs_2d(training_seqs_2d, use_weighted=False)
+        positive_scores_2d, suboptimal_scores_2d, forbidden_scores_2d = scored_training_arrays[1:]
 
+        if test_seqs_2d is not None:
+            scored_test_arrays = self.score_seqs_2d(test_seqs_2d, use_weighted=False)
+            test_positive_2d, test_suboptimal_2d, test_forbidden_2d = scored_test_arrays[1:]
+        else:
+            test_positive_2d, test_suboptimal_2d, test_forbidden_2d = None, None, None
+
+        ignore_failed_peptides = True
+        preview_scatter_plot = True
         result = ScoredPeptideResult(training_seqs_2d, slice_scores_subsets, positive_scores_2d, suboptimal_scores_2d,
-                                     forbidden_scores_2d, training_actual_truths, signal_values,
-                                     fig_path = precision_recall_path, coefs_path = coefficients_path,
-                                     suppress_positives = self.suppress_positive_positions,
-                                     suppress_suboptimals = self.suppress_suboptimal_positions,
-                                     suppress_forbiddens = self.suppress_forbidden_positions,
-                                     predefined_weights = predefined_weights)
+                                     forbidden_scores_2d, training_actual_truths, training_signal_values,
+                                     precision_recall_path, True, coefficients_path, self.suppress_positive_positions,
+                                     self.suppress_suboptimal_positions, self.suppress_forbidden_positions,
+                                     ignore_failed_peptides, preview_scatter_plot, test_seqs_2d,
+                                     test_positive_2d, test_suboptimal_2d, test_forbidden_2d, test_actual_truths,
+                                     test_signal_values, predefined_weights)
 
-        if test_seqs_2d is not None and test_actual_truths is not None:
-            scored_test_arrays = self.score_seqs_2d(test_seqs_2d, use_weighted = False)
-            test_positives_2d, test_suboptimals_2d, test_forbiddens_2d = scored_test_arrays[1:]
-            predefined_trained_weights = (result.binding_positive_weights, result.positives_weights,
-                                          result.suboptimals_weights, result.forbiddens_weights)
-            trained_binding_std_coefs = result.binding_standardization_coefficients
-            trained_binding_exp_params = result.binding_exp_params
-            trained_standardized_threshold = result.standardized_weighted_threshold
-
-            test_result = ScoredPeptideResult(test_seqs_2d, slice_scores_subsets, test_positives_2d,
-                                              test_suboptimals_2d, test_forbiddens_2d,
-                                              test_actual_truths, test_signal_values,
-                                              make_df = False, coefs_path = coefficients_path,
-                                              suppress_positives = self.suppress_positive_positions,
-                                              suppress_suboptimals = self.suppress_suboptimal_positions,
-                                              suppress_forbiddens = self.suppress_forbidden_positions,
-                                              predefined_weights = predefined_trained_weights,
-                                              predefined_binding_std_coefs = trained_binding_std_coefs,
-                                              predefined_binding_exp_params = trained_binding_exp_params,
-                                              predefined_std_threshold = trained_standardized_threshold)
-
-            self.training_accuracy = result.standardized_threshold_accuracy
-            self.test_accuracy = test_result.standardized_threshold_accuracy
-
-            print(f"Final classification accuracy:",
-                  f"train={self.training_accuracy*100:.1f}%, test={self.test_accuracy*100:.1f}%")
-
-        elif test_seqs_2d is not None:
-            print(f"Caution: optimize_scoring_weights() was given test_seqs_2d but not test_actual_truths; ignoring.")
-        elif test_actual_truths is not None:
-            print(f"Caution: optimize_scoring_weights() was given test_actual_truths but not test_seqs_2d; ignoring.")
+        # Assign metrics to self
+        self.train_binding_r2 = result.binding_score_r2
+        self.train_accuracy = result.standardized_threshold_accuracy
+        if result.test_set_exists:
+            self.test_binding_r2 = result.test_binding_r2
+            self.test_accuracy = result.test_accuracy
+        else:
+            self.test_binding_r2, self.test_accuracy = None, None
 
         # Assign weights and other information to self
         self.apply_weights(result.binding_positive_weights, result.positives_weights,
@@ -1192,23 +1178,32 @@ class ConditionalMatrices:
 
         return result
 
-    def make_output_df(self, source_df, seqs_2d, seq_col, scored_result, assign_residue_cols = True):
+    def make_output_df(self, source_df, seqs_2d, seq_col, scored_result, test_df = None, test_seqs_2d = None,
+                       assign_residue_cols = True):
         '''
         Function to generate the output dataframe with scoring results
 
         Args:
-            source_df (pd.DataFrame):            the source peptide dataframe
-            seqs_2d (np.ndarray):                2D array of motif sequences where each row represents a peptide
-            seq_col (str):                       column containing sequences
-            scored_result (ScoredPeptideResult): output from optimize_conditional_weights()
-            assign_residue_cols (bool):          whether to assign individual cols for motif positions for sortability
+            source_df (pd.DataFrame):                 source peptide dataframe
+            seqs_2d (np.ndarray):                     2D array of motif sequences where each row represents a peptide
+            seq_col (str):                            column containing sequences
+            scored_result (ScoredPeptideResult):      training set output from optimize_conditional_weights()
+            test_df (pd.DataFrame):                   peptide dataframe containing the test set
+            test_seqs_2d (np.ndarray):                2D array of test set motif sequences
+            assign_residue_cols (bool):               whether to assign cols for motif positions for better sortability
 
         Returns:
             output_df (pd.DataFrame):            output dataframe with new scores added
         '''
 
-        output_df = source_df.copy()
-        output_df = pd.concat([output_df, scored_result.scored_df], axis=1)
+        output_df = source_df.reset_index()
+        if test_df is not None:
+            test_output_df = test_df.set_index(np.arange(len(output_df), len(output_df) + len(test_df)))
+            output_df["Set"] = "train"
+            test_output_df["Set"] = "test"
+            output_df = pd.concat([output_df, test_output_df], axis=0, ignore_index=False)
+        scored_df = scored_result.scored_df.set_index(output_df.index)
+        output_df = pd.concat([output_df, scored_df], axis=1, ignore_index=False)
 
         current_cols = list(output_df.columns)
         insert_index = current_cols.index(seq_col) + 1
@@ -1217,7 +1212,11 @@ class ConditionalMatrices:
         if assign_residue_cols:
             residue_cols = ["#" + str(i) for i in np.arange(1, seqs_2d.shape[1] + 1)]
             residues_df = pd.DataFrame(seqs_2d, columns=residue_cols)
-            output_df = pd.concat([output_df, residues_df], axis=1)
+            if test_seqs_2d is not None and test_df is not None:
+                test_residues_df = pd.DataFrame(test_seqs_2d, columns=residue_cols)
+                residues_df = pd.concat([residues_df, test_residues_df], axis=0)
+                residues_df = residues_df.set_index(output_df.index)
+            output_df = pd.concat([output_df, residues_df], axis=1, ignore_index=False)
 
             # Define list of columns in the desired order
             final_columns = current_cols[0:insert_index]
