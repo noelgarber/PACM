@@ -980,8 +980,11 @@ class ScoredPeptideResult:
         _, trained_wps_optimal_thres = accuracy_objective(trained_wps_weights, self.actual_truths, train_wps_2d,
                                                           train_disqualified_forbidden, return_threshold = True)
 
-        print(f"\t\t\tPre-Weighted Positive + Suboptimal Weight Optimization Accuracy:",
-              f"train={trained_wps_best_x*100:.1f}%, test={test_wps_best_x*100:.1f}%")
+        if self.test_set_exists:
+            print(f"\t\t\tPre-Weighted Positive + Suboptimal Optimized Weight Accuracy:",
+                  f"train={trained_wps_best_x*100:.1f}%, test={test_wps_best_x*100:.1f}%")
+        else:
+            print(f"\t\t\tPre-Weighted Positive + Suboptimal Optimized Weight Accuracy: {trained_wps_best_x*100:.1f}%")
 
         return (trained_wps_weights, trained_wps_optimal_thres, trained_wps_best_x, test_wps_best_x, complete_wps_2d)
     
@@ -1012,7 +1015,7 @@ class ScoredPeptideResult:
                                              points_2d = train_inverted_suboptimal_2d,
                                              disqualified_forbidden = train_disqualified_forbidden)
         
-        if self.test_set_exists is not None:
+        if self.test_set_exists:
             test_inverted_suboptimal_2d = self.test_suboptimal_2d * -1
             test_suboptimal_objective = partial(accuracy_objective, actual_truths = self.test_actual_truths,
                                                 points_2d = test_inverted_suboptimal_2d, 
@@ -1025,7 +1028,7 @@ class ScoredPeptideResult:
         train_suboptimal_results = optimize_points_2d(self.suboptimal_scores_2d.shape[1], weights_range, mode,
                                                       train_suboptimal_objective, suboptimal_forced,
                                                       search_sample=1000000, test_function = test_suboptimal_objective)
-        if test_suboptimal_objective is not None: 
+        if self.test_set_exists:
             trained_suboptimal_weights, trained_suboptimal_best_x, test_suboptimal_best_x = train_suboptimal_results
         else: 
             trained_suboptimal_weights, trained_suboptimal_best_x = train_suboptimal_results
@@ -1035,8 +1038,11 @@ class ScoredPeptideResult:
                                                              train_inverted_suboptimal_2d, train_disqualified_forbidden,
                                                              return_threshold = True)
 
-        print(f"\t\t\tSuboptimal-only Optimization Accuracy:",
-              f"train={trained_suboptimal_best_x*100:.1f}%, test={test_suboptimal_best_x*100:.1f}%")
+        if self.test_set_exists:
+            print(f"\t\t\tSuboptimal-only Optimization Accuracy:",
+                  f"train={trained_suboptimal_best_x*100:.1f}%, test={test_suboptimal_best_x*100:.1f}%")
+        else:
+            print(f"\t\t\tSuboptimal-only Optimization Accuracy: {trained_suboptimal_best_x*100:.1f}%")
 
         output = (trained_suboptimal_weights, trained_suboptimal_threshold, trained_suboptimal_best_x,
                   test_suboptimal_best_x, inverted_suboptimal_2d)
