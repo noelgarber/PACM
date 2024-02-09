@@ -10,7 +10,8 @@ class RandomSearchOptimizer():
     This contains a simple random search optimizer that generates random arrays and tests against an objective function
     '''
 
-    def __init__(self, objective_function, array_len, value_range, mode, forced_values_dict=None, test_function=None):
+    def __init__(self, objective_function, array_len, value_range, mode, forced_values_dict=None, test_function=None,
+                 optimize_train_only = True):
         '''
         Initialization function that assigns input objects to self
 
@@ -21,10 +22,12 @@ class RandomSearchOptimizer():
             mode (str):                            either 'maximize' or 'minimize'
             forced_values_dict (dict):             dict of indices and forced values at those indices
             test_function (function|partial|None): objective function for the test set if given
+            optimize_train_only (bool):            if False, best mean of train and test x-values is found
         '''
 
         # Set optimization mode
         self.mode = mode
+        self.optimize_train_only = optimize_train_only
 
         # Assign inputs to self
         self.objective_function = objective_function
@@ -35,6 +38,7 @@ class RandomSearchOptimizer():
         # Assign best_array and evaluated objective function as None; will be reset later in self.search()
         self.best_array = None
         self.x = np.inf if mode == "minimize" else -np.inf
+        self.mean_x = np.inf if mode == "minimize" else -np.inf
 
         # Calculate and display baseline accuracy of all-ones weights
         self.forced_values_dict = forced_values_dict
@@ -68,13 +72,13 @@ class RandomSearchOptimizer():
 
         with trange(len(trial_arrays_chunks), desc="\tRandom search optimization in progress...") as pbar:
             for chunk_results in pool.imap_unordered(self.search_chunk, trial_arrays_chunks):
-                better = chunk_results[1] > self.x if self.mode == "maximize" else chunk_results[1] < self.x
+                better = chunk_results[1] > self.mean_x if self.mode == "maximize" else chunk_results[1] < self.mean_x
 
                 if better:
-                    self.best_array, self.x = chunk_results[0:2]
+                    self.best_array, self.mean_x, self.x = chunk_results[0:3]
                     best_array_str = ",".join(self.best_array.round(2).astype(str))
                     if self.test_function is not None:
-                        self.test_x = chunk_results[2]
+                        self.test_x = chunk_results[3]
                         print(f"\tRandomSearchOptimizer new record: train x={self.x}, test x={self.test_x}, arr=[{best_array_str}]")
                     else:
                         print(f"\tRandomSearchOptimizer new record: x={self.x}, arr=[{best_array_str}]")
@@ -98,7 +102,15 @@ class RandomSearchOptimizer():
 
         objective_vals = np.apply_along_axis(self.objective_function, axis=1, arr=chunk)
 
-        if self.mode == "maximize":
+        if self.mode == "maximize" and not self.optimize_train_only and self.test_function is not None:
+            test_objective_vals = np.apply_along_axis(self.test_function, axis=1, arr=chunk)
+            mean_objective_vals = np.mean([objective_vals, test_objective_vals])
+            best_idx = np.nanargmax(mean_objective_vals)
+        elif self.mode == "minimize" and not self.optimize_train_only and self.test_function is not None:
+            test_objective_vals = np.apply_along_axis(self.test_function, axis=1, arr=chunk)
+            mean_objective_vals = np.mean([objective_vals, test_objective_vals])
+            best_idx = np.nanargmin(mean_objective_vals)
+        elif self.mode == "maximize":
             best_idx = np.nanargmax(objective_vals)
         elif self.mode == "minimize":
             best_idx = np.nanargmin(objective_vals)
@@ -110,6 +122,8 @@ class RandomSearchOptimizer():
 
         if self.test_function is not None:
             test_x = self.test_function(best_array)
-            return (best_array, x, test_x)
+            mean_x = np.mean([x, test_x])
+            return (best_array, mean_x, x, test_x)
         else:
-            return (best_array, x)
+            mean_x = x
+            return (best_array, mean_x, x)
