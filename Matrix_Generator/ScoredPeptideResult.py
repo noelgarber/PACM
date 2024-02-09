@@ -619,8 +619,9 @@ class ScoredPeptideResult:
             # Bad sets of weights may fail to converge, generating warnings; this code suppresses these warnings
             warnings.simplefilter("ignore", RuntimeWarning)
             warnings.simplefilter("ignore", OptimizeWarning)
-            positive_weights, _, _ = optimize_points_2d(array_len, weights_range, "maximize", positive_objective,
-                                                        positive_forced_values, 100000, test_positive_objective)
+            opt_out = optimize_points_2d(array_len, weights_range, "maximize", positive_objective,
+                                         positive_forced_values, 100000, test_positive_objective)
+            positive_weights = opt_out[0]
 
         # Generate weighted summed points array
         self.binding_positive_weights = positive_weights
@@ -1135,7 +1136,7 @@ class ScoredPeptideResult:
                         np.concatenate([self.weighted_positives, self.test_weighted_positives]).reshape(-1,1),
                         np.concatenate([self.weighted_suboptimals, self.test_weighted_suboptimals]).reshape(-1,1),
                         np.concatenate([self.weighted_forbiddens, self.test_weighted_forbiddens]).reshape(-1,1),
-                        np.concatenate(self.weighted_accuracy_scores).reshape(-1,1)]
+                        self.weighted_accuracy_scores.reshape(-1,1)]
         else:
             raw_arrs = [self.binding_positive_scores.reshape(-1,1), self.weighted_positives.reshape(-1,1),
                         self.weighted_suboptimals.reshape(-1,1), self.weighted_forbiddens.reshape(-1,1),
@@ -1154,8 +1155,7 @@ class ScoredPeptideResult:
                                         self.test_standardized_weighted_suboptimals]).reshape(-1,1),
                         np.concatenate([self.standardized_weighted_forbiddens,
                                         self.test_standardized_weighted_forbiddens]).reshape(-1,1),
-                        np.concatenate([self.standardized_weighted_scores,
-                                        self.test_standardized_weighted_scores]).reshape(-1,1)]
+                        self.standardized_weighted_scores.reshape(-1,1)]
         else:
             std_arrs = [self.standardized_binding_scores.reshape(-1,1),
                         self.standardized_weighted_positives.reshape(-1,1),
@@ -1169,9 +1169,6 @@ class ScoredPeptideResult:
 
         # Final classification bools
         calls = np.greater_equal(self.standardized_weighted_scores, self.standardized_weighted_threshold)
-        if self.test_set_exists:
-            test_calls = np.greater_equal(self.test_standardized_weighted_scores, self.standardized_weighted_threshold)
-            calls = np.concatenate([calls, test_calls])
         arrays_list.append(calls.reshape(-1,1))
         col_titles.append("Final_Boolean_Classification")
 
