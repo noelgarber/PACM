@@ -766,10 +766,16 @@ class ScoredPeptideResult:
         test_suboptimal_best_x, inverted_suboptimal_2d = suboptimal_out[3:]
 
         # Select best
-        print(f"\t\tSelect a method to proceed: \n",
-              f"\t\t\t\"ps\" (positive and suboptimal scores): train={trained_ps_best_x*100:.1f}%, test={test_ps_best_x*100:.1f}%\n",
-              f"\t\t\t\"wps\" (binding and suboptimal scores): train={trained_wps_best_x*100:.1f}%, test={test_wps_best_x*100:.1f}%)\n",
-              f"\t\t\t\"suboptimal\" (suboptimal scores): train={trained_suboptimal_best_x*100:.1f}%, test={test_suboptimal_best_x*100:.1f}%")
+        if self.test_set_exists:
+            print(f"\t\tSelect a method to proceed: \n",
+                  f"\t\t\t\"ps\" (positive and suboptimal scores): train={trained_ps_best_x*100:.1f}%, test={test_ps_best_x*100:.1f}%\n",
+                  f"\t\t\t\"wps\" (binding and suboptimal scores): train={trained_wps_best_x*100:.1f}%, test={test_wps_best_x*100:.1f}%)\n",
+                  f"\t\t\t\"suboptimal\" (suboptimal scores): train={trained_suboptimal_best_x*100:.1f}%, test={test_suboptimal_best_x*100:.1f}%")
+        else:
+            print(f"\t\tSelect a method to proceed: \n",
+                  f"\t\t\t\"ps\" (positive and suboptimal scores): train={trained_ps_best_x*100:.1f}%\n",
+                  f"\t\t\t\"wps\" (binding and suboptimal scores): train={trained_wps_best_x*100:.1f}%\n",
+                  f"\t\t\t\"suboptimal\" (suboptimal scores): train={trained_suboptimal_best_x*100:.1f}%")
         while True:
             best_accuracy_method = input(f"\t\tInput selection:  ")
             if best_accuracy_method in ["ps", "wps", "suboptimal"]:
