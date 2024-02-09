@@ -11,6 +11,24 @@ try:
 except:
     from Matrix_Generator.config import general_params, data_params, matrix_params, aa_equivalence_dict
 
+def balanced_split(input_df, bait_pass_col, pass_str, test_size = 0.2):
+    # Performs balanced train/test split on dataframe to enforce even balance of positives and negatives
+
+    pass_bools = input_df[bait_pass_col] == pass_str
+    pass_bools = pass_bools.to_numpy()
+    passing_rows = np.where(pass_bools)[0]
+    failing_rows = np.where(~pass_bools)[0]
+
+    train_passing_rows, test_passing_rows = train_test_split(passing_rows, test_size=test_size)
+    train_failing_rows, test_failing_rows = train_test_split(failing_rows, test_size=test_size)
+    train_rows = np.concatenate([train_passing_rows, train_failing_rows])
+    test_rows = np.concatenate([test_passing_rows, test_failing_rows])
+
+    train_df = input_df.loc[train_rows, :].copy()
+    test_df = input_df.loc[test_rows, :].copy()
+
+    return train_df, test_df
+
 def main(input_df, general_params = general_params, data_params = data_params, matrix_params = matrix_params):
     '''
     Main function for making pairwise position-weighted matrices
@@ -49,9 +67,13 @@ def main(input_df, general_params = general_params, data_params = data_params, m
         retrain_with_all = matrix_params["retrain_with_all"]
 
         if split_data:
-            train_df, test_df = train_test_split(input_df, test_size=0.1)
+            pass_str = data_params["pass_str"]
+            bait_pass_col = data_params["bait_pass_col"]
+            train_df, test_df = balanced_split(input_df, bait_pass_col, pass_str, test_size = 0.2)
+
             train_df = train_df.reset_index(drop=True)
             test_df = test_df.reset_index(drop=True)
+
             conditional_matrices = ConditionalMatrices(motif_length, train_df, percentiles_dict, aa_charac_dict,
                                                        output_folder, data_params, matrix_params, test_df=test_df)
             if retrain_with_all:
