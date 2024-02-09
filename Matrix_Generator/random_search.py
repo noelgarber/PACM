@@ -10,15 +10,17 @@ class RandomSearchOptimizer():
     This contains a simple random search optimizer that generates random arrays and tests against an objective function
     '''
 
-    def __init__(self, objective_function, array_len, value_range, mode, forced_values_dict = None):
+    def __init__(self, objective_function, array_len, value_range, mode, forced_values_dict=None, test_function=None):
         '''
         Initialization function that assigns input objects to self
 
         Args:
-            objective_function (function): objective function to be minimized/maximized
-            array_len (int):               number of elements in an array to be fed to the objective function
-            value_range (iterable):        list/tuple/array of (min_val, max_val), the bounds applied to array values
-            mode (str):                    either 'maximize' or 'minimize'
+            objective_function (function|partial): objective function to be minimized/maximized
+            array_len (int):                       number of elements in an array to be fed to the objective function
+            value_range (iterable):                list/tuple/array of (min_val, max_val), the bounds applied to values
+            mode (str):                            either 'maximize' or 'minimize'
+            forced_values_dict (dict):             dict of indices and forced values at those indices
+            test_function (function|partial|None): objective function for the test set if given
         '''
 
         # Set optimization mode
@@ -26,6 +28,7 @@ class RandomSearchOptimizer():
 
         # Assign inputs to self
         self.objective_function = objective_function
+        self.test_function = test_function
         self.array_len = array_len
         self.value_range = value_range
 
@@ -41,6 +44,7 @@ class RandomSearchOptimizer():
                 baseline_weights[idx] = value
 
         self.baseline_x = self.objective_function(baseline_weights)
+        self.test_baseline_x = self.test_function(baseline_weights) if test_function is not None else None
 
         print(f"\tInitialized RandomSearchOptimizer; baseline objective x={self.baseline_x}")
 
@@ -64,12 +68,16 @@ class RandomSearchOptimizer():
 
         with trange(len(trial_arrays_chunks), desc="\tRandom search optimization in progress...") as pbar:
             for chunk_results in pool.imap_unordered(self.search_chunk, trial_arrays_chunks):
-                if chunk_results[1] > self.x and self.mode == "maximize":
-                    self.best_array, self.x = chunk_results
-                    print(f"\tRandomSearchOptimizer new record: x={self.x}")
-                elif chunk_results[1] < self.x and self.mode == "minimize":
-                    self.best_array, self.x = chunk_results
-                    print(f"\tRandomSearchOptimizer new record: x={self.x}")
+                better = chunk_results[1] > self.x if self.mode == "maximize" else chunk_results[1] < self.x
+
+                if better:
+                    self.best_array, self.x = chunk_results[0:2]
+                    best_array_str = ",".join(self.best_array.round(2).astype(str))
+                    if self.test_function is not None:
+                        self.test_x = chunk_results[2]
+                        print(f"\tRandomSearchOptimizer new record: train x={self.x}, test x={self.test_x}, arr=[{best_array_str}]")
+                    else:
+                        print(f"\tRandomSearchOptimizer new record: x={self.x}, arr=[{best_array_str}]")
 
                 pbar.update()
 
@@ -100,4 +108,8 @@ class RandomSearchOptimizer():
         best_array = chunk[best_idx]
         x = objective_vals[best_idx]
 
-        return (best_array, x)
+        if self.test_function is not None:
+            test_x = self.test_function(best_array)
+            return (best_array, x, test_x)
+        else:
+            return (best_array, x)
