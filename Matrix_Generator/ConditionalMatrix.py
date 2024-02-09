@@ -741,9 +741,8 @@ class ConditionalMatrices:
 
         # Optimize scoring weights
         self.scored_result = self.optimize_scoring_weights(seqs_2d, actual_truths, mean_signal_values,
-                                                           slice_scores_subsets, precision_recall_path,
-                                                           output_folder, test_seqs_2d, test_actual_truths,
-                                                           test_mean_signals, predefined_weights)
+                                                           slice_scores_subsets, precision_recall_path, test_seqs_2d,
+                                                           test_actual_truths, test_mean_signals, predefined_weights)
 
         self.output_df = self.make_output_df(source_df, seqs_2d, seq_col, self.scored_result, test_df, test_seqs_2d, assign_residue_cols=True)
 
@@ -1103,9 +1102,8 @@ class ConditionalMatrices:
         return (binding_scores_2d, positive_scores_2d, suboptimal_scores_2d, forbidden_scores_2d)
 
     def optimize_scoring_weights(self, training_seqs_2d, training_actual_truths, training_signal_values = None,
-                                 slice_scores_subsets = None, precision_recall_path = None, coefficients_path = None,
-                                 test_seqs_2d = None, test_actual_truths = None, test_signal_values = None,
-                                 predefined_weights = None):
+                                 slice_scores_subsets = None, precision_recall_path = None, test_seqs_2d = None,
+                                 test_actual_truths = None, test_signal_values = None, predefined_weights = None):
         '''
         Vectorized function to score amino acid sequences based on the dictionary of context-aware weighted matrices
 
@@ -1142,7 +1140,7 @@ class ConditionalMatrices:
         preview_scatter_plot = True
         result = ScoredPeptideResult(training_seqs_2d, slice_scores_subsets, positive_scores_2d, suboptimal_scores_2d,
                                      forbidden_scores_2d, training_actual_truths, training_signal_values,
-                                     precision_recall_path, True, coefficients_path, self.suppress_positive_positions,
+                                     precision_recall_path, True, self.suppress_positive_positions,
                                      self.suppress_suboptimal_positions, self.suppress_forbidden_positions,
                                      ignore_failed_peptides, preview_scatter_plot, test_seqs_2d,
                                      test_positive_2d, test_suboptimal_2d, test_forbidden_2d, test_actual_truths,
