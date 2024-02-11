@@ -144,9 +144,9 @@ class ScoredPeptideResult:
     def __init__(self, seqs_2d, slice_scores_subsets, positive_scores_2d, suboptimal_scores_2d, forbidden_scores_2d,
                  actual_truths = None, signal_values = None, fig_path = None, make_df = True,
                  suppress_positives = None, suppress_suboptimals = None, suppress_forbiddens = None,
-                 ignore_failed_peptides = True, preview_scatter_plot = True,
-                 test_seqs_2d = None, test_positive_2d = None, test_suboptimal_2d = None, test_forbidden_2d = None,
-                 test_actual_truths = None, test_signal_values = None,
+                 ignore_failed_peptides = True, optimization_method = ("ps", "wps", "suboptimal"),
+                 preview_scatter_plot = True, test_seqs_2d = None, test_positive_2d = None, test_suboptimal_2d = None,
+                 test_forbidden_2d = None, test_actual_truths = None, test_signal_values = None,
                  predefined_weights = None, predefined_binding_std_coefs = None, predefined_binding_exp_params = None,
                  predefined_std_threshold = None):
         '''
@@ -167,6 +167,7 @@ class ScoredPeptideResult:
             suppress_suboptimals (np.ndarray):     position indices to suppress effect of suboptimal elements at
             suppress_forbiddens (np.ndarray):      position indices to suppress effect of forbidden elements at
             ignore_failed_peptides (bool):         whether to only use signals from passing peptides for positive matrix
+            optimization_method (tuple|list|str):  method of combining scores for weights optimization
             preview_scatter_plot (bool):           whether to show a scatter plot of positive points against signals
             test_seqs_2d (np.ndarray):             if the main train/test split was done, include test sequences
             test_positive_2d (np.ndarray):         positive element scores matching test sequences
@@ -241,7 +242,7 @@ class ScoredPeptideResult:
 
         # Apply and assess score weightings, and assign them to a dataframe
         self.process_weights(fig_path, suppress_positives, suppress_suboptimals, suppress_forbiddens,
-                             ignore_failed_peptides, preview_scatter_plot, predefined_weights,
+                             ignore_failed_peptides, optimization_method, preview_scatter_plot, predefined_weights,
                              predefined_binding_std_coefs, predefined_binding_exp_params, predefined_std_threshold)
 
         # Print results
@@ -266,7 +267,8 @@ class ScoredPeptideResult:
             self.generate_scored_df()
 
     def process_weights(self, fig_path = None, suppress_positives = None, suppress_suboptimals = None,
-                        suppress_forbiddens = None, ignore_failed_peptides = True, preview_scatter_plot = True,
+                        suppress_forbiddens = None, ignore_failed_peptides = True,
+                        optimization_method = ("ps", "wps", "suboptimal"), preview_scatter_plot = True,
                         predefined_weights = None, predefined_binding_std_coefs = None,
                         predefined_binding_exp_params = None, predefined_std_threshold = None):
         '''
@@ -278,6 +280,7 @@ class ScoredPeptideResult:
             suppress_suboptimals (np.ndarray):     position indices to suppress suboptimal elements at
             suppress_forbiddens (np.ndarray):      position indices to suppress forbidden elements at
             ignore_failed_peptides (bool):         whether to only use signals from passing peptides for positive matrix
+            optimization_method (tuple|list|str):  method of combining scores for weights optimization
             preview_scatter_plot (bool):           whether to show a scatter plot of positive points against signals
             predefined_weights (tuple):            predefined tuple of (binding_score_weights, positive_score_weights,
                                                    suboptimal_score_weights, forbidden_score_weights)
@@ -299,7 +302,8 @@ class ScoredPeptideResult:
                                               self.binding_exp_params, ignore_failed_peptides)
 
             # Optimize weights for classification prediction
-            self.optimize_total_weights(fig_path, suppress_positives, suppress_suboptimals, suppress_forbiddens)
+            self.optimize_total_weights(fig_path, suppress_positives, suppress_suboptimals, suppress_forbiddens,
+                                        optimization_method)
             # Apply to test set
             if self.test_set_exists:
                 self.apply_predefined_weights(self.test_positive_2d, self.test_suboptimal_2d, self.test_forbidden_2d,
@@ -694,7 +698,7 @@ class ScoredPeptideResult:
             plt.show()
 
     def optimize_total_weights(self, fig_path = None, suppress_positives = None, suppress_suboptimals = None,
-                               suppress_forbiddens = None):
+                               suppress_forbiddens = None, method = ("ps", "wps", "suboptimal")):
         '''
         Function that applies random search optimization to find ideal position and score weights to maximize f1-score
 
@@ -702,6 +706,7 @@ class ScoredPeptideResult:
             fig_path (str):                    path to save the precision/recall/accuracy plot to
             suppress_suboptimals (np.ndarray): position indices to suppress suboptimal elements at
             suppress_forbiddens (np.ndarray):  position indices to suppress forbidden elements at
+            method (tuple|list|str):           method of combining scores for weights optimization
 
         Returns:
             None
@@ -712,18 +717,20 @@ class ScoredPeptideResult:
         # Optimize weights; first value is a multiplier of summed weighted positive scores
         print(f"\tOptimizing final score values to maximize accuracy in binary calls...")
 
-        # Generate forced values dicts
-        ps_forced = {}
-        wps_forced = {}
-        suboptimal_forced = {}
-        for idx in suppress_positives:
-            # Suppressed positive score positions
-            ps_forced[idx] = 0
-        for idx in suppress_suboptimals:
-            # Suppressed suboptimal score positions
-            ps_forced[idx + motif_length] = 0
-            wps_forced[idx + 1] = 0
-            suboptimal_forced[idx] = 0
+        # Parse method
+        if isinstance(method, str):
+            try_ps = method == "ps"
+            try_wps = method == "wps"
+            try_suboptimal = method == "suboptimal"
+        elif isinstance(method, list) or isinstance(method, tuple):
+            try_ps = "ps" in method
+            try_wps = "wps" in method
+            try_suboptimal = "suboptimal" in method
+        else:
+            raise TypeError(f"method was set to {method} ({type(method)}), but must be list, tuple, or string")
+
+        if not try_ps and not try_wps and not try_suboptimal:
+            raise ValueError(f"try_ps, try_wps, and try_suboptimal were all set to False, but >1 must be True")
 
         # Find disqualified peptides that have forbidden residues
         train_forbidden_2d = self.forbidden_scores_2d.copy()
@@ -738,36 +745,70 @@ class ScoredPeptideResult:
             test_forbidden_2d, test_disqualified_forbidden = None, None
 
         # Attempt optimization with unweighted positive and suboptimal element scores, masked by forbidden scores
-        ps_out = self.optimize_ps_weights(ps_forced, train_disqualified_forbidden, test_disqualified_forbidden)
-        trained_ps_weights, trained_ps_optimal_threshold, trained_ps_best_x, test_ps_best_x, complete_ps_2d = ps_out
+        if try_ps:
+            ps_suppressed_indices = np.concatenate([suppress_positives, suppress_suboptimals + motif_length])
+            ps_forced = {idx: 0 for idx in ps_suppressed_indices}
+            ps_out = self.optimize_ps_weights(ps_forced, train_disqualified_forbidden, test_disqualified_forbidden)
+            trained_ps_weights, trained_ps_optimal_threshold, trained_ps_best_x, test_ps_best_x, complete_ps_2d = ps_out
+        else:
+            trained_ps_weights, trained_ps_optimal_threshold = None, None
+            trained_ps_best_x, test_ps_best_x, complete_ps_2d = None, None, None
 
         # Attempt optimization with pre-weighted positive and unweighted suboptimal scores, masked by forbidden scores
-        wps_out = self.optimize_wps_weights(wps_forced, train_disqualified_forbidden, test_disqualified_forbidden)
-        trained_wps_weights, trained_wps_optimal_thres, trained_wps_best_x, test_wps_best_x, complete_wps_2d = wps_out
+        if try_wps:
+            wps_suppressed_indices = np.array(suppress_suboptimals) + 1
+            wps_forced = {idx: 0 for idx in wps_suppressed_indices}
+            wps_out = self.optimize_wps_weights(wps_forced, train_disqualified_forbidden, test_disqualified_forbidden)
+            trained_wps_weights, trained_wps_optimal_thres = wps_out[0:2]
+            trained_wps_best_x, test_wps_best_x, complete_wps_2d = wps_out[2:]
+        else:
+            trained_wps_weights, trained_wps_optimal_thres = None, None
+            trained_wps_best_x, test_wps_best_x, complete_wps_2d = None, None, None
 
         # Attempt optimization with only suboptimal element scores, masked by forbidden scores
-        suboptimal_out = self.optimize_suboptimal_weights(suboptimal_forced,
-                                                          train_disqualified_forbidden, test_disqualified_forbidden)
-        trained_suboptimal_weights, trained_suboptimal_threshold, trained_suboptimal_best_x = suboptimal_out[0:3]
-        test_suboptimal_best_x, inverted_suboptimal_2d = suboptimal_out[3:]
-
-        # Select best
-        if self.test_set_exists:
-            print(f"\t\tSelect a method to proceed: \n",
-                  f"\t\t\t\"ps\" (positive and suboptimal scores): train={trained_ps_best_x*100:.1f}%, test={test_ps_best_x*100:.1f}%\n",
-                  f"\t\t\t\"wps\" (binding and suboptimal scores): train={trained_wps_best_x*100:.1f}%, test={test_wps_best_x*100:.1f}%)\n",
-                  f"\t\t\t\"suboptimal\" (suboptimal scores): train={trained_suboptimal_best_x*100:.1f}%, test={test_suboptimal_best_x*100:.1f}%")
+        if try_suboptimal:
+            suboptimal_forced = {idx: 0 for idx in suppress_suboptimals}
+            suboptimal_out = self.optimize_suboptimal_weights(suboptimal_forced,
+                                                              train_disqualified_forbidden, test_disqualified_forbidden)
+            trained_suboptimal_weights, trained_suboptimal_threshold = suboptimal_out[0:2]
+            trained_suboptimal_best_x, test_suboptimal_best_x, inverted_suboptimal_2d = suboptimal_out[2:]
         else:
-            print(f"\t\tSelect a method to proceed: \n",
-                  f"\t\t\t\"ps\" (positive and suboptimal scores): train={trained_ps_best_x*100:.1f}%\n",
-                  f"\t\t\t\"wps\" (binding and suboptimal scores): train={trained_wps_best_x*100:.1f}%\n",
-                  f"\t\t\t\"suboptimal\" (suboptimal scores): train={trained_suboptimal_best_x*100:.1f}%")
-        while True:
-            best_accuracy_method = input(f"\t\tInput selection:  ")
-            if best_accuracy_method in ["ps", "wps", "suboptimal"]:
-                break
-            else:
-                print(f"\t\tInvalid option selected ({best_accuracy_method}), please try again.")
+            trained_suboptimal_weights, trained_suboptimal_threshold = None, None
+            trained_suboptimal_best_x, test_suboptimal_best_x, inverted_suboptimal_2d = None, None, None
+
+        # Select best method
+        if isinstance(method, str):
+            best_accuracy_method = method
+        elif len(method) == 1:
+            best_accuracy_method = method[0]
+        else:
+            message_lines = [f"\t\tSelect a method to proceed: \n"]
+            if try_ps:
+                if self.test_set_exists:
+                    message_lines.append(f"\t\t\t\"ps\" (positive and suboptimal scores): train={trained_ps_best_x*100:.1f}%, test={test_ps_best_x*100:.1f}%\n")
+                else:
+                    message_lines.append(f"\t\t\t\"ps\" (positive and suboptimal scores): train={trained_ps_best_x*100:.1f}%\n")
+            if try_wps:
+                if self.test_set_exists:
+                    message_lines.append(f"\t\t\t\"wps\" (binding and suboptimal scores): train={trained_wps_best_x*100:.1f}%, test={test_wps_best_x*100:.1f}%)\n")
+                else:
+                    message_lines.append(f"\t\t\t\"wps\" (binding and suboptimal scores): train={trained_wps_best_x*100:.1f}%\n")
+            if try_suboptimal:
+                if self.test_set_exists:
+                    message_lines.append(f"\t\t\t\"suboptimal\" (suboptimal scores): train={trained_suboptimal_best_x*100:.1f}%, test={test_suboptimal_best_x*100:.1f}%")
+                else:
+                    message_lines.append(f"\t\t\t\"suboptimal\" (suboptimal scores): train={trained_suboptimal_best_x * 100:.1f}%")
+
+            for line in message_lines:
+                print(line)
+
+            while True:
+                best_accuracy_method = input(f"\t\tInput selection:  ")
+                if best_accuracy_method in ["ps", "wps", "suboptimal"]:
+                    break
+                else:
+                    print(f"\t\tInvalid option selected ({best_accuracy_method}), please try again.")
+
         self.best_accuracy_method = best_accuracy_method
 
         # Assign best to self
@@ -886,7 +927,7 @@ class ScoredPeptideResult:
         train_ps_2d = np.hstack([self.positive_scores_2d, self.suboptimal_scores_2d * -1])
         train_ps_objective = partial(accuracy_objective, actual_truths = self.actual_truths, points_2d = train_ps_2d,
                                      disqualified_forbidden = train_disqualified_forbidden)
-        
+
         if self.test_set_exists:
             test_ps_2d = np.hstack([self.test_positive_2d, self.test_suboptimal_2d * -1])
             complete_ps_2d = np.vstack([train_ps_2d, test_ps_2d])
@@ -901,7 +942,7 @@ class ScoredPeptideResult:
         if self.test_set_exists:
             trained_ps_weights, trained_ps_best_x, test_ps_best_x = train_ps_results
             print(f"\t\t\tAccuracy: train={trained_ps_best_x * 100:.1f}%, test={test_ps_best_x * 100:.1f}%")
-        else: 
+        else:
             trained_ps_weights, trained_ps_best_x = train_ps_results
             test_ps_best_x = None
             print(f"\t\t\tAccuracy: train={trained_ps_best_x * 100:.1f}%")
@@ -916,7 +957,7 @@ class ScoredPeptideResult:
             print(f"\t\t\tPositive/Suboptimal Optimization Accuracy: {trained_ps_best_x*100:.1f}%")
 
         return (trained_ps_weights, trained_ps_optimal_threshold, trained_ps_best_x, test_ps_best_x, complete_ps_2d)
-    
+
     def optimize_wps_weights(self, wps_forced, train_disqualified_forbidden, test_disqualified_forbidden = None):
         '''
         Classification optimization with pre-weighted positive and unweighted suboptimal scores, masked by forbiddens
@@ -944,23 +985,23 @@ class ScoredPeptideResult:
                                   self.suboptimal_scores_2d * -1])
         train_wps_objective = partial(accuracy_objective, actual_truths = self.actual_truths, points_2d = train_wps_2d,
                                       disqualified_forbidden = train_disqualified_forbidden)
-        
-        if self.test_positive_2d is not None: 
+
+        if self.test_positive_2d is not None:
             test_wps_2d = np.hstack([self.test_binding_scores.reshape(-1,1) * binding_positive_multiplier,
                                      self.test_suboptimal_2d * -1])
             test_wps_objective = partial(accuracy_objective, actual_truths = self.test_actual_truths,
                                          points_2d = test_wps_2d, disqualified_forbidden = test_disqualified_forbidden)
             complete_wps_2d = np.vstack([train_wps_2d, test_wps_2d])
-        else: 
+        else:
             test_wps_2d, test_wps_objective = None, None
             complete_wps_2d = train_wps_2d
 
         train_wps_results = optimize_points_2d(train_wps_2d.shape[1], weights_range, mode, train_wps_objective,
                                                wps_forced, search_sample = 1000000, test_function = test_wps_objective)
 
-        if test_wps_objective is not None: 
+        if test_wps_objective is not None:
             trained_wps_weights, trained_wps_best_x, test_wps_best_x = train_wps_results
-        else: 
+        else:
             trained_wps_weights, trained_wps_best_x = train_wps_results
             test_wps_best_x = None
         trained_wps_weights[0] = trained_wps_weights[0] * binding_positive_multiplier
@@ -975,7 +1016,7 @@ class ScoredPeptideResult:
             print(f"\t\t\tPre-Weighted Positive + Suboptimal Optimized Weight Accuracy: {trained_wps_best_x*100:.1f}%")
 
         return (trained_wps_weights, trained_wps_optimal_thres, trained_wps_best_x, test_wps_best_x, complete_wps_2d)
-    
+
     def optimize_suboptimal_weights(self, suboptimal_forced, train_disqualified_forbidden,
                                     test_disqualified_forbidden = None):
         '''
@@ -1002,14 +1043,14 @@ class ScoredPeptideResult:
         train_suboptimal_objective = partial(accuracy_objective, actual_truths = self.actual_truths,
                                              points_2d = train_inverted_suboptimal_2d,
                                              disqualified_forbidden = train_disqualified_forbidden)
-        
+
         if self.test_set_exists:
             test_inverted_suboptimal_2d = self.test_suboptimal_2d * -1
             test_suboptimal_objective = partial(accuracy_objective, actual_truths = self.test_actual_truths,
-                                                points_2d = test_inverted_suboptimal_2d, 
+                                                points_2d = test_inverted_suboptimal_2d,
                                                 disqualified_forbidden = test_disqualified_forbidden)
             inverted_suboptimal_2d = np.vstack([train_inverted_suboptimal_2d, test_inverted_suboptimal_2d])
-        else: 
+        else:
             inverted_suboptimal_2d = train_inverted_suboptimal_2d.copy()
             test_inverted_suboptimal_2d, test_suboptimal_objective = None, None
 
@@ -1018,7 +1059,7 @@ class ScoredPeptideResult:
                                                       search_sample=1000000, test_function = test_suboptimal_objective)
         if self.test_set_exists:
             trained_suboptimal_weights, trained_suboptimal_best_x, test_suboptimal_best_x = train_suboptimal_results
-        else: 
+        else:
             trained_suboptimal_weights, trained_suboptimal_best_x = train_suboptimal_results
             test_suboptimal_best_x = None
 

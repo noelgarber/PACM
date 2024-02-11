@@ -740,9 +740,11 @@ class ConditionalMatrices:
             test_seqs_2d, test_actual_truths, test_mean_signals = None, None, None
 
         # Optimize scoring weights
+        optimization_method = matrix_params["optimization_method"]
         self.scored_result = self.optimize_scoring_weights(seqs_2d, actual_truths, mean_signal_values,
-                                                           slice_scores_subsets, precision_recall_path, test_seqs_2d,
-                                                           test_actual_truths, test_mean_signals, predefined_weights)
+                                                           slice_scores_subsets, optimization_method,
+                                                           precision_recall_path, test_seqs_2d, test_actual_truths,
+                                                           test_mean_signals, predefined_weights)
 
         self.output_df = self.make_output_df(source_df, seqs_2d, seq_col, self.scored_result, test_df, test_seqs_2d, assign_residue_cols=True)
 
@@ -1102,8 +1104,9 @@ class ConditionalMatrices:
         return (binding_scores_2d, positive_scores_2d, suboptimal_scores_2d, forbidden_scores_2d)
 
     def optimize_scoring_weights(self, training_seqs_2d, training_actual_truths, training_signal_values = None,
-                                 slice_scores_subsets = None, precision_recall_path = None, test_seqs_2d = None,
-                                 test_actual_truths = None, test_signal_values = None, predefined_weights = None):
+                                 slice_scores_subsets = None, optimization_method = ("ps", "wps", "suboptimal"),
+                                 precision_recall_path = None, test_seqs_2d = None, test_actual_truths = None,
+                                 test_signal_values = None, predefined_weights = None):
         '''
         Vectorized function to score amino acid sequences based on the dictionary of context-aware weighted matrices
 
@@ -1115,6 +1118,7 @@ class ConditionalMatrices:
             slice_scores_subsets (np.ndarray):          array of stretches of positions to stratify results into;
                                                         e.g. [6,7,2] is stratified into scores for positions
                                                         1-6, 7-13, & 14-15
+            optimization_method (tuple|list|str):       method of combining scores for weights optimization
             precision_recall_path (str):                desired file path for saving the precision/recall graph
             coefficients_path (str):                    path to save score standardization coefficients to for later use
             test_seqs_2d (np.ndarray):                  if a train/test split was performed, include test sequences
@@ -1142,7 +1146,7 @@ class ConditionalMatrices:
                                      forbidden_scores_2d, training_actual_truths, training_signal_values,
                                      precision_recall_path, True, self.suppress_positive_positions,
                                      self.suppress_suboptimal_positions, self.suppress_forbidden_positions,
-                                     ignore_failed_peptides, preview_scatter_plot, test_seqs_2d,
+                                     ignore_failed_peptides, optimization_method, preview_scatter_plot, test_seqs_2d,
                                      test_positive_2d, test_suboptimal_2d, test_forbidden_2d, test_actual_truths,
                                      test_signal_values, predefined_weights)
 
