@@ -11,7 +11,7 @@ try:
 except:
     from Matrix_Generator.config import general_params, data_params, matrix_params, aa_equivalence_dict
 
-def balanced_split(input_df, bait_pass_col, pass_str, test_size = 0.2):
+def balanced_split(input_df, bait_pass_col, pass_str, test_size = 0.2, random_state = 1):
     # Performs balanced train/test split on dataframe to enforce even balance of positives and negatives
 
     pass_bools = input_df[bait_pass_col] == pass_str
@@ -19,8 +19,10 @@ def balanced_split(input_df, bait_pass_col, pass_str, test_size = 0.2):
     passing_rows = np.where(pass_bools)[0]
     failing_rows = np.where(~pass_bools)[0]
 
-    train_passing_rows, test_passing_rows = train_test_split(passing_rows, test_size=test_size)
-    train_failing_rows, test_failing_rows = train_test_split(failing_rows, test_size=test_size)
+    train_passing_rows, test_passing_rows = train_test_split(passing_rows, test_size=test_size,
+                                                             random_state=random_state)
+    train_failing_rows, test_failing_rows = train_test_split(failing_rows, test_size=test_size,
+                                                             random_state=random_state)
     train_rows = np.concatenate([train_passing_rows, train_failing_rows])
     test_rows = np.concatenate([test_passing_rows, test_failing_rows])
 
