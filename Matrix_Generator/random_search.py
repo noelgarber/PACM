@@ -27,6 +27,13 @@ class RandomSearchOptimizer():
 
         # Set optimization mode
         self.mode = mode
+        if self.mode == "maximize":
+            self.argfunc, self.func = np.nanargmax, np.nanmax
+        elif self.mode == "minimize":
+            self.argfunc, self.func = np.nanargmin, np.nanmin
+        else:
+            raise ValueError(f"mode is set to {self.mode}, but must be `maximize` or `minimize`")
+
         self.optimize_train_only = optimize_train_only
 
         # Assign inputs to self
@@ -39,6 +46,7 @@ class RandomSearchOptimizer():
         self.best_array = None
         self.x = np.inf if mode == "minimize" else -np.inf
         self.mean_x = np.inf if mode == "minimize" else -np.inf
+        self.relative_delta_x = np.inf
 
         # Calculate and display baseline accuracy of all-ones weights
         self.forced_values_dict = forced_values_dict
@@ -72,14 +80,32 @@ class RandomSearchOptimizer():
 
         with trange(len(trial_arrays_chunks), desc="\tRandom search optimization in progress...") as pbar:
             for chunk_results in pool.imap_unordered(self.search_chunk, trial_arrays_chunks):
-                better = chunk_results[1] > self.mean_x if self.mode == "maximize" else chunk_results[1] < self.mean_x
+                # Judge whether a new record is set
+                mean_x = chunk_results[1]
+                if self.mode == "maximize":
+                    if self.test_function is not None:
+                        relative_delta_x = np.abs(chunk_results[2] - chunk_results[3]) / np.abs(chunk_results[1])
+                        better = mean_x > self.mean_x and relative_delta_x <= self.relative_delta_x
+                    else:
+                        relative_delta_x = None
+                        better = mean_x > self.mean_x
+                else:
+                    if self.test_function is not None:
+                        relative_delta_x = np.abs(chunk_results[2] - chunk_results[3]) / np.abs(chunk_results[1])
+                        better = mean_x < self.mean_x and relative_delta_x < self.relative_delta_x
+                    else:
+                        relative_delta_x = None
+                        better = mean_x < self.mean_x
 
+                # Handle new records
                 if better:
                     self.best_array, self.mean_x, self.x = chunk_results[0:3]
                     best_array_str = ",".join(self.best_array.round(2).astype(str))
                     if self.test_function is not None:
                         self.test_x = chunk_results[3]
-                        print(f"\tRandomSearchOptimizer new record: train x={self.x}, test x={self.test_x}, arr=[{best_array_str}]")
+                        self.relative_delta_x = relative_delta_x
+                        print(f"\tRandomSearchOptimizer new record: ",
+                              f"train x={self.x}, test x={self.test_x}, arr=[{best_array_str}]")
                     else:
                         print(f"\tRandomSearchOptimizer new record: x={self.x}, arr=[{best_array_str}]")
 
@@ -102,20 +128,15 @@ class RandomSearchOptimizer():
 
         objective_vals = np.apply_along_axis(self.objective_function, axis=1, arr=chunk)
 
-        if self.mode == "maximize" and not self.optimize_train_only and self.test_function is not None:
+        if not self.optimize_train_only and self.test_function is not None:
             test_objective_vals = np.apply_along_axis(self.test_function, axis=1, arr=chunk)
             mean_objective_vals = np.mean([objective_vals, test_objective_vals])
-            best_idx = np.nanargmax(mean_objective_vals)
-        elif self.mode == "minimize" and not self.optimize_train_only and self.test_function is not None:
-            test_objective_vals = np.apply_along_axis(self.test_function, axis=1, arr=chunk)
-            mean_objective_vals = np.mean([objective_vals, test_objective_vals])
-            best_idx = np.nanargmin(mean_objective_vals)
-        elif self.mode == "maximize":
-            best_idx = np.nanargmax(objective_vals)
-        elif self.mode == "minimize":
-            best_idx = np.nanargmin(objective_vals)
+            max_mean_val = self.func(mean_objective_vals)
+            indices_where_max = np.where(np.equal(mean_objective_vals, max_mean_val))[0]
+            deltas_at = np.abs(objective_vals[indices_where_max] - test_objective_vals[indices_where_max])
+            best_idx = indices_where_max[np.nanargmin(deltas_at)]
         else:
-            raise ValueError(f"RandomSearchOptimizer mode is set to {self.mode}, but needs `maximize` or `minimize`")
+            best_idx = self.argfunc(objective_vals)
 
         best_array = chunk[best_idx]
         x = objective_vals[best_idx]
