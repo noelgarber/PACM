@@ -741,10 +741,11 @@ class ConditionalMatrices:
 
         # Optimize scoring weights
         optimization_method = matrix_params["optimization_method"]
+        predefined_std_coefs = matrix_params.get("predefined_std_coefs")
         self.scored_result = self.optimize_scoring_weights(seqs_2d, actual_truths, mean_signal_values,
                                                            slice_scores_subsets, optimization_method,
                                                            precision_recall_path, test_seqs_2d, test_actual_truths,
-                                                           test_mean_signals, predefined_weights)
+                                                           test_mean_signals, predefined_weights, predefined_std_coefs)
 
         self.output_df = self.make_output_df(source_df, seqs_2d, seq_col, self.scored_result, test_df, test_seqs_2d, assign_residue_cols=True)
 
@@ -1106,7 +1107,7 @@ class ConditionalMatrices:
     def optimize_scoring_weights(self, training_seqs_2d, training_actual_truths, training_signal_values = None,
                                  slice_scores_subsets = None, optimization_method = ("ps", "wps", "suboptimal"),
                                  precision_recall_path = None, test_seqs_2d = None, test_actual_truths = None,
-                                 test_signal_values = None, predefined_weights = None):
+                                 test_signal_values = None, predefined_weights = None, predefined_std_coefs = None):
         '''
         Vectorized function to score amino acid sequences based on the dictionary of context-aware weighted matrices
 
@@ -1126,6 +1127,7 @@ class ConditionalMatrices:
             test_signal_values (np.ndarray):            if a train/test split was performed, include test signal values
             predefined_weights (tuple):                 tuple of (binding_positive_weights, positive_weights,
                                                         suboptimal_weights, forbidden_weights)
+            predefined_std_coefs (tuple):               predefined classification score standardization coefficients
 
         Returns:
             result (ScoredPeptideResult):               signal, suboptimal, and forbidden score values in 1D and 2D
@@ -1148,7 +1150,7 @@ class ConditionalMatrices:
                                      self.suppress_suboptimal_positions, self.suppress_forbidden_positions,
                                      ignore_failed_peptides, optimization_method, preview_scatter_plot, test_seqs_2d,
                                      test_positive_2d, test_suboptimal_2d, test_forbidden_2d, test_actual_truths,
-                                     test_signal_values, predefined_weights)
+                                     test_signal_values, predefined_weights, predefined_std_coefs=predefined_std_coefs)
 
         # Assign metrics to self
         self.train_binding_r2 = result.binding_score_r2
@@ -1162,11 +1164,10 @@ class ConditionalMatrices:
         # Assign weights and other information to self
         self.apply_weights(result.binding_positive_weights, result.positives_weights,
                            result.suboptimals_weights, result.forbiddens_weights, only_3d=False)
-        self.best_accuracy_method = result.best_accuracy_method
 
         # Assign standardization coefficients to self
         self.binding_standardization_coefficients = result.binding_standardization_coefficients
-        self.accuracy_standardization_coefficients = result.standardization_coefficients
+        self.classification_standardization_coefficients = result.standardization_coefficients
 
         # Assign thresholds to self
         self.standardized_weighted_threshold = result.standardized_weighted_threshold

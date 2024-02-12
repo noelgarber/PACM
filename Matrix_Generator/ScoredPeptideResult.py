@@ -147,8 +147,8 @@ class ScoredPeptideResult:
                  ignore_failed_peptides = True, optimization_method = ("ps", "wps", "suboptimal"),
                  preview_scatter_plot = True, test_seqs_2d = None, test_positive_2d = None, test_suboptimal_2d = None,
                  test_forbidden_2d = None, test_actual_truths = None, test_signal_values = None,
-                 predefined_weights = None, predefined_binding_std_coefs = None, predefined_binding_exp_params = None,
-                 predefined_std_threshold = None):
+                 predefined_weights = None, predefined_binding_std_coefs = None, predefined_std_coefs = None,
+                 predefined_binding_exp_params = None, predefined_std_threshold = None):
         '''
         Initialization function to generate the score values and assign them to self
 
@@ -178,6 +178,7 @@ class ScoredPeptideResult:
             predefined_weights (tuple):            predefined tuple of (binding_score_weights, positive_score_weights,
                                                    suboptimal_score_weights, forbidden_score_weights)
             predefined_binding_std_coefs (tuple):  predefined binding score standardization coefficients
+            predefined_std_coefs (tuple):          predefined classification score standardization coefficients
             predefined_binding_exp_params (tuple): predefined fitted exponential curve params
             predefined_std_threshold (float): predefined weighted points threshold to consider a peptide positive
         '''
@@ -243,7 +244,8 @@ class ScoredPeptideResult:
         # Apply and assess score weightings, and assign them to a dataframe
         self.process_weights(fig_path, suppress_positives, suppress_suboptimals, suppress_forbiddens,
                              ignore_failed_peptides, optimization_method, preview_scatter_plot, predefined_weights,
-                             predefined_binding_std_coefs, predefined_binding_exp_params, predefined_std_threshold)
+                             predefined_binding_std_coefs, predefined_std_coefs, predefined_binding_exp_params,
+                             predefined_std_threshold)
 
         # Print results
         if self.test_set_exists:
@@ -269,7 +271,7 @@ class ScoredPeptideResult:
     def process_weights(self, fig_path = None, suppress_positives = None, suppress_suboptimals = None,
                         suppress_forbiddens = None, ignore_failed_peptides = True,
                         optimization_method = ("ps", "wps", "suboptimal"), preview_scatter_plot = True,
-                        predefined_weights = None, predefined_binding_std_coefs = None,
+                        predefined_weights = None, predefined_binding_std_coefs = None, predefined_std_coefs = None,
                         predefined_binding_exp_params = None, predefined_std_threshold = None):
         '''
         Parent function to either optimize weights or apply predefined weights (or all ones if not given)
@@ -285,11 +287,15 @@ class ScoredPeptideResult:
             predefined_weights (tuple):            predefined tuple of (binding_score_weights, positive_score_weights,
                                                    suboptimal_score_weights, forbidden_score_weights)
             predefined_binding_std_coefs (tuple):  predefined binding score standardization coefficients
+            predefined_std_coefs (tuple):          predefined classification score standardization coefficients
             predefined_binding_exp_params (tuple): predefined fitted exponential curve params
             predefined_std_threshold (float): predefined weighted points threshold to consider a peptide positive
         Returns:
             None
         '''
+
+        if predefined_std_coefs is not None:
+            self.standardization_coefficients = predefined_std_coefs
 
         if self.actual_truths is not None and predefined_weights is None:
             # Optimize weights for binding score prediction
@@ -363,6 +369,7 @@ class ScoredPeptideResult:
                     self.evaluate_weighted_scores(np.concatenate([self.actual_truths, self.test_actual_truths]))
                 else:
                     self.evaluate_weighted_scores(self.actual_truths)
+
     def apply_predefined_binding(self, positive_scores_2d, actual_truths, signal_values, binding_positive_weights,
                                  binding_standardization_coefs = None, binding_exp_params = None,
                                  ignore_failed_peptides = True):
@@ -399,6 +406,9 @@ class ScoredPeptideResult:
         # Calculate R2
         if self.test_set_exists:
             self.test_binding_scores = weighted_summed_points.copy()
+        else:
+            self.binding_positive_scores = weighted_summed_points.copy()
+
         if ignore_failed_peptides and actual_truths is not None:
             weighted_summed_points = weighted_summed_points[actual_truths]
             signal_values = signal_values[actual_truths]
@@ -411,13 +421,16 @@ class ScoredPeptideResult:
         else:
             binding_exp_params, _ = curve_fit(exp_func, weighted_summed_points, signal_values, p0=[1,1,1,1],
                                               maxfev=1000000)
-            predicted_signal_values = exp_func(weighted_summed_points, *params)
+            predicted_signal_values = exp_func(weighted_summed_points, *binding_exp_params)
             binding_score_r2 = r2_score(signal_values, predicted_signal_values)
 
         if binding_standardization_coefs is not None:
             # Also fit a curve to standardized binding scores and save the params to self (for future use)
             if self.test_set_exists:
-                self.test_standardized_binding_scores = standardized_weighted_points
+                self.test_standardized_binding_scores = standardized_weighted_points.copy()
+            else:
+                self.standardized_binding_scores = standardized_weighted_points.copy()
+
             if ignore_failed_peptides and actual_truths is not None:
                 standardized_weighted_points = standardized_weighted_points[actual_truths]
 
@@ -436,9 +449,7 @@ class ScoredPeptideResult:
             self.test_standardized_binding_r2 = standardized_binding_r2
         else:
             self.binding_positive_weights = binding_positive_weights
-            self.binding_positive_scores = weighted_summed_points
             self.binding_standardization_coefficients = binding_standardization_coefs
-            self.standardized_binding_scores = standardized_weighted_points
             self.binding_score_r2 = binding_score_r2
             self.binding_exp_params = binding_exp_params
             self.standardized_binding_r2 = standardized_binding_r2

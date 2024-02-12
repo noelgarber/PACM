@@ -79,6 +79,12 @@ def main(input_df, general_params = general_params, data_params = data_params, m
             conditional_matrices = ConditionalMatrices(motif_length, train_df, percentiles_dict, aa_charac_dict,
                                                        output_folder, data_params, matrix_params, test_df=test_df)
             if retrain_with_all:
+                trained_weights = (conditional_matrices.binding_positive_weights,
+                                   conditional_matrices.accuracy_positive_weights,
+                                   conditional_matrices.accuracy_suboptimal_weights,
+                                   conditional_matrices.accuracy_forbidden_weights)
+                matrix_params["predefined_weights"] = trained_weights
+                matrix_params["predefined_std_coefs"] = conditional_matrices.classification_standardization_coefficients
                 conditional_matrices = ConditionalMatrices(motif_length, input_df, percentiles_dict, aa_charac_dict,
                                                            output_folder, data_params, matrix_params)
         else:
