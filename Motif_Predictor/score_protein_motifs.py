@@ -19,15 +19,15 @@ except:
 if predictor_params["compare_classical_method"]:
     from Motif_Predictor.classical_method import classical_protein_method
 
-def score_sliced_protein(sequences_2d, conditional_matrices, return_count = 3):
+def score_sliced_protein(sequences_2d, conditional_matrices, score_addition_method, return_count = 3):
     '''
     Vectorized function to score amino acid sequences based on the dictionary of context-aware weighted matrices
 
     Args:
         sequences_2d (np.ndarray):                  unravelled peptide sequences to score
         conditional_matrices (ConditionalMatrices): conditional weighted matrices for scoring peptides
+        score_addition_method (str):                matches matrix_params["optimization_method"]
         return_count (int):                         number of motifs to return
-        std_coefs (tuple)        tuple of coefficients from the model for standardizing score values
 
     Returns:
         output_motifs (list):                       list of motifs as strings
@@ -50,21 +50,21 @@ def score_sliced_protein(sequences_2d, conditional_matrices, return_count = 3):
     forbidden_scores = forbidden_scores_2d.sum(axis=1)
 
     # Calculate total scores
-    if conditional_matrices.best_accuracy_method == "ps":
+    if score_addition_method == "ps":
         total_scores = positive_weighted_scores - suboptimal_weighted_scores
-    elif conditional_matrices.best_accuracy_method == "wps":
+    elif score_addition_method == "wps":
         total_scores = binding_weighted_scores - suboptimal_weighted_scores
-    elif conditional_matrices.best_accuracy_method == "suboptimal":
+    elif score_addition_method == "suboptimal":
         total_scores = suboptimal_weighted_scores * -1
     else:
-        raise ValueError(f"conditional_matrices.best_accuracy_method is {conditional_matrices.best_accuracy_method}")
+        raise ValueError(f"score_addition_method is {score_addition_method}")
 
     # Standardization of the scores
     binding_std_coefs = conditional_matrices.binding_standardization_coefficients
     if binding_std_coefs is not None:
         binding_weighted_scores = (binding_weighted_scores - binding_std_coefs[0]) / binding_std_coefs[1]
 
-    std_coefs = conditional_matrices.accuracy_standardization_coefficients
+    std_coefs = conditional_matrices.classification_standardization_coefficients
     if std_coefs is not None:
         total_scores = (total_scores - std_coefs[0]) / std_coefs[1]
         positive_weighted_scores = (positive_weighted_scores - std_coefs[2]) / std_coefs[3]
@@ -225,7 +225,9 @@ def scan_protein_seq(protein_seq, conditional_matrices, predictor_params = predi
         # Calculate motif scores
         if len(cleaned_sliced_2d) > 0:
             # Score the protein sequence chunks
-            output_lists = score_sliced_protein(cleaned_sliced_2d, conditional_matrices, return_count)
+            score_addition_method = predictor_params["score_addition_method"]
+            output_lists = score_sliced_protein(cleaned_sliced_2d, conditional_matrices, score_addition_method,
+                                                return_count)
             motifs, total_scores = output_lists[0:2]
             binding_scores, positive_scores, suboptimal_scores, forbidden_scores, final_calls = output_lists[2:]
 
@@ -306,10 +308,6 @@ def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
         final_call_col_names.append(suffix_number+"_final_call")
 
     # Assemble a partial function for scoring individual proteins
-    weights_path = predictor_params["pickled_weights_path"]
-    with open(weights_path, "rb") as f:
-        weights_tuple = pickle.load(f)
-
     scan_seq_partial = partial(scan_protein_seq, conditional_matrices = conditional_matrices,
                                predictor_params = predictor_params)
 

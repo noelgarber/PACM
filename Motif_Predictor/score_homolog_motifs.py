@@ -19,14 +19,15 @@ except:
 if predictor_params["compare_classical_method"]:
     from Motif_Predictor.classical_method import classical_motif_method
 
-def score_motifs(seqs_2d, conditional_matrices, filters = None, selenocysteine_substitute = "C", gap_substitute = "G"):
+def score_motifs(seqs_2d, conditional_matrices, score_addition_method, filters = None,
+                 selenocysteine_substitute = "C", gap_substitute = "G"):
     '''
     Vectorized function to score homolog motif seqs based on the dictionary of context-aware weighted matrices
 
     Args:
         seqs_2d (np.ndarray):                       motif sequences to score
         conditional_matrices (ConditionalMatrices): conditional weighted matrices for scoring peptides
-        std_coefs (tuple)                           tuple of coefficients from the model for standardizing score values
+        score_addition_method (str):                matches matrix_params["optimization_method"]
         filters (dict):                             dict of position index --> permitted residues
         selenocysteine_substitute (str):            letter to substitute for selenocysteine (U) when U is not in model
         gap_substitute (str):                       the letter to treat gaps ("X") as; default is no side chain, i.e. G
@@ -58,21 +59,21 @@ def score_motifs(seqs_2d, conditional_matrices, filters = None, selenocysteine_s
     del forbidden_scores_2d
 
     # Calculate total scores
-    if conditional_matrices.best_accuracy_method == "ps":
+    if score_addition_method == "ps":
         total_scores = positive_weighted_scores - suboptimal_weighted_scores
-    elif conditional_matrices.best_accuracy_method == "wps":
+    elif score_addition_method == "wps":
         total_scores = binding_weighted_scores - suboptimal_weighted_scores
-    elif conditional_matrices.best_accuracy_method == "suboptimal":
+    elif score_addition_method == "suboptimal":
         total_scores = suboptimal_weighted_scores * -1
     else:
-        raise ValueError(f"conditional_matrices.best_accuracy_method is {conditional_matrices.best_accuracy_method}")
+        raise ValueError(f"conditional_matrices.best_accuracy_method is {score_addition_method}")
 
     # Standardization of the scores
     binding_std_coefs = conditional_matrices.binding_standardization_coefficients
     if binding_std_coefs is not None:
         binding_weighted_scores = (binding_weighted_scores - binding_std_coefs[0]) / binding_std_coefs[1]
 
-    std_coefs = conditional_matrices.accuracy_standardization_coefficients
+    std_coefs = conditional_matrices.classification_standardization_coefficients
     if std_coefs is not None:
         total_scores = (total_scores - std_coefs[0]) / std_coefs[1]
         positive_weighted_scores = (positive_weighted_scores - std_coefs[2]) / std_coefs[3]
@@ -102,14 +103,14 @@ def seqs_chunk_generator(seqs_2d, chunk_size):
     for i in range(0, len(seqs_2d), chunk_size):
         yield seqs_2d[i:i+chunk_size]
 
-def score_motifs_parallel(seqs_2d, conditional_matrices, chunk_size = 10000, filters = None,
+def score_motifs_parallel(seqs_2d, conditional_matrices, score_addition_method, chunk_size = 10000, filters = None,
                           selenocysteine_substitute = "C", gap_substitute = "G"):
     '''
     Parallelized function for scoring sequences using a ConditionalMatrices object
 
         seqs_2d (np.ndarray):                       motif sequences to score
         conditional_matrices (ConditionalMatrices): conditional weighted matrices for scoring peptides
-        standardization_coefficients (tuple)        tuple of coefficients from the model for standardizing score values
+        score_addition_method (str):                matches matrix_params["optimization_method"]
         chunk_size (int):                           number of sequences per parallel processing chunk
         filters (dict):                             dict of position index --> permitted residues
         selenocysteine_substitute (str):            letter to substitute for selenocysteine (U) when U is not in model
@@ -119,7 +120,8 @@ def score_motifs_parallel(seqs_2d, conditional_matrices, chunk_size = 10000, fil
         total_scores (list):                        list of matching scores for each motif
     '''
 
-    partial_function = partial(score_motifs, conditional_matrices = conditional_matrices, filters = filters,
+    partial_function = partial(score_motifs, conditional_matrices = conditional_matrices,
+                               score_addition_method = score_addition_method, filters = filters,
                                selenocysteine_substitute = selenocysteine_substitute, gap_substitute = gap_substitute)
 
     chunk_motifs = []
@@ -208,8 +210,9 @@ def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, 
     selenocysteine_substitute = predictor_params["selenocysteine_substitute"]
     gap_substitute = predictor_params["gap_substitute"]
     chunk_size = predictor_params["homolog_score_chunk_size"]
+    score_addition_method = predictor_params["score_addition_method"]
 
-    results = score_motifs_parallel(motif_seqs_2d, conditional_matrices, chunk_size,
+    results = score_motifs_parallel(motif_seqs_2d, conditional_matrices, chunk_size, score_addition_method,
                                     filters, selenocysteine_substitute, gap_substitute)
 
     print(f"\t\tParsing results into motif-score dicts...") if verbose else None
