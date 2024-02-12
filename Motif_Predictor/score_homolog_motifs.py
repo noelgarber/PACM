@@ -212,7 +212,7 @@ def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, 
     chunk_size = predictor_params["homolog_score_chunk_size"]
     score_addition_method = predictor_params["score_addition_method"]
 
-    results = score_motifs_parallel(motif_seqs_2d, conditional_matrices, chunk_size, score_addition_method,
+    results = score_motifs_parallel(motif_seqs_2d, conditional_matrices, score_addition_method, chunk_size,
                                     filters, selenocysteine_substitute, gap_substitute)
 
     print(f"\t\tParsing results into motif-score dicts...") if verbose else None
