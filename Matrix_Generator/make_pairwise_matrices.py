@@ -76,9 +76,11 @@ def main(input_df, general_params = general_params, data_params = data_params, m
             train_df = train_df.reset_index(drop=True)
             test_df = test_df.reset_index(drop=True)
 
-            conditional_matrices = ConditionalMatrices(motif_length, train_df, percentiles_dict, aa_charac_dict,
-                                                       output_folder, data_params, matrix_params, test_df=test_df)
             if retrain_with_all:
+                train_folder = os.path.join(output_folder, "train_test_split")
+                conditional_matrices = ConditionalMatrices(motif_length, train_df, percentiles_dict, aa_charac_dict,
+                                                           train_folder, data_params, matrix_params, test_df=test_df)
+
                 trained_weights = (conditional_matrices.binding_positive_weights,
                                    conditional_matrices.accuracy_positive_weights,
                                    conditional_matrices.accuracy_suboptimal_weights,
@@ -87,6 +89,9 @@ def main(input_df, general_params = general_params, data_params = data_params, m
                 matrix_params["predefined_std_coefs"] = conditional_matrices.classification_standardization_coefficients
                 conditional_matrices = ConditionalMatrices(motif_length, input_df, percentiles_dict, aa_charac_dict,
                                                            output_folder, data_params, matrix_params)
+            else:
+                conditional_matrices = ConditionalMatrices(motif_length, train_df, percentiles_dict, aa_charac_dict,
+                                                           output_folder, data_params, matrix_params, test_df=test_df)
         else:
             conditional_matrices = ConditionalMatrices(motif_length, input_df, percentiles_dict, aa_charac_dict,
                                                        output_folder, data_params, matrix_params)
