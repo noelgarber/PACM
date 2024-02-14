@@ -129,10 +129,14 @@ def main(predictor_params = predictor_params):
             os.remove(cache_path)
         print(f"Done!")
 
+    # Combine dataframes
+    print(f"Combining dataframes for homolog species into one simplified dataframe...")
     combined_df = fuse_dfs(output_paths)
     parent_path = output_paths[0].rsplit("/",1)[0]
     combined_path = os.path.join(parent_path, "proteome_datasets_combined_scored.csv")
     combined_df.to_csv(combined_path)
+
+    print(f"Process completed!")
 
 if __name__ == "__main__":
     main()
