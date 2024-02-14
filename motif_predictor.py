@@ -3,12 +3,12 @@
 import numpy as np
 import pandas as pd
 import os
-import psutil
 from Motif_Predictor.score_protein_motifs import score_proteins
 from Motif_Predictor.specificity_score_assigner import apply_specificity_scores
 from Motif_Predictor.check_conservation import evaluate_homologs
 from Motif_Predictor.score_homolog_motifs import score_homolog_motifs
 from Motif_Predictor.motif_topology_predictor import predict_topology
+from Motif_Predictor.combine_dfs import fuse_dfs
 try:
     from Motif_Predictor.predictor_config_local import predictor_params
 except:
@@ -46,6 +46,7 @@ def main(predictor_params = predictor_params):
     df_chunk_counts = predictor_params["df_chunks"]
     seq_col = predictor_params["seq_col"]
 
+    output_paths = []
     for path, chunk_count in zip(protein_seqs_paths, df_chunk_counts):
         # Get row count for the whole spreadsheet
         with open(path, "r", encoding="utf-8") as file:
@@ -119,6 +120,7 @@ def main(predictor_params = predictor_params):
         output_path = path[:-4] + "_scored.csv"
         protein_seqs_df.to_csv(output_path)
         print(f"Saved scored motifs to {output_path}")
+        output_paths.append(output_path)
         del protein_seqs_df
 
         # Delete temporary files
@@ -126,6 +128,11 @@ def main(predictor_params = predictor_params):
         for cache_path in cache_paths:
             os.remove(cache_path)
         print(f"Done!")
+
+    combined_df = fuse_dfs(output_paths)
+    parent_path = output_paths[0].rsplit("/",1)[0]
+    combined_path = os.path.join(parent_path, "proteome_datasets_combined_scored.csv")
+    combined_df.to_csv(combined_path)
 
 if __name__ == "__main__":
     main()
