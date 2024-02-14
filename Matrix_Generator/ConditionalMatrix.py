@@ -907,14 +907,14 @@ class ConditionalMatrices:
         # Apply weights to 3D representations of matrices for rapid scoring
         self.stacked_binding_weighted = self.stacked_positive_matrices * binding_weights
         self.stacked_positive_weighted = self.stacked_positive_matrices * positive_weights
-        self.stacked_suboptimal_weighted = self.stacked_suboptimal_matrices * suboptimal_weights
-        self.stacked_forbidden_weighted = self.stacked_forbidden_matrices * forbidden_weights
+        self.stacked_suboptimal_weighted = self.stacked_suboptimal_matrices * np.abs(suboptimal_weights)
+        self.stacked_forbidden_weighted = self.stacked_forbidden_matrices * np.abs(forbidden_weights)
 
         # Assign weights to self
         self.binding_positive_weights = binding_weights
         self.accuracy_positive_weights = positive_weights
-        self.accuracy_suboptimal_weights = suboptimal_weights
-        self.accuracy_forbidden_weights = forbidden_weights
+        self.accuracy_suboptimal_weights = np.abs(suboptimal_weights)
+        self.accuracy_forbidden_weights = np.abs(forbidden_weights)
 
         # Optionally also apply weights to the other formats
         if not only_3d:
