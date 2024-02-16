@@ -31,7 +31,8 @@ Old*
 *uniprot_sprot*
 *.xsd
 *temp_df_dump*
-*.xlsx
+*.xlsx*
+*combined_datasets*.csv
 
 #Ignore PyCharm idea files
 *.idea
