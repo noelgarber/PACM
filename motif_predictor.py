@@ -8,7 +8,7 @@ from Motif_Predictor.specificity_score_assigner import apply_specificity_scores
 from Motif_Predictor.check_conservation import evaluate_homologs
 from Motif_Predictor.score_homolog_motifs import score_homolog_motifs
 from Motif_Predictor.motif_topology_predictor import predict_topology
-from Motif_Predictor.combine_dfs import fuse_dfs
+from Motif_Predictor.combine_dfs import fuse_dfs, make_gene_df
 try:
     from Motif_Predictor.predictor_config_local import predictor_params
 except:
@@ -135,6 +135,11 @@ def main(predictor_params = predictor_params):
     parent_path = output_paths[0].rsplit("/",1)[0]
     combined_path = os.path.join(parent_path, "proteome_datasets_combined_scored.csv")
     combined_df.to_csv(combined_path)
+
+    print(f"Generating dataframe with only one row per gene ID...")
+    unique_df = make_gene_df(combined_df)
+    unique_path = os.path.join(parent_path, "proteome_datasets_combined_scored_by_gene.csv")
+    unique_df.to_csv(unique_path)
 
     print(f"Process completed!")
 

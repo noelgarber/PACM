@@ -82,18 +82,94 @@ def make_unique_df(csv_path):
                 topology_type_dict[ensembl_peptide_id] = base_df.at[j, topology_type_col]
                 topology_desc_dict[ensembl_peptide_id] = base_df.at[j, topology_desc_col]
 
-        # Assign topology info and source uniprot accessions to dataframe
+        # Assign topology info
         topology_types = [topology_type_dict.get(unique_peptide_id) for unique_peptide_id in unique_ensembl_peptides]
         topology_descs = [topology_desc_dict.get(unique_peptide_id) for unique_peptide_id in unique_ensembl_peptides]
         source_uniprot_ids = [uniprot_dict.get(unique_peptide_id) for unique_peptide_id in unique_ensembl_peptides]
         source_trembl_ids = [trembl_dict.get(unique_peptide_id) for unique_peptide_id in unique_ensembl_peptides]
 
+        # Determine whether topologically accessible to cytoplasm
         unique_df[topology_type_col] = topology_types
         unique_df[topology_desc_col] = topology_descs
+
+        motif_exists = np.logical_and(np.logical_not(unique_df[motif_col].isna()),
+                                      np.logical_not(unique_df[motif_col].eq("")))
+        soluble = np.logical_and(np.logical_not(unique_df[topology_type_col].eq("")),
+                                 np.logical_and(np.logical_not(unique_df[topology_type_col].isna()), motif_exists))
+        topo_accessible = np.logical_and(unique_df[topology_type_col].eq("topological domain"),
+                                         unique_df[topology_desc_col].eq("Cytoplasmic"))
+        accessible = np.logical_or(soluble, topo_accessible)
+        accessible_col = topology_type_col.split("_type")[0] + "_accessible"
+        unique_df[accessible_col] = accessible
+
+        # Assign source uniprot accessions to dataframe
         unique_df[motif_col + "_topology_source_uniprot_id"] = source_uniprot_ids
         unique_df[motif_col + "_topology_source_trembl_id"] = source_trembl_ids
 
     return unique_df, motif_cols, motif_col_groups
+
+def make_gene_df(input_df):
+    '''
+    Generates dataframe containing only one gene id per row
+
+    Args:
+        input_df (pd.DataFrame):  input dataframe
+
+    Returns:
+        unique_df (pd.DataFrame): dataframe with only one row for each gene ID
+    '''
+
+    main_df = input_df.copy()
+
+    unique_genes = pd.unique(main_df["ensembl_gene_id"])
+
+    unique_df = pd.DataFrame(index=np.arange(len(unique_genes)), columns = main_df.columns)
+    unique_df["ensembl_gene_id"] = unique_genes
+    gene_name_row_indices = pd.Index(main_df["ensembl_gene_id"].to_list()).get_indexer_for(unique_genes)
+    unique_df.loc[:, "external_gene_name"] = main_df.loc[gene_name_row_indices, "external_gene_name"]
+
+    novel_cols = [col for col in main_df.columns if "Novel" in col]
+    if len(novel_cols) > 0:
+        # Sort for preferred proteins with better novel scores
+        main_set1 = ["ensembl_transcript_id", "ensembl_peptide_id"] + novel_cols
+        unique_set1 = ["ensembl_transcript_id_best_novel", "ensembl_peptide_id_best_novel"] + novel_cols
+
+        main_df.sort_values("Novel_1st_binding_motif_score", ascending=False, inplace=True)
+        main_df.sort_values("Novel_1st_binding_motif_score", ascending=False, inplace=True)
+        main_df.sort_values("Novel_1st_motif_topology_accessible", ascending=False, inplace=True)
+        main_df.reset_index(drop=True)
+
+        novel_ref_row_indices = pd.Index(main_df["ensembl_gene_id"].to_list()).get_indexer_for(unique_genes)
+        unique_df.loc[:, unique_set1] = main_df.loc[novel_ref_row_indices, main_set1]
+
+        # Sort for preferred proteins with better classical scores
+        classical_cols = [col for col in main_df.columns if "Classical" in col]
+        main_set2 = ["ensembl_transcript_id", "ensembl_peptide_id"] + classical_cols
+        unique_set2 = ["ensembl_transcript_id_best_classical", "ensembl_peptide_id_best_classical"] + classical_cols
+
+        main_df.sort_values("Classical_1st_total_motif_score", ascending=True, inplace=True)
+        main_df.sort_values("Classical_1st_motif_topology_accessible", ascending=False, inplace=True)
+        main_df.reset_index(drop=True)
+
+        classical_ref_row_indices = pd.Index(main_df["ensembl_gene_id"].to_list()).get_indexer_for(unique_genes)
+        unique_df.loc[:, unique_set2] = main_df.loc[classical_ref_row_indices, main_set2]
+
+        # Drop blank cols
+        unique_df.drop(["ensembl_transcript_id", "ensembl_peptide_id"], axis=1, inplace=True)
+        
+    else:
+        # Sort for preferred proteins with better novel scores
+        assign_cols = [col for col in unique_df.columns if col != "ensembl_gene_id"]
+
+        main_df.sort_values("1st_binding_motif_score", ascending=False, inplace=True)
+        main_df.sort_values("1st_binding_motif_score", ascending=False, inplace=True)
+        main_df.sort_values("1st_motif_topology_accessible", ascending=False, inplace=True)
+        main_df.reset_index(drop=True)
+
+        ref_row_indices = pd.Index(main_df["ensembl_gene_id"].to_list()).get_indexer_for(unique_genes)
+        unique_df.loc[:, assign_cols] = main_df.loc[ref_row_indices, assign_cols]
+    
+    return unique_df
 
 def fuse_dfs(csv_paths):
     '''
@@ -168,8 +244,14 @@ if __name__ == "__main__":
         else:
             break
 
+    print("Fusing dataframes together...")
     combined_df = fuse_dfs(csv_paths)
 
     parent_folder = csv_paths[0].rsplit("/",1)[0]
     save_path = os.path.join(parent_folder, "combined_datasets.csv")
     combined_df.to_csv(save_path)
+
+    print("Making version with only one row per gene (best protein used)...")
+    gene_df = make_gene_df(combined_df)
+    gene_save_path = os.path.join(parent_folder, "combined_datasets_by_gene.csv")
+    gene_df.to_csv(gene_save_path)
