@@ -22,18 +22,27 @@ def classical_motif_method(motif_seqs, classical_matrix = classical_matrix):
     Example of a parallel classical scoring method to employ alongside the new one; replace with your method as needed
 
     Args:
-        motif_seqs (list): motif sequences of equal length
+        motif_seqs (list|np.ndarray): motif sequences of equal length; if given as a 2D array, each row is a motif
 
     Returns:
         total_points_motifs (np.ndarray): array of corresponding classical motif scores for the input sequences
     '''
 
-    correct_lengths = np.array([len(seq) == motif_length for seq in motif_seqs])
-    valid_indices = np.where(correct_lengths)[0]
-    motif_seqs = np.array(motif_seqs)
-    valid_motif_seqs = motif_seqs[valid_indices]
+    if not isinstance(motif_seqs, np.ndarray):
+        motif_seqs = np.array(motif_seqs)
 
-    valid_motif_seqs_2d = np.array([list(seq) for seq in valid_motif_seqs])
+    if motif_seqs.ndim == 1:
+        correct_lengths = np.array([len(seq) == motif_length for seq in motif_seqs])
+        valid_indices = np.where(correct_lengths)[0]
+        valid_motif_seqs = motif_seqs[valid_indices]
+        valid_motif_seqs_2d = np.array([list(seq) for seq in valid_motif_seqs])
+    elif motif_seqs.ndim == 2:
+        valid_motif_seqs_2d = motif_seqs
+        if motif_seqs.shape[1] != motif_length:
+            raise ValueError(f"motif_seqs axis=1 shape is {motif_seqs.shape[1]}, but should be {motif_length}")
+        valid_indices = np.arange(len(valid_motif_seqs_2d))
+    else:
+        raise Exception(f"motif_seqs ndim={motif_seqs.ndim}, but ndim must be either 1 or 2")
 
     tract_seqs = valid_motif_seqs_2d[:,0:6]
     core_seqs = valid_motif_seqs_2d[:,6:13]
@@ -72,8 +81,11 @@ def classical_motif_method(motif_seqs, classical_matrix = classical_matrix):
     # Get the total points for all the possible motifs
     valid_total_points = tract_points + core_points_sums
 
-    total_points_motifs = np.full(len(motif_seqs), fill_value=np.nan, dtype=float)
-    total_points_motifs[valid_indices] = valid_total_points
+    if motif_seqs.ndim == 1:
+        total_points_motifs = np.full(len(motif_seqs), fill_value=np.nan, dtype=float)
+        total_points_motifs[valid_indices] = valid_total_points
+    else:
+        total_points_motifs = valid_total_points
 
     return total_points_motifs
 
