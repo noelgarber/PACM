@@ -142,8 +142,9 @@ def predict_topology(data_df, motif_cols, predictor_params = predictor_params,
             pool.join()
 
             pd.options.mode.chained_assignment = None  # suppress SettingWithCopyWarning, which has no effect
-            data_df.loc[:, motif_col + "_topology_type"] = domain_types_vals
-            data_df.loc[:, motif_col + "_topology_description"] = domain_descriptions_vals
-            pd.options.mode.chained_assignment = "warn" #restore to default
+            insert_col_idx = data_df.columns.get_loc(motif_col) + 1
+            data_df.insert(insert_col_idx, motif_col + "_topology_type", domain_types_vals)
+            data_df.insert(insert_col_idx + 1, motif_col + "_topology_description", domain_descriptions_vals)
+            pd.options.mode.chained_assignment = "warn" # restore to default
 
     return data_df
