@@ -20,7 +20,7 @@ if predictor_params["compare_classical_method"]:
     from Motif_Predictor.classical_method import classical_motif_method
 
 def score_motifs(seqs_2d, conditional_matrices, score_addition_method, filters = None,
-                 selenocysteine_substitute = "C", gap_substitute = "G"):
+                 selenocysteine_substitute = "C", gap_substitute = "G", classical_func = None):
     '''
     Vectorized function to score homolog motif seqs based on the dictionary of context-aware weighted matrices
 
@@ -31,6 +31,7 @@ def score_motifs(seqs_2d, conditional_matrices, score_addition_method, filters =
         filters (dict):                             dict of position index --> permitted residues
         selenocysteine_substitute (str):            letter to substitute for selenocysteine (U) when U is not in model
         gap_substitute (str):                       the letter to treat gaps ("X") as; default is no side chain, i.e. G
+        classical_func (function|partial):          optional function for comparing an existing classical method
 
     Returns:
         results (tuple):   tuple of (total_scores, positive_scores, suboptimal_scores, forbidden_scores, final_calls)
@@ -92,9 +93,15 @@ def score_motifs(seqs_2d, conditional_matrices, score_addition_method, filters =
                 seqs_pass = np.logical_or(seqs_pass, np.char.equal(seqs_2d[:,i], allowed_aa))
             total_scores[~seqs_pass] = 0
 
+    # Compare optional classical method function
+    if classical_func is not None:
+        classical_points_vals = classical_func(seqs_2d)
+    else:
+        classical_points_vals = None
+
     motifs = ["".join(seqs_2d[i]) for i in np.arange(len(seqs_2d))]
     results = (motifs, total_scores, binding_weighted_scores, positive_weighted_scores,
-               suboptimal_weighted_scores, forbidden_scores, predicted_calls)
+               suboptimal_weighted_scores, forbidden_scores, predicted_calls, classical_points_vals)
 
     return results
 
@@ -104,7 +111,7 @@ def seqs_chunk_generator(seqs_2d, chunk_size):
         yield seqs_2d[i:i+chunk_size]
 
 def score_motifs_parallel(seqs_2d, conditional_matrices, score_addition_method, chunk_size = 10000, filters = None,
-                          selenocysteine_substitute = "C", gap_substitute = "G"):
+                          selenocysteine_substitute = "C", gap_substitute = "G", classical_func = None):
     '''
     Parallelized function for scoring sequences using a ConditionalMatrices object
 
@@ -115,6 +122,7 @@ def score_motifs_parallel(seqs_2d, conditional_matrices, score_addition_method, 
         filters (dict):                             dict of position index --> permitted residues
         selenocysteine_substitute (str):            letter to substitute for selenocysteine (U) when U is not in model
         gap_substitute (str):                       the letter to treat gaps ("X") as; default is no side chain, i.e. G
+        classical_func (function|partial):          optional function for comparing an existing classical method
 
     Returns:
         total_scores (list):                        list of matching scores for each motif
@@ -122,7 +130,8 @@ def score_motifs_parallel(seqs_2d, conditional_matrices, score_addition_method, 
 
     partial_function = partial(score_motifs, conditional_matrices = conditional_matrices,
                                score_addition_method = score_addition_method, filters = filters,
-                               selenocysteine_substitute = selenocysteine_substitute, gap_substitute = gap_substitute)
+                               selenocysteine_substitute = selenocysteine_substitute, gap_substitute = gap_substitute,
+                               classical_func = classical_func)
 
     chunk_motifs = []
     chunk_total_scores = []
@@ -131,6 +140,7 @@ def score_motifs_parallel(seqs_2d, conditional_matrices, score_addition_method, 
     chunk_suboptimal_scores = []
     chunk_forbidden_scores = []
     chunk_final_calls = []
+    chunk_classical_scores = []
 
     description = f"\tScoring {len(seqs_2d)} unique homologous motifs..."
     with trange(int(np.ceil(len(seqs_2d) / chunk_size) + 1), desc=description) as pbar:
@@ -144,6 +154,8 @@ def score_motifs_parallel(seqs_2d, conditional_matrices, score_addition_method, 
             chunk_suboptimal_scores.append(results[4])
             chunk_forbidden_scores.append(results[5])
             chunk_final_calls.append(results[6])
+            if results[7] is not None:
+                chunk_classical_scores.append(results[7])
 
             pbar.update()
 
@@ -157,11 +169,13 @@ def score_motifs_parallel(seqs_2d, conditional_matrices, score_addition_method, 
         chunk_suboptimal_scores = np.concatenate(chunk_suboptimal_scores)
         chunk_forbidden_scores = np.concatenate(chunk_forbidden_scores)
         chunk_final_calls = np.concatenate(chunk_final_calls)
+        if len(chunk_classical_scores) > 0:
+            chunk_classical_scores = np.concatenate(chunk_classical_scores)
 
         pbar.update()
 
-    output = (chunk_motifs, chunk_total_scores, chunk_binding_scores,
-              chunk_positive_scores, chunk_suboptimal_scores, chunk_forbidden_scores, chunk_final_calls)
+    output = (chunk_motifs, chunk_total_scores, chunk_binding_scores, chunk_positive_scores,
+              chunk_suboptimal_scores, chunk_forbidden_scores, chunk_final_calls, chunk_classical_scores)
 
     return output
 
@@ -255,30 +269,40 @@ def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, 
     gap_substitute = predictor_params["gap_substitute"]
     chunk_size = predictor_params["homolog_score_chunk_size"]
     score_addition_method = predictor_params["score_addition_method"]
+    compare_classical_method = predictor_params["compare_classical_method"]
+    classical_func = classical_motif_method if compare_classical_method else None
 
     results = score_motifs_parallel(motif_seqs_2d, conditional_matrices, score_addition_method, chunk_size,
-                                    filters, selenocysteine_substitute, gap_substitute)
+                                    filters, selenocysteine_substitute, gap_substitute, classical_func)
 
     print(f"\t\tParsing results into motif-score dicts...") if verbose else None
     motifs, total_scores, binding_scores = results[0:3]
-    positive_scores, suboptimal_scores, forbidden_scores, final_calls = results[3:]
-    zipped_results = zip(motifs, total_scores, binding_scores,
-                         positive_scores, suboptimal_scores, forbidden_scores, final_calls)
+    positive_scores, suboptimal_scores, forbidden_scores, final_calls = results[3:7]
+    classical_scores = results[7]
+    if len(classical_scores) == len(total_scores):
+        zipped_results = zip(motifs, total_scores, binding_scores, positive_scores,
+                             suboptimal_scores, forbidden_scores, final_calls, classical_scores)
+    else:
+        zipped_results = zip(motifs, total_scores, binding_scores, positive_scores, suboptimal_scores, forbidden_scores,
+                             final_calls, np.full(shape=len(total_scores), fill_value=np.nan))
+
     total_dict = {}
     binding_dict = {}
     positive_dict = {}
     suboptimal_dict = {}
     forbidden_dict = {}
     calls_dict = {}
+    classical_dict = {}
     combined_dict = {}
-    for motif, total_score, binding, positive, suboptimal, forbidden, call in zipped_results:
+    for motif, total_score, binding, positive, suboptimal, forbidden, call, classical in zipped_results:
         total_dict[motif] = total_score
         binding_dict[motif] = binding
         positive_dict[motif] = positive
         suboptimal_dict[motif] = suboptimal
         forbidden_dict[motif] = forbidden
         calls_dict[motif] = call
-        combined_dict[motif] = (total_score, positive, suboptimal, forbidden, call)
+        classical_dict[motif] = classical
+        combined_dict[motif] = (total_score, positive, suboptimal, forbidden, call, classical)
 
     # Iterate over homolog motif col groups, organized by host motif col
     row_indices = np.arange(len(data_df))
@@ -287,7 +311,7 @@ def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, 
     drop_cols = []
     selection_mode = predictor_params["homolog_selection_mode"]
     description = "\tAssigning best homologous motifs to dataframe and removing others..."
-    with trange(int(19*len(homolog_motif_col_groups)), desc=description) as pbar:
+    with trange(int(21*len(homolog_motif_col_groups)), desc=description) as pbar:
         # Get the grids of scores from the dataframe
         for motif_seq_col, col_groups in homolog_motif_col_groups.items():
             homolog_motif_cols = [col_group[0] for col_group in col_groups]
@@ -307,6 +331,7 @@ def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, 
                     executor.submit(homolog_motifs_grid.applymap, lambda x: suboptimal_dict.get(x)),
                     executor.submit(homolog_motifs_grid.applymap, lambda x: forbidden_dict.get(x)),
                     executor.submit(homolog_motifs_grid.applymap, lambda x: calls_dict.get(x)),
+                    executor.submit(homolog_motifs_grid.applymap, lambda x: classical_dict.get(x)),
                 ]
 
                 results = []
@@ -320,6 +345,7 @@ def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, 
                 suboptimal_scores_grid = results[3].to_numpy(dtype=float)
                 forbidden_scores_grid = results[4].to_numpy(dtype=float)
                 final_calls_grid = results[5].to_numpy(dtype=bool)
+                classical_scores_grid = results[6].to_numpy(dtype=float)
                 del results
 
                 pbar.update()
@@ -404,6 +430,12 @@ def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, 
             data_df[col_prefix + "_best_model_call"] = best_calls
             final_call_cols.append(col_prefix + "_best_model_call")
             del final_calls_grid, best_calls
+            pbar.update()
+
+            if len(classical_scores) == len(total_scores):
+                best_classical_scores = classical_scores_grid[row_indices, best_col_indices]
+                data_df[col_prefix + "_classical_score"] = best_classical_scores
+                del classical_scores_grid
             pbar.update()
 
     drop_cols = list(set(drop_cols))
