@@ -168,6 +168,50 @@ def score_motifs_parallel(seqs_2d, conditional_matrices, score_addition_method, 
 def process_grid(grid, lookup_dict, dtype):
     return grid.applymap(lambda x: lookup_dict.get(x)).to_numpy(dtype=dtype)
 
+def get_valid_mask(homolog_motifs_grid, filters):
+    # Helper function to get homolog grid validity mask based on filters dict
+
+    if isinstance(homolog_motifs_grid, pd.Series) or isinstance(homolog_motifs_grid, pd.DataFrame):
+        homolog_motifs_grid = homolog_motifs_grid.to_numpy(dtype="U")
+
+    motif_len = None
+    for motif in homolog_motifs_grid.flatten():
+        if motif != "":
+            motif_len = len(motif)
+            break
+
+    homolog_motifs_grid[homolog_motifs_grid == ""] = "".join(np.repeat("Z",motif_len))
+
+    grid_3d_shape = [homolog_motifs_grid.shape[0], homolog_motifs_grid.shape[1], motif_len]
+    homolog_grid_3d = np.frombuffer(homolog_motifs_grid.astype(np.unicode_).tobytes(), dtype=np.uint32).reshape(grid_3d_shape)
+    homolog_grid_3d = np.vectorize(chr)(homolog_grid_3d).astype("<U1")
+
+    homolog_valid_grid = np.full(shape=homolog_motifs_grid.shape, fill_value=True, dtype=bool)
+    for idx, allowed_residues in filters.items():
+        grid_at_idx = homolog_grid_3d[:, :, idx]
+        grid_at_idx_allowed = np.isin(grid_at_idx, allowed_residues)
+        grid_at_idx_disallowed = ~grid_at_idx_allowed
+        homolog_valid_grid[grid_at_idx_disallowed] = False
+
+    return homolog_valid_grid
+
+def get_best_cols(selection_grid, homolog_valid_grid):
+    # Helper function to get best column indices for homolog motifs from a grid of reference values
+
+    masked_selection_grid = selection_grid.copy()
+    masked_selection_grid[~homolog_valid_grid] = -1
+    masked_best_selection_vals = np.nanmax(masked_selection_grid, axis=1)
+    masked_best_col_indices = np.nanargmax(masked_selection_grid, axis=1)
+    if np.any(masked_best_selection_vals == -1):
+        unmasked_best_col_indices = np.nanargmax(selection_grid, axis=1)
+        best_col_indices = masked_best_col_indices.copy()
+        masked_best_invalid = np.equal(masked_best_selection_vals, -1)
+        best_col_indices[masked_best_invalid] = unmasked_best_col_indices[masked_best_invalid]
+    else:
+        best_col_indices = masked_best_col_indices
+
+    return best_col_indices
+
 def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, predictor_params):
     '''
     Main function for scoring homologous motifs
@@ -281,14 +325,16 @@ def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, 
                 pbar.update()
 
             # Find best col indices for best homologous motifs
+            homolog_valid_grid = get_valid_mask(homolog_motifs_grid, filters)
+
             if selection_mode == "similarity":
                 similarities_grid = data_df[similarity_cols].to_numpy(dtype=float)
-                best_col_indices = np.nanargmax(similarities_grid, axis=1)
+                best_col_indices = get_best_cols(similarities_grid, homolog_valid_grid)
             elif selection_mode == "identity":
                 identities_grid = data_df[identity_cols].to_numpy(dtype=float)
-                best_col_indices = np.nanargmax(identities_grid, axis=1)
+                best_col_indices = get_best_cols(identities_grid, homolog_valid_grid)
             elif selection_mode == "score":
-                best_col_indices = np.nanargmax(total_scores_grid, axis=1)
+                best_col_indices = get_best_cols(total_scores_grid, homolog_valid_grid)
             else:
                 message = f"mode was set to {selection_mode}, but must be identity, similarity, or score"
                 raise ValueError(message)

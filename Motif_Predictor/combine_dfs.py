@@ -143,9 +143,12 @@ def fuse_dfs(csv_paths, verbose = True):
         for motif_prefix in motif_prefixes:
             motif_homolog_cols = [col for col in all_homolog_cols if motif_prefix in col]
 
-            # Sort by similarity
+            # Sort by similarity and preferentially pick passing scores if they exist
             similarity_col = [col for col in motif_homolog_cols if "similarity" in col][0]
             homolog_df.sort_values(similarity_col, ascending=False, inplace=True)
+            if "Novel" in motif_prefix or "Classical" not in motif_prefix:
+                model_call_col = [col for col in motif_homolog_cols if "model_call" in col][0]
+                homolog_df.sort_values(model_call_col, ascending=False, inplace=True)
             homolog_df.reset_index(drop=True, inplace=True)
 
             # Pick most similar match for each protein
