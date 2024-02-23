@@ -89,17 +89,18 @@ def apply_specificity_scores(protein_seqs_df, motif_cols, predictor_params=predi
 
     # Parallel processing of specificity score calculation
     chunk_size = 1000
-    chunk_count = int(np.ceil(len(protein_seqs_df) / chunk_size))
+    valids = np.logical_and(protein_seqs_df[motif_col].notna().to_numpy(), protein_seqs_df[motif_col].ne("").to_numpy())
+    valid_count = valids.sum()
 
     if "homolog" in motif_cols[0]:
         description = "\tScoring homologous motif specificities..."
     else:
         description  = "\tScoring motif specificities..."
 
-    with trange(chunk_count+1, desc=description) as pbar:
+    with trange(valid_count+1, desc=description) as pbar:
         pool = multiprocessing.Pool()
 
-        for chunk_results in pool.map(partial_evaluator, seq_chunk_generator(protein_seqs_df, motif_cols)):
+        for chunk_results in pool.map(partial_evaluator, seq_chunk_generator(protein_seqs_df, motif_cols, chunk_size)):
             chunk_valid_scores, specificity_score_col = chunk_results
 
             if chunk_valid_scores is None:
