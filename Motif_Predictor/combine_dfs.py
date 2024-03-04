@@ -19,9 +19,10 @@ def make_gene_df(input_df, verbose = True):
     unique_genes = pd.unique(main_df["ensembl_gene_id"]).tolist()
 
     unique_df = pd.DataFrame()
-    unique_ref_row_indices = [main_genes.index(x) for x in unique_genes]
     unique_df["ensembl_gene_id"] = unique_genes
-    unique_df["external_gene_name"] = main_df.loc[unique_ref_row_indices, "external_gene_name"]
+    unique_ref_row_indices = [main_genes.index(x) for x in unique_genes]
+    unique_gene_names = main_df.loc[unique_ref_row_indices, "external_gene_name"].to_list()
+    unique_df["external_gene_name"] = unique_gene_names
 
     novel_cols = [col for col in main_df.columns if "Novel" in col]
     if len(novel_cols) > 0:
