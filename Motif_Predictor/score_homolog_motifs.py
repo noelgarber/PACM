@@ -19,7 +19,7 @@ except:
 if predictor_params["compare_classical_method"]:
     from Motif_Predictor.classical_method import classical_motif_method
 
-def score_motifs(seqs_2d, conditional_matrices, score_addition_method, filters = None,
+def score_motifs(seqs_2d, conditional_matrices, score_addition_method, enforced_position_rules = None,
                  selenocysteine_substitute = "C", gap_substitute = "G", classical_func = None):
     '''
     Vectorized function to score homolog motif seqs based on the dictionary of context-aware weighted matrices
@@ -28,7 +28,7 @@ def score_motifs(seqs_2d, conditional_matrices, score_addition_method, filters =
         seqs_2d (np.ndarray):                       motif sequences to score
         conditional_matrices (ConditionalMatrices): conditional weighted matrices for scoring peptides
         score_addition_method (str):                matches matrix_params["optimization_method"]
-        filters (dict):                             dict of position index --> permitted residues
+        enforced_position_rules (dict):             dict of position index --> permitted residues
         selenocysteine_substitute (str):            letter to substitute for selenocysteine (U) when U is not in model
         gap_substitute (str):                       the letter to treat gaps ("X") as; default is no side chain, i.e. G
         classical_func (function|partial):          optional function for comparing an existing classical method
@@ -85,19 +85,22 @@ def score_motifs(seqs_2d, conditional_matrices, score_addition_method, filters =
     threshold = conditional_matrices.standardized_weighted_threshold
     predicted_calls = np.greater_equal(total_scores, threshold)
 
-    # Apply filters
-    if isinstance(filters, dict):
-        for i, allowed_residues in filters.items():
-            seqs_pass = np.full(shape=seqs_2d.shape[0], fill_value=False, dtype=bool)
-            for allowed_aa in allowed_residues:
-                seqs_pass = np.logical_or(seqs_pass, np.char.equal(seqs_2d[:,i], allowed_aa))
-            total_scores[~seqs_pass] = 0
-
     # Compare optional classical method function
-    if classical_func is not None:
-        classical_points_vals = classical_func(seqs_2d)
-    else:
-        classical_points_vals = None
+    classical_points_vals = classical_func(seqs_2d) if classical_func is not None else None
+
+    # Apply filters
+    if enforced_position_rules is not None:
+        for position_index, allowed_residues in enforced_position_rules.items():
+            column_residues = seqs_2d[:, position_index]
+            residues_allowed = np.isin(column_residues, allowed_residues)
+            total_scores[~residues_allowed] = np.nan
+            binding_weighted_scores[~residues_allowed] = np.nan
+            positive_weighted_scores[~residues_allowed] = np.nan
+            suboptimal_weighted_scores[~residues_allowed] = np.nan
+            forbidden_scores[~residues_allowed] = np.nan
+            predicted_calls[~residues_allowed] = False
+            if classical_func is not None:
+                classical_points_vals[~residues_allowed] = np.nan
 
     motifs = ["".join(seqs_2d[i]) for i in np.arange(len(seqs_2d))]
     results = (motifs, total_scores, binding_weighted_scores, positive_weighted_scores,
@@ -110,8 +113,9 @@ def seqs_chunk_generator(seqs_2d, chunk_size):
     for i in range(0, len(seqs_2d), chunk_size):
         yield seqs_2d[i:i+chunk_size]
 
-def score_motifs_parallel(seqs_2d, conditional_matrices, score_addition_method, chunk_size = 10000, filters = None,
-                          selenocysteine_substitute = "C", gap_substitute = "G", classical_func = None):
+def score_motifs_parallel(seqs_2d, conditional_matrices, score_addition_method, chunk_size = 10000,
+                          enforced_position_rules = None, selenocysteine_substitute = "C", gap_substitute = "G",
+                          classical_func = None):
     '''
     Parallelized function for scoring sequences using a ConditionalMatrices object
 
@@ -119,7 +123,7 @@ def score_motifs_parallel(seqs_2d, conditional_matrices, score_addition_method, 
         conditional_matrices (ConditionalMatrices): conditional weighted matrices for scoring peptides
         score_addition_method (str):                matches matrix_params["optimization_method"]
         chunk_size (int):                           number of sequences per parallel processing chunk
-        filters (dict):                             dict of position index --> permitted residues
+        enforced_position_rules (dict):             dict of position index --> permitted residues
         selenocysteine_substitute (str):            letter to substitute for selenocysteine (U) when U is not in model
         gap_substitute (str):                       the letter to treat gaps ("X") as; default is no side chain, i.e. G
         classical_func (function|partial):          optional function for comparing an existing classical method
@@ -129,7 +133,8 @@ def score_motifs_parallel(seqs_2d, conditional_matrices, score_addition_method, 
     '''
 
     partial_function = partial(score_motifs, conditional_matrices = conditional_matrices,
-                               score_addition_method = score_addition_method, filters = filters,
+                               score_addition_method = score_addition_method,
+                               enforced_position_rules = enforced_position_rules,
                                selenocysteine_substitute = selenocysteine_substitute, gap_substitute = gap_substitute,
                                classical_func = classical_func)
 
@@ -182,7 +187,7 @@ def score_motifs_parallel(seqs_2d, conditional_matrices, score_addition_method, 
 def process_grid(grid, lookup_dict, dtype):
     return grid.applymap(lambda x: lookup_dict.get(x)).to_numpy(dtype=dtype)
 
-def get_valid_mask(homolog_motifs_grid, filters):
+def get_valid_mask(homolog_motifs_grid, enforced_position_rules):
     # Helper function to get homolog grid validity mask based on filters dict
 
     if isinstance(homolog_motifs_grid, pd.Series) or isinstance(homolog_motifs_grid, pd.DataFrame):
@@ -194,14 +199,15 @@ def get_valid_mask(homolog_motifs_grid, filters):
             motif_len = len(motif)
             break
 
-    homolog_motifs_grid[homolog_motifs_grid == ""] = "".join(np.repeat("Z",motif_len))
+    grid_copy = homolog_motifs_grid.copy()
+    grid_copy[grid_copy == ""] = "".join(np.repeat("Z",motif_len))
 
-    grid_3d_shape = [homolog_motifs_grid.shape[0], homolog_motifs_grid.shape[1], motif_len]
-    homolog_grid_3d = np.frombuffer(homolog_motifs_grid.astype(np.unicode_).tobytes(), dtype=np.uint32).reshape(grid_3d_shape)
+    grid_3d_shape = [grid_copy.shape[0], grid_copy.shape[1], motif_len]
+    homolog_grid_3d = np.frombuffer(grid_copy.astype(np.unicode_).tobytes(), dtype=np.uint32).reshape(grid_3d_shape)
     homolog_grid_3d = np.vectorize(chr)(homolog_grid_3d).astype("<U1")
 
-    homolog_valid_grid = np.full(shape=homolog_motifs_grid.shape, fill_value=True, dtype=bool)
-    for idx, allowed_residues in filters.items():
+    homolog_valid_grid = np.full(shape=grid_copy.shape, fill_value=True, dtype=bool)
+    for idx, allowed_residues in enforced_position_rules.items():
         grid_at_idx = homolog_grid_3d[:, :, idx]
         grid_at_idx_allowed = np.isin(grid_at_idx, allowed_residues)
         grid_at_idx_disallowed = ~grid_at_idx_allowed
@@ -264,7 +270,7 @@ def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, 
     motif_seqs_2d = np.array([list(motif) for motif in motif_seqs])
 
     # Score the unique motif sequences
-    filters = predictor_params["enforced_position_rules"]
+    enforced_position_rules = predictor_params["enforced_position_rules"]
     selenocysteine_substitute = predictor_params["selenocysteine_substitute"]
     gap_substitute = predictor_params["gap_substitute"]
     chunk_size = predictor_params["homolog_score_chunk_size"]
@@ -273,7 +279,7 @@ def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, 
     classical_func = classical_motif_method if compare_classical_method else None
 
     results = score_motifs_parallel(motif_seqs_2d, conditional_matrices, score_addition_method, chunk_size,
-                                    filters, selenocysteine_substitute, gap_substitute, classical_func)
+                                    enforced_position_rules, selenocysteine_substitute, gap_substitute, classical_func)
 
     print(f"\t\tParsing results into motif-score dicts...") if verbose else None
     motifs, total_scores, binding_scores = results[0:3]
@@ -351,7 +357,7 @@ def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, 
                 pbar.update()
 
             # Find best col indices for best homologous motifs
-            homolog_valid_grid = get_valid_mask(homolog_motifs_grid, filters)
+            homolog_valid_grid = get_valid_mask(homolog_motifs_grid, enforced_position_rules)
 
             if selection_mode == "similarity":
                 similarities_grid = data_df[similarity_cols].to_numpy(dtype=float)
@@ -378,6 +384,7 @@ def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, 
             drop_cols.extend(homolog_id_cols)
             best_homolog_ids = homolog_ids_grid[row_indices, best_col_indices]
             data_df[col_prefix + "_id_best"] = best_homolog_ids
+            data_df[col_prefix + "_id_best"] = data_df[col_prefix + "_id_best"].fillna("")
             del homolog_ids_grid, best_homolog_ids
             pbar.update()
 
