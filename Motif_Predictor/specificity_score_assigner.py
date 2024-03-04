@@ -89,15 +89,18 @@ def apply_specificity_scores(protein_seqs_df, motif_cols, predictor_params=predi
 
     # Parallel processing of specificity score calculation
     chunk_size = 1000
-    valids = np.logical_and(protein_seqs_df[motif_col].notna().to_numpy(), protein_seqs_df[motif_col].ne("").to_numpy())
-    valid_count = valids.sum()
+    valid_chunk_count = 0
+    for motif_col in motif_cols:
+        valids = np.logical_and(protein_seqs_df[motif_col].notna().to_numpy(),
+                                protein_seqs_df[motif_col].ne("").to_numpy())
+        valid_chunk_count += int(np.ceil(valids.sum() / chunk_size))
 
     if "homolog" in motif_cols[0]:
         description = "\tScoring homologous motif specificities..."
     else:
         description  = "\tScoring motif specificities..."
 
-    with trange(valid_count+1, desc=description) as pbar:
+    with trange(valid_chunk_count+1, desc=description) as pbar:
         pool = multiprocessing.Pool()
 
         for chunk_results in pool.map(partial_evaluator, seq_chunk_generator(protein_seqs_df, motif_cols, chunk_size)):
@@ -128,23 +131,15 @@ def apply_specificity_scores(protein_seqs_df, motif_cols, predictor_params=predi
                 # Apply valid scores onto an expanded column using the mask
                 specificity_scores = np.full(shape=len(protein_seqs_df), fill_value=np.nan, dtype=float)
                 specificity_scores[valid_mask] = valid_specificity_scores
-                protein_seqs_df[specificity_score_col] = specificity_scores
 
-                # Reorder the columns so that specificity score is to the right of the motif's model score
                 motif_col_idx = cols.get_loc(motif_col)
                 if "homolog" in motif_col:
-                    if "Classical" in motif_col:
-                        cols = cols.insert(motif_col_idx+9, specificity_score_col)
-                    else:
-                        cols = cols.insert(motif_col_idx+9, specificity_score_col)
+                    specificity_insert_idx = motif_col_idx + 9
                 else:
-                    if "Classical" in motif_col:
-                        cols = cols.insert(motif_col_idx+2, specificity_score_col)
-                    else:
-                        cols = cols.insert(motif_col_idx+6, specificity_score_col)
+                    specificity_insert_idx = motif_col_idx + 2 if "Classical" in motif_col else motif_col_idx + 6
 
-        # Apply dataframe reordering
-        protein_seqs_df = protein_seqs_df[cols]
+                protein_seqs_df.insert(specificity_insert_idx, specificity_score_col, specificity_scores)
+
         pbar.update()
 
     return protein_seqs_df
