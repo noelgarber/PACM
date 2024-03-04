@@ -2,7 +2,10 @@
 import os
 import numpy as np
 import pandas as pd
-from Motif_Predictor.predictor_config import predictor_params
+try:
+    from Motif_Predictor.predictor_config import predictor_params
+except ModuleNotFoundError:
+    from predictor_config import predictor_params
 
 ''' ---------------------------------------------------------------------------------------------------------------- 
             It is sometimes useful to compare the predictions of the PACM workflow against known algorithms. 
@@ -11,9 +14,10 @@ from Motif_Predictor.predictor_config import predictor_params
     ---------------------------------------------------------------------------------------------------------------- '''
 
 try:
-    classical_matrix = pd.read_csv("Motif_Predictor/classical_matrix.csv", index_col = 0)
-except:
-    raise Exception("Failed to load classical_matrix.csv, which is required when using classical_method()")
+    try: classical_matrix = pd.read_csv("Motif_Predictor/classical_matrix.csv", index_col = 0)
+    except FileNotFoundError: classical_matrix = pd.read_csv("classical_matrix.csv", index_col = 0)
+except FileNotFoundError:
+    raise Exception("Failed to load classical_matrix.csv, which is required for classical_method to function.")
 
 motif_length = 15
 
