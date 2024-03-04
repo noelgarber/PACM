@@ -86,7 +86,11 @@ def main(predictor_params = predictor_params):
                     homolog_id_cols.append(col)
 
             # Evaluate motif homology
-            homology_results = evaluate_homologs(chunk_df, all_motif_cols, homolog_seq_cols)
+            similarity_weights = predictor_params.get("similarity_position_weights")
+            replace_selenocysteine = predictor_params["replace_selenocysteine"]
+            selenocysteine_substitute = predictor_params.get("selenocysteine_substitute")
+            homology_results = evaluate_homologs(chunk_df, all_motif_cols, homolog_seq_cols, similarity_weights,
+                                                 replace_selenocysteine, selenocysteine_substitute)
             chunk_df, homolog_motif_cols, homolog_motif_col_groups = homology_results
 
             # Score homologous motifs
