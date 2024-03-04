@@ -220,7 +220,10 @@ def scan_protein_seq(protein_seq, conditional_matrices, predictor_params = predi
         # Optionally replace selenocysteine with cysteine for scoring purposes
         replace_selenocysteine = predictor_params["replace_selenocysteine"]
         if replace_selenocysteine and "U" in sliced_seqs_2d:
-            cleaned_sliced_2d[cleaned_sliced_2d == "U"] = "C"
+            selenocysteine_substitute = predictor_params.get("selenocysteine_substitute")
+            if selenocysteine_substitute is None:
+                selenocysteine_substitute = "C"
+            cleaned_sliced_2d[cleaned_sliced_2d == "U"] = selenocysteine_substitute
 
         # Calculate motif scores
         if len(cleaned_sliced_2d) > 0:
