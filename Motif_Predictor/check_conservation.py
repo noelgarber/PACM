@@ -2,27 +2,39 @@
 
 import numpy as np
 import pandas as pd
-
 import warnings
 import multiprocessing
+from functools import partial
 from tqdm import trange
 from Bio.Align import substitution_matrices
 
 # Vectorization is not possible for this procedure; suppress Pandas performance warnings arising from fragmentatiom
 warnings.simplefilter(action = "ignore", category = pd.errors.PerformanceWarning)
 
-blosum62 = substitution_matrices.load("BLOSUM62")
-
-def motif_similarity(seqs_tuple):
+def motif_similarity(seqs_tuple, substitution_matrix = "BLOSUM62", normalize = True, substitution_weights = None,
+					 replace_selenocysteine = True, selenocysteine_substitute = "C"):
 	'''
 	Finds the gap-less segment of a target sequence that is most similar to a short motif sequence
 
 	Args:
-		seqs_tuple (list): tuple of (motif_seqs, target_seqs, col_names)
+		seqs_tuple (list):                      tuple of (motif_seqs, target_seqs, col_names)
+		substitution_matrix (str):              name of the substitution matrix to use, e.g. "BLOSUM62"
+		normalize (bool): 		                whether to normalize the matrix to have a max value of +1
+		substitution_weights (np.ndarray|None): array of position weights for non-linear similarity measurement
+		replace_selenocysteine (bool): 			whether to treat selenocysteine ("U") as another residue for scoring
+		selenocysteine_substitute (str): 		AA to substitute selenocysteine with, if replace_selenocysteine is True
 
 	Returns:
-
+		results (tuple): (homologous_motifs, homologous_similarity_scores, homologous_identity_ratios,
+		                  col_names, accession_col_idx)
 	'''
+
+	# Set up the substitution matrix
+	matrix = substitution_matrices.load(substitution_matrix)
+	if normalize:
+		max_vals = matrix.max(axis=1)
+		max_vals[max_vals == 0] = 1 # avoid divide-by-zero errors
+		matrix = matrix / max_vals
 
 	motif_seqs, target_seqs, col_names, accession_col_idx = seqs_tuple
 
@@ -43,6 +55,9 @@ def motif_similarity(seqs_tuple):
 
 		slice_indices = np.arange(len(target_seq) - motif_length + 1)[:, np.newaxis] + np.arange(motif_length)
 		sliced_target_2d = target_seq[slice_indices]
+		if replace_selenocysteine:
+			motif_seq[motif_seq == "U"] = selenocysteine_substitute
+			sliced_target_2d[sliced_target_2d == "U"] = selenocysteine_substitute
 
 		scores_2d = np.zeros(shape=sliced_target_2d.shape)
 		for i, motif_aa in enumerate(motif_seq):
@@ -50,12 +65,19 @@ def motif_similarity(seqs_tuple):
 			unique_residues_col = np.unique(col_residues)
 			col_scores = np.zeros(shape=col_residues.shape)
 			for target_aa in unique_residues_col:
-				matrix_value = blosum62.get((motif_aa, target_aa))
+				matrix_value = matrix.get((motif_aa, target_aa))
+				if matrix_value is None:
+					matrix_value = 0
+					print(f"Warning: could not find substitution pair ({motif_aa},{target_aa}) in similarity matrix")
+				if substitution_weights is not None:
+					matrix_value = matrix_value * substitution_weights[i]
 				mask = np.char.equal(col_residues, target_aa)
 				col_scores[mask] = matrix_value
 			scores_2d[:,i] = col_scores
 
 		scores = scores_2d.sum(axis=1)
+		scores = scores / np.sum(substitution_weights)
+
 		best_score_idx = np.argmax(scores)
 		best_score = scores[best_score_idx]
 
@@ -71,14 +93,18 @@ def motif_similarity(seqs_tuple):
 
 	return (homologous_motifs, homologous_similarity_scores, homologous_identity_ratios, col_names, accession_col_idx)
 
-def evaluate_homologs(data_df, motif_seq_cols, homolog_seq_cols):
+def evaluate_homologs(data_df, motif_seq_cols, homolog_seq_cols, substitution_weights = None,
+					  replace_selenocysteine = True, selenocysteine_substitute = "C"):
 	'''
 	Main function to evaluate homologs in a dataframe for homology with the motif of interest
 
 	Args:
-		data_df (pd.DataFrame):    dataframe containing motif, parent, and homolog seqs
-		motif_seq_cols (list):     col names holding predicted motifs from parental protein sequences
-		homolog_seq_cols (list):   col names with homolog protein sequences to be searched
+		data_df (pd.DataFrame):                 dataframe containing motif, parent, and homolog seqs
+		motif_seq_cols (list):                  col names holding predicted motifs from parental protein sequences
+		homolog_seq_cols (list):                col names with homolog protein sequences to be searched
+		substitution_weights (np.ndarray|None): array of position weights for non-linear similarity measurement
+		replace_selenocysteine (bool): 			whether to treat selenocysteine ("U") as another residue for scoring
+		selenocysteine_substitute (str): 		AA to substitute selenocysteine with, if replace_selenocysteine is True
 
 	Returns:
 		data_df (pd.DataFrame):          dataframe with added motif homology columns
@@ -129,8 +155,11 @@ def evaluate_homologs(data_df, motif_seq_cols, homolog_seq_cols):
 	homologous_motifs_dict = {}
 
 	pool = multiprocessing.Pool()
+	similarity_func = partial(motif_similarity, substitution_weights = substitution_weights,
+							  replace_selenocysteine = replace_selenocysteine,
+							  selenocysteine_substitute = selenocysteine_substitute)
 	with trange(len(seqs_tuples) + 1, desc="\tEvaluating motif homolog similarities by column pair...") as pbar:
-		for result in pool.imap(motif_similarity, seqs_tuples):
+		for result in pool.imap(similarity_func, seqs_tuples):
 			homologous_motifs, homologous_similarities, homologous_identities, col_names, insertion_idx = result
 
 			homologous_motifs_dict[col_names[0]] = homologous_motifs
