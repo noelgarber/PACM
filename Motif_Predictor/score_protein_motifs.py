@@ -70,12 +70,11 @@ def score_sliced_protein(sequences_2d, conditional_matrices, score_addition_meth
         positive_weighted_scores = (positive_weighted_scores - std_coefs[2]) / std_coefs[3]
         suboptimal_weighted_scores = (suboptimal_weighted_scores - std_coefs[4]) / std_coefs[5]
 
-    # Get binary predictions
+    # Get binary predictions and apply them as a mask to get passing entries
     total_scores[disqualified_forbidden] = np.nan
     threshold = conditional_matrices.standardized_weighted_threshold
     predicted_calls = np.greater_equal(total_scores, threshold)
 
-    # Sort passing motifs (which will be preferentially selected)
     passing_seqs_2d = sequences_2d[predicted_calls]
     passing_total_scores = total_scores[predicted_calls]
     passing_binding_scores = binding_weighted_scores[predicted_calls]
@@ -83,7 +82,11 @@ def score_sliced_protein(sequences_2d, conditional_matrices, score_addition_meth
     passing_suboptimal_scores = suboptimal_weighted_scores[predicted_calls]
     passing_forbidden_scores = forbidden_scores[predicted_calls]
 
-    sorted_passing_indices = np.argsort(passing_total_scores * -1) # multiply by -1 to get indices in descending order
+    # Sort passing motifs (which will be preferentially selected)
+    passing_vectors = np.hstack([passing_total_scores.reshape(-1,1), passing_binding_scores.reshape(-1,1)])
+    passing_magnitudes = np.linalg.norm(passing_vectors, axis=1)
+    sorted_passing_indices = np.argsort(passing_magnitudes * -1) # multiply by -1 to get indices in descending order
+
     sorted_passing_seqs_2d = passing_seqs_2d[sorted_passing_indices]
     sorted_passing_total_scores = passing_total_scores[sorted_passing_indices]
     sorted_passing_binding_scores = passing_binding_scores[sorted_passing_indices]
@@ -114,7 +117,7 @@ def score_sliced_protein(sequences_2d, conditional_matrices, score_addition_meth
 
     # Handle cases where not enough score sets pass thresholds
     if passing_output_count < return_count:
-        # Sort failing motifs
+        # Apply inverse mask to get failing entries
         failing_seqs_2d = sequences_2d[~predicted_calls]
         failing_total_scores = total_scores[~predicted_calls]
         failing_binding_scores = binding_weighted_scores[~predicted_calls]
@@ -122,7 +125,11 @@ def score_sliced_protein(sequences_2d, conditional_matrices, score_addition_meth
         failing_suboptimal_scores = suboptimal_weighted_scores[~predicted_calls]
         failing_forbidden_scores = forbidden_scores[~predicted_calls]
 
-        sorted_failing_indices = np.argsort(failing_total_scores * -1)  # multiply by -1 to get in descending order
+        # Sort failing motifs
+        failing_vectors = np.hstack([failing_total_scores.reshape(-1, 1), failing_binding_scores.reshape(-1, 1)])
+        failing_magnitudes = np.linalg.norm(failing_vectors, axis=1)
+        sorted_failing_indices = np.argsort(failing_magnitudes * -1)  # multiply by -1 to get in descending order
+
         sorted_failing_seqs_2d = failing_seqs_2d[sorted_failing_indices]
         sorted_failing_total_scores = failing_total_scores[sorted_failing_indices]
         sorted_failing_binding_scores = failing_binding_scores[sorted_failing_indices]
