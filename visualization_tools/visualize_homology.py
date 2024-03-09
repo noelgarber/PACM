@@ -66,13 +66,13 @@ def main(path, similarity_col, homolog_id_col, likelihood_cols = None, strength_
     plt.figure(figsize=(12,8))
     for i in reversed(np.arange(np.max([both_count, host_only_count, homolog_only_count, neither_count]))):
         if i < both_count:
-            plt.scatter(likelihood_deltas_both_pass[i], similarities_both_pass[i], color="green", alpha=0.5)
+            plt.scatter(likelihood_deltas_both_pass[i], similarities_both_pass[i], color="green", alpha=0.25)
         if i < host_only_count:
-            plt.scatter(likelihood_deltas_host_only[i], similarities_host_only[i], color="blue", alpha=0.5)
+            plt.scatter(likelihood_deltas_host_only[i], similarities_host_only[i], color="blue", alpha=0.25)
         if i < homolog_only_count:
-            plt.scatter(likelihood_deltas_homolog_only[i], similarities_homolog_only[i], color="purple", alpha=0.5)
+            plt.scatter(likelihood_deltas_homolog_only[i], similarities_homolog_only[i], color="purple", alpha=0.25)
         if i < neither_count:
-            plt.scatter(likelihood_deltas_neither_pass[i], similarities_neither_pass[i], color="red", alpha=0.5)
+            plt.scatter(likelihood_deltas_neither_pass[i], similarities_neither_pass[i], color="red", alpha=0.25)
 
     plt.xlabel("Δ Model Score (Homolog - Host)", fontsize=18)
     plt.ylabel("FFAT Core Similarity (BLOSUM62, normalized)", fontsize=18)
