@@ -1,0 +1,10 @@
+settings:
+  csv_path: "/home/user/Documents/GitHub/PACM/combined_datasets_by_gene.csv"
+  similarity_col: "10090_homolog_vs_Novel_1st_motif_similarity_best"
+  homolog_id_col: "10090_homolog_vs_Novel_1st_motif_id_best"
+  host_likelihood_col: "Novel_1st_total_motif_score"
+  homolog_likelihood_col: "10090_homolog_vs_Novel_1st_motif_best_total_model_score"
+  host_binding_col: "Novel_1st_binding_motif_score"
+  homolog_binding_col: "10090_homolog_vs_Novel_1st_motif_best_binding_model_score"
+  host_call_col: "Novel_1st_final_call"
+  homolog_call_col: "10090_homolog_vs_Novel_1st_motif_best_model_call"
