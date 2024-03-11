@@ -21,6 +21,56 @@ except FileNotFoundError:
 
 motif_length = 15
 
+def classical_single_motif(motif_seq, classical_matrix = classical_matrix):
+    '''
+    Example of a parallel classical scoring method to employ alongside the new one; replace with your method as needed
+
+    Args:
+        motif_seq (str|list|np.ndarray): single motif sequence to be scored
+
+    Returns:
+        total_points (float):  classical points value for given motif
+    '''
+
+    if len(motif_seq) >= 13 and len(motif_seq) <= 15:
+        if isinstance(motif_seq, str):
+            motif_seq = np.array(list(motif_seq))
+        elif isinstance(motif_seq, list):
+            motif_seq = np.array(motif_seq)
+
+        tract_seq = motif_seq[0:6]
+        tract_residue_charges = np.zeros(shape=(6,), dtype=float)
+        tract_residue_charges[tract_seq == "D"] = -1
+        tract_residue_charges[tract_seq == "E"] = -1
+        tract_residue_charges[tract_seq == "S"] = -0.5
+        tract_residue_charges[tract_seq == "T"] = -0.5
+        tract_residue_charges[tract_seq == "R"] = 1
+        tract_residue_charges[tract_seq == "K"] = 1
+
+        tract_charges = tract_residue_charges.sum()
+        if tract_charges <= -4:
+            tract_points = 0
+        elif tract_charges <= -3:
+            tract_points = 0.5
+        elif tract_charges <= -2:
+            tract_points = 1
+        else:
+            tract_points = 1.5
+
+        core_seq = motif_seq[6:13]
+
+        matrix_row_indices = classical_matrix.index.get_indexer_for(core_seq)
+        matrix_col_indices = np.arange(len(core_seq))
+        core_points = classical_matrix.values[matrix_row_indices, matrix_col_indices]
+        core_points = core_points.sum()
+
+        total_points = tract_points + core_points
+
+    else:
+        total_points = np.nan
+
+    return total_points
+
 def classical_motif_method(motif_seqs, classical_matrix = classical_matrix):
     '''
     Example of a parallel classical scoring method to employ alongside the new one; replace with your method as needed
