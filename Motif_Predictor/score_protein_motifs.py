@@ -17,7 +17,7 @@ except:
 
 # If selected, import a parallel method for comparison
 if predictor_params["compare_classical_method"]:
-    from Motif_Predictor.classical_method import classical_protein_method
+    from Motif_Predictor.classical_method import classical_protein_method, classical_single_motif
 
 def score_sliced_protein(sequences_2d, conditional_matrices, score_addition_method, return_count = 3):
     '''
@@ -296,26 +296,20 @@ def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
     ordered_suboptimal_scores_cols = [[] for i in np.arange(return_count)]
     ordered_forbidden_scores_cols = [[] for i in np.arange(return_count)]
     ordered_final_calls_cols = [[] for i in np.arange(return_count)]
+    ordered_novel_classical_cols = [[] for i in np.arange(return_count)]
     classical_motifs_cols = [[] for i in np.arange(return_count)]
     classical_scores_cols = [[] for i in np.arange(return_count)]
 
     # Generate names for the aforementioned columns
-    motif_col_names = []
-    total_score_col_names = []
-    binding_score_col_names = []
-    positive_score_col_names = []
-    suboptimal_score_col_names = []
-    forbidden_score_col_names = []
-    final_call_col_names = []
-    for i in np.arange(return_count):
-        suffix_number = add_number_suffix(i+1)
-        motif_col_names.append(suffix_number+"_motif")
-        total_score_col_names.append(suffix_number+"_total_motif_score")
-        binding_score_col_names.append(suffix_number+"_binding_motif_score")
-        positive_score_col_names.append(suffix_number+"_positive_motif_score")
-        suboptimal_score_col_names.append(suffix_number+"_suboptimal_motif_score")
-        forbidden_score_col_names.append(suffix_number+"_forbidden_motif_score")
-        final_call_col_names.append(suffix_number+"_final_call")
+    suffix_numbers = [add_number_suffix(i) for i in np.arange(1, return_count + 1)]
+    motif_col_names = [f"{suffix_number}_motif" for suffix_number in suffix_numbers]
+    total_score_col_names = [f"{suffix_number}_total_motif_score" for suffix_number in suffix_numbers]
+    binding_score_col_names = [f"{suffix_number}_binding_motif_score" for suffix_number in suffix_numbers]
+    positive_score_col_names = [f"{suffix_number}_positive_motif_score" for suffix_number in suffix_numbers]
+    suboptimal_score_col_names = [f"{suffix_number}_suboptimal_motif_score" for suffix_number in suffix_numbers]
+    forbidden_score_col_names = [f"{suffix_number}_forbidden_motif_score" for suffix_number in suffix_numbers]
+    final_call_col_names = [f"{suffix_number}_final_call" for suffix_number in suffix_numbers]
+    novel_classical_col_names = [f"{suffix_number}_classical_score" for suffix_number in suffix_numbers]
 
     # Assemble a partial function for scoring individual proteins
     scan_seq_partial = partial(scan_protein_seq, conditional_matrices = conditional_matrices,
@@ -340,10 +334,16 @@ def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
 
         # Optionally score the sequence using a classical method for comparison
         if compare_classical_method:
+            # Find best motifs according to classical method
             classical_motifs, classical_scores = classical_protein_method(protein_seq, predictor_params)
             for j, (classical_motif, classical_score) in enumerate(zip(classical_motifs, classical_scores)):
                 classical_motifs_cols[j].append(classical_motif)
                 classical_scores_cols[j].append(classical_score)
+
+            # Also calculate classical scores for the new model's best predicted motifs
+            for j, motif in enumerate(motifs):
+                novel_classical_score = classical_single_motif(motif)
+                ordered_novel_classical_cols[j].append(novel_classical_score)
 
     # Apply motifs and scores as columns to the dataframe, and record col names
     novel_motif_headers = []
@@ -353,53 +353,36 @@ def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
     novel_suboptimal_score_headers = []
     novel_forbidden_score_headers = []
     novel_final_call_headers = []
+    novel_classical_score_headers = []
 
     for i in np.arange(len(motif_col_names)):
-        ordered_motifs_col = ordered_motifs_cols[i]
-        motif_col_name = motif_col_names[i]
-
-        ordered_total_scores_col = ordered_total_scores_cols[i]
-        total_score_col_name = total_score_col_names[i]
-
-        ordered_binding_scores_col = ordered_binding_scores_cols[i]
-        binding_score_col_name = binding_score_col_names[i]
-
-        ordered_positive_scores_col = ordered_positive_scores_cols[i]
-        positive_score_col_name = positive_score_col_names[i]
-
-        ordered_suboptimal_scores_col = ordered_suboptimal_scores_cols[i]
-        suboptimal_score_col_name = suboptimal_score_col_names[i]
-
-        ordered_forbidden_scores_col = ordered_forbidden_scores_cols[i]
-        forbidden_score_col_name = forbidden_score_col_names[i]
-
-        ordered_final_calls_col = ordered_final_calls_cols[i]
-        final_call_col_name = final_call_col_names[i]
-
         if compare_classical_method:
-            motif_col_name = f"Novel_{motif_col_name}"
-            total_score_col_name = f"Novel_{total_score_col_name}"
-            binding_score_col_name = f"Novel_{binding_score_col_name}"
-            positive_score_col_name = f"Novel_{positive_score_col_name}"
-            suboptimal_score_col_name = f"Novel_{suboptimal_score_col_name}"
-            forbidden_score_col_name = f"Novel_{forbidden_score_col_name}"
-            final_call_col_name = f"Novel_{final_call_col_name}"
+            motif_col_names[i] = f"Novel_{motif_col_names[i]}"
+            total_score_col_names[i] = f"Novel_{total_score_col_names[i]}"
+            binding_score_col_names[i] = f"Novel_{binding_score_col_names[i]}"
+            positive_score_col_names[i] = f"Novel_{positive_score_col_names[i]}"
+            suboptimal_score_col_names[i] = f"Novel_{suboptimal_score_col_names[i]}"
+            forbidden_score_col_names[i] = f"Novel_{forbidden_score_col_names[i]}"
+            final_call_col_names[i] = f"Novel_{final_call_col_names[i]}"
+            novel_classical_col_names[i] = f"Novel_{novel_classical_col_names[i]}"
 
-        df_chunk_scored[motif_col_name] = ordered_motifs_col
-        df_chunk_scored[total_score_col_name] = ordered_total_scores_col
-        df_chunk_scored[binding_score_col_name] = ordered_binding_scores_col
-        df_chunk_scored[positive_score_col_name] = ordered_positive_scores_col
-        df_chunk_scored[suboptimal_score_col_name] = ordered_suboptimal_scores_col
-        df_chunk_scored[forbidden_score_col_name] = ordered_forbidden_scores_col
-        df_chunk_scored[final_call_col_name] = ordered_final_calls_col
+        df_chunk_scored[motif_col_names[i]] = ordered_motifs_cols[i]
+        df_chunk_scored[total_score_col_names[i]] = ordered_total_scores_cols[i]
+        df_chunk_scored[binding_score_col_names[i]] = ordered_binding_scores_cols[i]
+        df_chunk_scored[positive_score_col_names[i]] = ordered_positive_scores_cols[i]
+        df_chunk_scored[suboptimal_score_col_names[i]] = ordered_suboptimal_scores_cols[i]
+        df_chunk_scored[forbidden_score_col_names[i]] = ordered_forbidden_scores_cols[i]
+        df_chunk_scored[final_call_col_names[i]] = ordered_final_calls_cols[i]
+        df_chunk_scored[novel_classical_col_names[i]] = ordered_novel_classical_cols[i]
 
-        novel_motif_headers.append(motif_col_name)
-        novel_total_score_headers.append(total_score_col_name)
-        novel_binding_score_headers.append(binding_score_col_name)
-        novel_positive_score_headers.append(positive_score_col_name)
-        novel_suboptimal_score_headers.append(suboptimal_score_col_name)
-        novel_forbidden_score_headers.append(forbidden_score_col_name)
-        novel_final_call_headers.append(final_call_col_name)
+        novel_motif_headers.append(motif_col_names[i])
+        novel_total_score_headers.append(total_score_col_names[i])
+        novel_binding_score_headers.append(binding_score_col_names[i])
+        novel_positive_score_headers.append(positive_score_col_names[i])
+        novel_suboptimal_score_headers.append(suboptimal_score_col_names[i])
+        novel_forbidden_score_headers.append(forbidden_score_col_names[i])
+        novel_final_call_headers.append(final_call_col_names[i])
+        novel_classical_score_headers.append(novel_classical_col_names[i])
 
     # Optionally apply classical motifs and scores as columns if they were generated
     classical_motif_headers = []
@@ -408,13 +391,11 @@ def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
         zipped_classical_cols = zip(classical_motifs_cols, motif_col_names,
                                     classical_scores_cols, total_score_col_names)
         for classical_motif_col, motif_col_name, classical_scores_col, total_score_col_name in zipped_classical_cols:
-            classical_motif_col_name = "Classical_" + motif_col_name
-            classical_score_col_name = "Classical_" + total_score_col_name
-            df_chunk_scored[classical_motif_col_name] = classical_motif_col
-            df_chunk_scored[classical_score_col_name] = classical_scores_col
+            df_chunk_scored[f"Classical_{motif_col_name}"] = classical_motif_col
+            df_chunk_scored[f"Classical_{total_score_col_name}"] = classical_scores_col
 
-            classical_motif_headers.append(classical_motif_col_name)
-            classical_score_headers.append(classical_score_col_name)
+            classical_motif_headers.append(f"Classical_{motif_col_name}")
+            classical_score_headers.append(f"Classical_{total_score_col_name}")
 
     results_tuple = (df_chunk_scored, novel_motif_headers, novel_total_score_headers, novel_binding_score_headers,
                      novel_positive_score_headers, novel_suboptimal_score_headers, novel_forbidden_score_headers,
