@@ -29,13 +29,8 @@ def make_gene_df(input_df, verbose = True):
         # Sort for preferred proteins with better novel scores
         id_cols = ["ensembl_gene_id", "external_gene_name", "ensembl_transcript_id", "ensembl_peptide_id"]
 
-        novel_vectors = np.hstack([main_df["Novel_1st_binding_motif_score"].to_numpy().reshape(-1,1),
-                                   main_df["Novel_1st_total_motif_score"].to_numpy().reshape(-1,1)])
-        novel_vector_magnitudes = np.linalg.norm(novel_vectors, axis=1)
-        main_df["vector_magnitude_temporary"] = novel_vector_magnitudes
-
         print("Generating dataframe with novel motifs by gene...") if verbose else None
-        main_df.sort_values("vector_magnitude_temporary", ascending=False, kind="stable", inplace=True)
+        main_df.sort_values("Novel_1st_binding_motif_score", ascending=False, kind="stable", inplace=True)
         main_df.sort_values("Novel_1st_final_call", ascending=False, kind="stable", inplace=True)
         main_df.sort_values("Novel_1st_motif_topology_accessible", ascending=False, kind="stable", inplace=True)
 
@@ -65,12 +60,7 @@ def make_gene_df(input_df, verbose = True):
         # Sort for preferred proteins with better novel scores
         print("Sorting dataframe...") if verbose else None
 
-        vectors = np.hstack([main_df["1st_binding_motif_score"].to_numpy().reshape(-1,1),
-                             main_df["1st_total_motif_score"].to_numpy().reshape(-1,1)])
-        vector_magnitudes = np.linalg.norm(vectors, axis=1)
-        main_df["vector_magnitude_temporary"] = vector_magnitudes
-
-        main_df.sort_values("vector_magnitude_temporary", ascending=False, kind="stable", inplace=True)
+        main_df.sort_values("1st_binding_motif_score", ascending=False, kind="stable", inplace=True)
         main_df.sort_values("1st_final_call", ascending=False, kind="stable", inplace=True)
         main_df.sort_values("1st_motif_topology_accessible", ascending=False, kind="stable", inplace=True)
 
