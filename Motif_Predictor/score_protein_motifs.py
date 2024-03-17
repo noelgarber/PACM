@@ -309,7 +309,7 @@ def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
     suboptimal_score_col_names = [f"{suffix_number}_suboptimal_motif_score" for suffix_number in suffix_numbers]
     forbidden_score_col_names = [f"{suffix_number}_forbidden_motif_score" for suffix_number in suffix_numbers]
     final_call_col_names = [f"{suffix_number}_final_call" for suffix_number in suffix_numbers]
-    novel_classical_col_names = [f"{suffix_number}_classical_score" for suffix_number in suffix_numbers]
+    matching_classical_col_names = [f"{suffix_number}_classical_score" for suffix_number in suffix_numbers]
 
     # Assemble a partial function for scoring individual proteins
     scan_seq_partial = partial(scan_protein_seq, conditional_matrices = conditional_matrices,
@@ -346,43 +346,24 @@ def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
                 ordered_novel_classical_cols[j].append(novel_classical_score)
 
     # Apply motifs and scores as columns to the dataframe, and record col names
-    novel_motif_headers = []
-    novel_total_score_headers = []
-    novel_binding_score_headers = []
-    novel_positive_score_headers = []
-    novel_suboptimal_score_headers = []
-    novel_forbidden_score_headers = []
-    novel_final_call_headers = []
-    novel_classical_score_headers = []
+    novel_motif_cols = [f"Novel_{col}" if compare_classical_method else col for col in motif_col_names]
+    novel_total_cols = [f"Novel_{col}" if compare_classical_method else col for col in total_score_col_names]
+    novel_binding_cols = [f"Novel_{col}" if compare_classical_method else col for col in binding_score_col_names]
+    novel_positive_cols = [f"Novel_{col}" if compare_classical_method else col for col in positive_score_col_names]
+    novel_suboptimal_cols = [f"Novel_{col}" if compare_classical_method else col for col in suboptimal_score_col_names]
+    novel_forbidden_cols = [f"Novel_{col}" if compare_classical_method else col for col in forbidden_score_col_names]
+    novel_call_cols = [f"Novel_{col}" if compare_classical_method else col for col in final_call_col_names]
+    novel_classical_cols = [f"Novel_{col}" if compare_classical_method else col for col in matching_classical_col_names]
 
     for i in np.arange(len(motif_col_names)):
-        if compare_classical_method:
-            motif_col_names[i] = f"Novel_{motif_col_names[i]}"
-            total_score_col_names[i] = f"Novel_{total_score_col_names[i]}"
-            binding_score_col_names[i] = f"Novel_{binding_score_col_names[i]}"
-            positive_score_col_names[i] = f"Novel_{positive_score_col_names[i]}"
-            suboptimal_score_col_names[i] = f"Novel_{suboptimal_score_col_names[i]}"
-            forbidden_score_col_names[i] = f"Novel_{forbidden_score_col_names[i]}"
-            final_call_col_names[i] = f"Novel_{final_call_col_names[i]}"
-            novel_classical_col_names[i] = f"Novel_{novel_classical_col_names[i]}"
-
-        df_chunk_scored[motif_col_names[i]] = ordered_motifs_cols[i]
-        df_chunk_scored[total_score_col_names[i]] = ordered_total_scores_cols[i]
-        df_chunk_scored[binding_score_col_names[i]] = ordered_binding_scores_cols[i]
-        df_chunk_scored[positive_score_col_names[i]] = ordered_positive_scores_cols[i]
-        df_chunk_scored[suboptimal_score_col_names[i]] = ordered_suboptimal_scores_cols[i]
-        df_chunk_scored[forbidden_score_col_names[i]] = ordered_forbidden_scores_cols[i]
-        df_chunk_scored[final_call_col_names[i]] = ordered_final_calls_cols[i]
-        df_chunk_scored[novel_classical_col_names[i]] = ordered_novel_classical_cols[i]
-
-        novel_motif_headers.append(motif_col_names[i])
-        novel_total_score_headers.append(total_score_col_names[i])
-        novel_binding_score_headers.append(binding_score_col_names[i])
-        novel_positive_score_headers.append(positive_score_col_names[i])
-        novel_suboptimal_score_headers.append(suboptimal_score_col_names[i])
-        novel_forbidden_score_headers.append(forbidden_score_col_names[i])
-        novel_final_call_headers.append(final_call_col_names[i])
-        novel_classical_score_headers.append(novel_classical_col_names[i])
+        df_chunk_scored[novel_motif_cols[i]] = ordered_motifs_cols[i]
+        df_chunk_scored[novel_total_cols[i]] = ordered_total_scores_cols[i]
+        df_chunk_scored[novel_binding_cols[i]] = ordered_binding_scores_cols[i]
+        df_chunk_scored[novel_positive_cols[i]] = ordered_positive_scores_cols[i]
+        df_chunk_scored[novel_suboptimal_cols[i]] = ordered_suboptimal_scores_cols[i]
+        df_chunk_scored[novel_forbidden_cols[i]] = ordered_forbidden_scores_cols[i]
+        df_chunk_scored[novel_call_cols[i]] = ordered_final_calls_cols[i]
+        df_chunk_scored[novel_classical_cols[i]] = ordered_novel_classical_cols[i]
 
     # Optionally apply classical motifs and scores as columns if they were generated
     classical_motif_headers = []
@@ -397,9 +378,9 @@ def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
             classical_motif_headers.append(f"Classical_{motif_col_name}")
             classical_score_headers.append(f"Classical_{total_score_col_name}")
 
-    results_tuple = (df_chunk_scored, novel_motif_headers, novel_total_score_headers, novel_binding_score_headers,
-                     novel_positive_score_headers, novel_suboptimal_score_headers, novel_forbidden_score_headers,
-                     novel_final_call_headers, classical_motif_headers, classical_score_headers)
+    results_tuple = (df_chunk_scored, novel_motif_cols, novel_total_cols, novel_binding_cols, novel_positive_cols,
+                     novel_suboptimal_cols, novel_forbidden_cols, novel_call_cols, novel_classical_cols,
+                     classical_motif_headers, classical_score_headers)
 
     return results_tuple
 
@@ -424,17 +405,15 @@ def score_proteins(protein_seqs_df, predictor_params = predictor_params):
 
     pool = multiprocessing.Pool()
     scored_chunks = []
-    novel_motif_cols, novel_score_cols, classical_motif_cols, classical_score_cols = [], [], [], []
 
     with trange(len(df_chunks), desc="\tScoring proteins...") as pbar:
         for results in pool.imap(score_chunk_partial, df_chunks):
             df_chunk_scored = results[0]
             scored_chunks.append(df_chunk_scored)
 
-            novel_motif_cols, novel_total_score_cols, novel_binding_score_cols = results[1:4]
-            novel_positive_score_cols, novel_suboptimal_score_cols, novel_forbidden_score_cols = results[4:7]
-            novel_final_call_cols = results[7]
-            classical_motif_cols, classical_score_cols = results[8:]
+            novel_motif_cols, novel_total_cols, novel_binding_cols, novel_positive_cols = results[1:5]
+            novel_suboptimal_cols, novel_forbidden_cols, novel_call_cols, novel_classical_cols = results[5:9]
+            classical_motif_cols, classical_score_cols = results[9:]
 
             pbar.update()
 
@@ -443,9 +422,8 @@ def score_proteins(protein_seqs_df, predictor_params = predictor_params):
 
     scored_protein_df = pd.concat(scored_chunks, ignore_index=True)
 
-    final_results = (scored_protein_df, novel_motif_cols, novel_total_score_cols, novel_binding_score_cols,
-                     novel_positive_score_cols, novel_suboptimal_score_cols, novel_forbidden_score_cols,
-                     novel_final_call_cols,
-                     classical_motif_cols, classical_score_cols)
+    final_results = (scored_protein_df, novel_motif_cols, novel_total_cols, novel_binding_cols,
+                     novel_positive_cols, novel_suboptimal_cols, novel_forbidden_cols,
+                     novel_call_cols, novel_classical_cols, classical_motif_cols, classical_score_cols)
 
     return final_results
