@@ -120,7 +120,6 @@ def apply_specificity_scores(protein_seqs_df, motif_cols, predictor_params=predi
         pool.join()
 
         # Parse and reorder the results; assumes row order is the same as the input dataframe
-        cols = protein_seqs_df.columns.copy()
         for motif_col, specificity_score_col, valid_specificity_scores in zip(motif_cols, results.keys(), results.values()):
             if valid_specificity_scores is not None:
                 # Get mask for reapplying valid scores to whole column
@@ -132,13 +131,16 @@ def apply_specificity_scores(protein_seqs_df, motif_cols, predictor_params=predi
                 specificity_scores = np.full(shape=len(protein_seqs_df), fill_value=np.nan, dtype=float)
                 specificity_scores[valid_mask] = valid_specificity_scores
 
-                motif_col_idx = cols.get_loc(motif_col)
+                motif_col_idx = protein_seqs_df.columns.get_loc(motif_col)
                 if "homolog" in motif_col:
                     specificity_insert_idx = motif_col_idx + 9
                 else:
-                    specificity_insert_idx = motif_col_idx + 2 if "Classical" in motif_col else motif_col_idx + 6
+                    specificity_insert_idx = motif_col_idx + 2 if "Classical" in motif_col else motif_col_idx + 7
 
-                protein_seqs_df.insert(specificity_insert_idx, specificity_score_col, specificity_scores)
+                try:
+                    protein_seqs_df.insert(specificity_insert_idx, specificity_score_col, specificity_scores)
+                except Exception as e:
+                    raise e
 
         pbar.update()
 
