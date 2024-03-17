@@ -15,14 +15,6 @@ def make_gene_df(input_df, verbose = True):
 
     print("Initializing dataframe with best protein hit per gene...") if verbose else None
     main_df = input_df.copy()
-    main_genes = main_df["ensembl_gene_id"].to_list()
-    unique_genes = pd.unique(main_df["ensembl_gene_id"]).tolist()
-
-    unique_df = pd.DataFrame()
-    unique_df["ensembl_gene_id"] = unique_genes
-    unique_ref_row_indices = [main_genes.index(x) for x in unique_genes]
-    unique_gene_names = main_df.loc[unique_ref_row_indices, "external_gene_name"].to_list()
-    unique_df["external_gene_name"] = unique_gene_names
 
     novel_cols = [col for col in main_df.columns if "Novel" in col]
     if len(novel_cols) > 0:
@@ -176,17 +168,11 @@ def fuse_dfs(csv_paths, verbose = True):
     # Concatenate dataframes
     print("Combining homolog dataframes...") if verbose else None
     combined_df = unique_protein_dfs[0]
-    ensembl_peptides = combined_df["ensembl_peptide_id"].to_list()
     for unique_protein_df in unique_protein_dfs[1:]:
-        current_ensembl_peptides = unique_protein_df["ensembl_peptide_id"].to_list()
-        ref_row_index_dict = {}
-        for idx, peptide_id in enumerate(current_ensembl_peptides):
-            if ref_row_index_dict.get(peptide_id) is None:
-                ref_row_index_dict[peptide_id] = idx
-        ref_row_indices = [ref_row_index_dict.get(protein_id) for protein_id in ensembl_peptides]
-
         homolog_cols = [col for col in unique_protein_df.columns if "homolog" in col]
-        combined_df.loc[:,homolog_cols] = unique_protein_df.loc[ref_row_indices,homolog_cols]
+        homolog_cols = ["ensembl_peptide_id"] + homolog_cols
+        combined_df = pd.merge(combined_df, unique_protein_df[homolog_cols],
+                               how="outer", on="ensembl_peptide_id", validate="one_to_one")
 
     return combined_df
 
