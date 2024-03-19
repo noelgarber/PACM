@@ -17,47 +17,106 @@ def make_gene_df(input_df, verbose = True):
     main_df = input_df.copy()
 
     novel_cols = [col for col in main_df.columns if "Novel" in col]
-    if len(novel_cols) > 0:
-        # Sort for preferred proteins with better novel scores
-        id_cols = ["ensembl_gene_id", "external_gene_name", "ensembl_transcript_id", "ensembl_peptide_id"]
+    # Sort for preferred proteins with better novel scores
+    id_cols = ["ensembl_gene_id", "external_gene_name", "ensembl_transcript_id", "ensembl_peptide_id"]
 
-        print("Generating dataframe with novel motifs by gene...") if verbose else None
-        main_df.sort_values("Novel_1st_binding_motif_score", ascending=False, kind="stable", inplace=True)
-        main_df.sort_values("Novel_1st_final_call", ascending=False, kind="stable", inplace=True)
-        main_df.sort_values("Novel_1st_motif_topology_accessible", ascending=False, kind="stable", inplace=True)
+    print("Generating dataframe with novel motifs by gene...") if verbose else None
+    main_df.sort_values("Novel_1st_binding_motif_score", ascending=False, kind="stable", inplace=True)
+    main_df.sort_values("Novel_1st_final_call", ascending=False, kind="stable", inplace=True)
+    main_df.sort_values("Novel_1st_motif_topology_accessible", ascending=False, kind="stable", inplace=True)
 
-        novel_df = main_df.loc[:, id_cols + novel_cols].copy()
-        novel_df.drop_duplicates(subset="ensembl_gene_id", keep="first", inplace=True, ignore_index=True)
+    novel_df = main_df.loc[:, id_cols + novel_cols].copy()
+    novel_base_cols = [col for col in novel_df.columns if "homolog" not in col]
+    novel_base_cols.remove("ensembl_transcript_id")
+    novel_base_cols.remove("external_gene_name")
+    novel_homolog_cols = [col for col in novel_df.columns if "homolog" in col]
 
-        # Sort for preferred proteins with better classical scores
+    # For each homologous TaxID, preferentially pick entries for which a homolog exists
+    taxids = list(set([col.split("_homolog_")[0] for col in novel_homolog_cols]))
+    print(f"Picking optimal entries for each TaxID: {taxids}") if verbose else None
+
+    novel_taxid_dfs = []
+    for taxid in taxids:
+        taxid_cols = [col for col in novel_homolog_cols if taxid in col]
+        novel_taxid_df = novel_df.loc[:,novel_base_cols+taxid_cols].copy()
+        homolog_id_col = None
+        for taxid_col in taxid_cols:
+            if "_homolog_vs" in taxid_col and "id_best" in taxid_col:
+                homolog_id_col = taxid_col
+                break
+        homolog_exists = np.logical_and(novel_taxid_df[homolog_id_col].notna(),
+                                        novel_taxid_df[homolog_id_col].ne(""))
+        novel_taxid_df[f"{taxid}_homolog_exists"] = homolog_exists
+        novel_taxid_df.sort_values(f"{taxid}_homolog_exists", ascending=False, kind="stable", inplace=True)
+        novel_taxid_df.drop_duplicates(subset="ensembl_gene_id", keep="first", inplace=True, ignore_index=True)
+        novel_taxid_df.drop(f"{taxid}_homolog_exists", axis=1, inplace=True)
+
+        host_cols = novel_base_cols.copy()
+        host_cols.remove("ensembl_gene_id")
+        matching_host_cols = {col: f"{taxid}_Host_Match_{col}" for col in host_cols}
+        novel_taxid_df.rename(matching_host_cols, axis=1, inplace=True)
+
+        novel_taxid_dfs.append(novel_taxid_df)
+
+    # Merge dataframes for each TaxID for motifs found by the current model
+    novel_df.drop(novel_homolog_cols, axis=1, inplace=True)
+    novel_df.drop_duplicates(subset="ensembl_gene_id", keep="first", inplace=True, ignore_index=True)
+    for novel_taxid_df in novel_taxid_dfs:
+        novel_df = pd.merge(novel_df, novel_taxid_df, how="outer", on="ensembl_gene_id", validate="one_to_one")
+
+    novel_df.rename({"ensembl_transcript_id": "ensembl_transcript_id_best_novel",
+                     "ensembl_peptide_id": "ensembl_peptide_id_best_novel"}, axis=1, inplace=True)
+
+    # Sort for preferred proteins with better classical scores
+    classical_cols = [col for col in main_df.columns if "Classical" in col]
+    if len(classical_cols) > 0:
         print("Generating dataframe with classical motifs by gene...") if verbose else None
-        classical_cols = [col for col in main_df.columns if "Classical" in col]
 
         main_df.sort_values("Classical_1st_total_motif_score", ascending=True, kind="stable", inplace=True)
         main_df.sort_values("Classical_1st_motif_topology_accessible", ascending=False, kind="stable", inplace=True)
 
         classical_df = main_df.loc[:, id_cols + classical_cols].copy()
-        classical_df.drop_duplicates(subset="ensembl_gene_id", keep="first", inplace=True, ignore_index=True)
-        classical_df.drop("external_gene_name", axis=1, inplace=True) # prevent duplication
+        classical_base_cols = [col for col in classical_df.columns if "homolog" not in col]
+        classical_base_cols.remove("ensembl_transcript_id")
+        classical_base_cols.remove("external_gene_name")
+        classical_homolog_cols = [col for col in classical_df.columns if "homolog" in col]
+        classical_taxid_dfs = []
+        for taxid in taxids:
+            taxid_cols = [col for col in classical_homolog_cols if taxid in col]
+            classical_taxid_df = classical_df.loc[:,classical_base_cols+taxid_cols].copy()
+            homolog_id_col = None
+            for taxid_col in taxid_cols:
+                if "_homolog_vs" in taxid_col and "id_best" in taxid_col:
+                    homolog_id_col = taxid_col
+                    break
+            homolog_exists = np.logical_and(classical_taxid_df[homolog_id_col].notna(),
+                                            classical_taxid_df[homolog_id_col].ne(""))
+            classical_taxid_df[f"{taxid}_homolog_exists"] = homolog_exists
+            classical_taxid_df.sort_values(f"{taxid}_homolog_exists", ascending=False, kind="stable", inplace=True)
+            classical_taxid_df.drop_duplicates(subset="ensembl_gene_id", keep="first", inplace=True, ignore_index=True)
+            classical_taxid_df.drop(f"{taxid}_homolog_exists", axis=1, inplace=True)
 
-        # Merge dataframes
-        print("Concatenating dataframes of gene-level motif hits...") if verbose else None
-        novel_df.rename({"ensembl_transcript_id": "ensembl_transcript_id_best_novel",
-                         "ensembl_peptide_id": "ensembl_peptide_id_best_novel"}, axis=1, inplace=True)
+            host_cols = classical_base_cols.copy()
+            host_cols.remove("ensembl_gene_id")
+            matching_host_cols = {col: f"{taxid}_Host_Match_{col}" for col in host_cols}
+            classical_taxid_df.rename(matching_host_cols, axis=1, inplace=True)
+
+            classical_taxid_dfs.append(classical_taxid_df)
+
+        classical_df.drop(classical_homolog_cols, axis=1, inplace=True)
+        classical_df.drop_duplicates(subset="ensembl_gene_id", keep="first", inplace=True, ignore_index=True)
+        for classical_taxid_df in classical_taxid_dfs:
+            classical_df = pd.merge(classical_df, classical_taxid_df, how="outer", on="ensembl_gene_id",
+                                    validate="one_to_one")
+
         classical_df.rename({"ensembl_transcript_id": "ensembl_transcript_id_best_classical",
                              "ensembl_peptide_id": "ensembl_peptide_id_best_classical"}, axis=1, inplace=True)
+
+        print("Concatenating dataframes of gene-level motif hits...") if verbose else None
         unique_df = pd.merge(novel_df, classical_df, how="outer", on="ensembl_gene_id", validate="one_to_one")
 
     else:
-        # Sort for preferred proteins with better novel scores
-        print("Sorting dataframe...") if verbose else None
-
-        main_df.sort_values("1st_binding_motif_score", ascending=False, kind="stable", inplace=True)
-        main_df.sort_values("1st_final_call", ascending=False, kind="stable", inplace=True)
-        main_df.sort_values("1st_motif_topology_accessible", ascending=False, kind="stable", inplace=True)
-
-        print("Generating dataframe with scored motifs by gene...") if verbose else None
-        unique_df = main_df.drop_duplicates(subset="ensembl_gene_id", keep="first", inplace=False, ignore_index=True)
+        unique_df = novel_df
 
     return unique_df
 
