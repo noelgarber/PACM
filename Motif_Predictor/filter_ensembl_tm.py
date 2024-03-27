@@ -22,7 +22,7 @@ def parse_ensembl_tm(path):
     end_col = "end" if "end" in ensembl_tm_df.columns else "Transmembrane helices end"
 
     ensembl_tm_df.dropna(subset=[start_col, end_col], inplace=True)
-    ensembl_tm_df.sort_values(start_col, axis=1, ascending=True, inplace=True)
+    ensembl_tm_df.sort_values(start_col, axis=0, ascending=True, inplace=True)
     zipped_cols = zip(ensembl_tm_df[ensembl_id_col].to_list(),
                       ensembl_tm_df[start_col].to_list(),
                       ensembl_tm_df[end_col].to_list())
