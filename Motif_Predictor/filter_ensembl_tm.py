@@ -37,22 +37,28 @@ def parse_ensembl_tm(path):
 
     return ensembl_tm_dict
 
-def apply_ensembl_tm(df, ensembl_tm_dict, ensembl_id_col = "ensembl_peptide_id", seq_col = "sequence",
-                     start_tolerance = 0, end_tolerance = 0):
+def apply_ensembl_tm(df, ensembl_id_col = "ensembl_peptide_id", seq_col = "sequence", start_tolerance = 0,
+                     end_tolerance = 0, ensembl_tm_dict = None, ensembl_tm_path = None):
     '''
     Removes Ensembl transmembrane domains from scannable protein sequences
 
     Args:
         df (pd.DataFrame):      input dataframe containing sequences to sanitize
-        ensembl_tm_dict (dict): dictionary of ensembl protein id --> list of (start,end) for each transmembrane domain
         ensembl_id_col (str):   column name in df containing ensembl protein ids
         seq_col (str):          column name in df containing protein sequences
         start_tolerance (int):  amount of N-terminal side of transmembrane domain to retain
         end_tolerance (int):    amount of C-terminal side of transmembrane domain to retain
+        ensembl_tm_dict (dict): dictionary of ensembl protein id --> list of (start,end) for each transmembrane domain
+        ensembl_tm_path (str):  if ensembl_tm_dict is not given, give a path to a CSV/TSV so it can be constructed
 
     Returns:
         df (pd.DataFrame):      modified input dataframe
     '''
+
+    if ensembl_tm_dict is None and isinstance(ensembl_tm_path, str):
+        ensembl_tm_dict = parse_ensembl_tm(ensembl_tm_path)
+    elif ensembl_tm_dict is None:
+        raise ValueError(f"ensembl_tm_path must be a valid path, but was set to {ensembl_tm_path}")
 
     for i in np.arange(len(df)):
         ensembl_peptide_id = df.at[i, ensembl_id_col]
