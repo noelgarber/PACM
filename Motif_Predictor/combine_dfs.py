@@ -32,7 +32,11 @@ def make_gene_df(input_df, verbose = True):
     novel_homolog_cols = [col for col in novel_df.columns if "homolog" in col]
 
     # For each homologous TaxID, preferentially pick entries for which a homolog exists
-    taxids = list(set([col.split("_homolog_")[0] for col in novel_homolog_cols]))
+    taxids = []
+    for col in novel_homolog_cols:
+        new_taxid = col.split("_homolog_")[0]
+        if new_taxid not in taxids:
+            taxids.append(new_taxid)
     print(f"Picking optimal entries for each TaxID: {taxids}") if verbose else None
 
     novel_taxid_dfs = []
@@ -113,7 +117,8 @@ def make_gene_df(input_df, verbose = True):
                              "ensembl_peptide_id": "ensembl_peptide_id_best_classical"}, axis=1, inplace=True)
 
         print("Concatenating dataframes of gene-level motif hits...") if verbose else None
-        unique_df = pd.merge(novel_df, classical_df, how="outer", on="ensembl_gene_id", validate="one_to_one")
+        unique_df = pd.merge(novel_df, classical_df, how="outer", on="ensembl_gene_id",
+                             suffixes=("_novel", "_classical"), validate="one_to_one")
 
     else:
         unique_df = novel_df
