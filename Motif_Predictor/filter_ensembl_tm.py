@@ -60,15 +60,15 @@ def apply_ensembl_tm(df, ensembl_id_col = "ensembl_peptide_id", seq_col = "seque
     elif ensembl_tm_dict is None:
         raise ValueError(f"ensembl_tm_path must be a valid path, but was set to {ensembl_tm_path}")
 
-    for i in np.arange(len(df)):
-        ensembl_peptide_id = df.at[i, ensembl_id_col]
+    for idx in df.index:
+        ensembl_peptide_id = df.at[idx, ensembl_id_col]
         tm_ranges = ensembl_tm_dict.get(ensembl_peptide_id)
         if tm_ranges is not None:
-            protein_seq = df.at[i, seq_col]
+            protein_seq = df.at[idx, seq_col]
             for start, end in reversed(tm_ranges):
                 start = start + start_tolerance - 1 # convert to 0-indexing
                 end = end + end_tolerance - 1
                 protein_seq = protein_seq[:start] + "X" + protein_seq[end+1:]
-                df.at[i, seq_col] = protein_seq
+                df.at[idx, seq_col] = protein_seq
 
     return df

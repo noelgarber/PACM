@@ -7,6 +7,7 @@ import multiprocessing
 from tqdm import trange
 from functools import partial
 from Matrix_Generator.ConditionalMatrix import ConditionalMatrices
+from Motif_Predictor.filter_ensembl_tm import parse_ensembl_tm, apply_ensembl_tm
 from general_utils.general_utils import add_number_suffix
 
 # Import the user-specified params, either from a local version or the git-linked version
@@ -398,7 +399,22 @@ def score_proteins(protein_seqs_df, predictor_params = predictor_params):
                                classical_motif_cols, classical_score_cols)
     '''
 
+    # Filter out transmembrane helices before scoring
+    filter_transmembrane_helices = predictor_params["filter_transmembrane_helices"]
+    ensembl_tm_path = predictor_params["ensembl_tm_path"]
+    ensembl_tm_dict = parse_ensembl_tm(ensembl_tm_path)
+
     chunk_size = predictor_params["chunk_size"]
+    df_chunks = []
+    for i in range(0, len(protein_seqs_df), chunk_size):
+        df_chunk = protein_seqs_df.iloc[i:i + chunk_size]
+        if filter_transmembrane_helices:
+            seq_col = predictor_params["seq_col"]
+            start_tol = predictor_params["transmembrane_start_tolerance"]
+            end_tol = predictor_params["transmembrane_end_tolerance"]
+            df_chunk = apply_ensembl_tm(df_chunk, "ensembl_peptide_id", seq_col, start_tol, end_tol, ensembl_tm_dict)
+        df_chunks.append(df_chunk)
+
     df_chunks = [protein_seqs_df.iloc[i:i + chunk_size] for i in range(0, len(protein_seqs_df), chunk_size)]
 
     score_chunk_partial = partial(score_proteins_chunk, predictor_params = predictor_params)
