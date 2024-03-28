@@ -254,9 +254,9 @@ if __name__ == "__main__":
 
     parent_folder = csv_paths[0].rsplit("/",1)[0]
     save_path = os.path.join(parent_folder, "combined_datasets.csv")
-    combined_df.to_csv(save_path)
+    combined_df.to_csv(save_path, index=False)
 
     print("Making version with only one row per gene (best protein used)...")
     gene_df = make_gene_df(combined_df)
     gene_save_path = os.path.join(parent_folder, "combined_datasets_by_gene.csv")
-    gene_df.to_csv(gene_save_path)
+    gene_df.to_csv(gene_save_path, index=False)
