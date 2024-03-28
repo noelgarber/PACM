@@ -218,7 +218,7 @@ def scan_protein_seq(protein_seq, conditional_matrices, predictor_params = predi
                 residues_allowed = np.isin(column_residues, allowed_residues)
                 sliced_seqs_2d = sliced_seqs_2d[residues_allowed]
 
-        # After rules have been enforced, remove slices with uncertain residues (X)
+        # After rules have been enforced, remove slices with uncertain residues ("X") or discontinuous points (also "X")
         missing_residues = "X" in sliced_seqs_2d
         cleaned_sliced_2d = sliced_seqs_2d.copy()
         if missing_residues:
