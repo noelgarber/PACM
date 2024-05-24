@@ -1,14 +1,16 @@
 import pickle
 import os
 import xmltodict
+import gzip
+
+cwd = os.getcwd()
 
 def load_uniprot(path = None):
     '''
-    Simple function to load Uniprot database, available over FTP.
-    Warning: loads whole file in memory, so this will only work for subsets, not the whole database.
+    Simple function to load Uniprot database, available over FTP. Note: this takes a lot of memory!
 
     Args:
-        path (str):  path to either the XML file or a pickled version of it as a dictionary of dictionaries (pickled)
+        path (str|None): path to either the XML file or a pickled version of it as a dictionary of dictionaries (pickled)
 
     Returns:
         data (dict): dictionary of results
@@ -37,9 +39,13 @@ def load_uniprot(path = None):
 
     # Parse the path into a dictionary of dictionaries
     with open(path, "rb") as file:
-        if path.rsplit(".",1)[1] == "xml":
+        if path[-7:] == ".xml.gz":
+            with gzip.open(path, "rt") as gz:
+                xml_content = gz.read()
+                data = xmltodict.parse(xml_content)
+        elif path[-4:] == ".xml":
             data = xmltodict.parse(file)
-        elif path.rsplit(".",1)[1] == "pkl":
+        elif path[-4:] == ".pkl":
             data = pickle.load(file)
         else:
             raise Exception(f"Incorrect filetype; must be xml or pkl (pickled): {path}")
