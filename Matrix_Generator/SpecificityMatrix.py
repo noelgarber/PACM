@@ -178,38 +178,6 @@ class SpecificityMatrix:
             self.score_source_peptides(use_weighted = True)
             self.set_specificity_statistics(use_weighted = True)
 
-    def set_bias_ratio(self, thresholds, passes_col, pass_str):
-        '''
-        Function for finding the ratio of entries in the dataframe specific to one bait set vs. the other bait set;
-        necessary for statistical adjustment when the data is not evenly distributed between baits
-
-        Args:
-            thresholds (tuple):                  tuple of floats as (positive_thres, negative_thres)
-            passes_col (str):                    col name in source_df containing pass/fail info (significance calls)
-            pass_str (str):                      the string that indicates a pass in source_df[pass_col], e.g. "Yes"
-
-        Returns:
-            ratio (float): the ratio of entries above pos_thres to entries below neg_thres
-        '''
-
-        positive_thres, negative_thres = thresholds
-
-        # Get boolean series for thresholds and pass/fail info
-        above_thres = (self.least_different_values > positive_thres)
-        below_neg_thres = (self.least_different_values < negative_thres)
-        passes = self.scored_source_df[passes_col] == pass_str
-
-        # Count the number of qualifying entries that are above/below the relevant threshold and are marked as pass
-        above_thres_count = (above_thres & passes).sum()
-        below_neg_thres_count = (below_neg_thres & passes).sum()
-
-        # Handle divide-by-zero instances by incrementing both values by 1
-        if below_neg_thres_count == 0:
-            below_neg_thres_count += 1
-            above_thres_count += 1
-
-        self.bias_ratio = above_thres_count / below_neg_thres_count
-
     def find_least_different(self, log2fc_cols = None):
         '''
         Simple function to determine the least different log2fc between permutations of the sets of comparators
