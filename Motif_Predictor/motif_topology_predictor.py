@@ -5,7 +5,7 @@ import pandas as pd
 import multiprocessing
 from tqdm import trange
 from functools import partial
-from assemble_data.parse_uniprot_topology import get_topological_domains
+from uniparser import get_topological_domains
 from Motif_Predictor.predictor_config import predictor_params
 
 def predict_chunk(motifs_ids_tuple, topology_trim_begin, topology_trim_end, topological_domains, sequences):

@@ -29,7 +29,7 @@ def main(predictor_params = predictor_params):
     parse_topologies_upfront = predictor_params.get("parse_topologies_upfront")
     if parse_topologies_upfront:
         print("Parsing topologies upfront from Uniprot...")
-        from assemble_data.parse_uniprot_topology import get_topological_domains
+        from uniparser import get_topological_domains
         uniprot_path = predictor_params["uniprot_path"]
         topological_domains, sequences = get_topological_domains(path = uniprot_path)
     else:
