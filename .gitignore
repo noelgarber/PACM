@@ -36,6 +36,7 @@ Old*
 *temp_df_dump*
 *.xlsx*
 *combined_datasets*.csv
+*vs*.csv
 
 #Ignore PyCharm idea files
 *.idea
