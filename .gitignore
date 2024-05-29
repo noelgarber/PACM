@@ -37,6 +37,11 @@ Old*
 *.xlsx*
 *combined_datasets*.csv
 *vs*.csv
+*.tsv
+ensembl_transmembrane_human.csv
+ensembl_proteins_with_uniprot_and_lengths.csv
+ensembl_genes_with_uniprot_and_lengths.csv
+pickle
 
 #Ignore PyCharm idea files
 *.idea
