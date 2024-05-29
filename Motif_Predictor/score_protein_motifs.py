@@ -177,7 +177,8 @@ def score_sliced_protein(sequences_2d, conditional_matrices, score_addition_meth
 
     return output_lists
 
-def scan_protein_seq(protein_seq, conditional_matrices, forbidden_mask = None, predictor_params = predictor_params):
+def scan_protein_seq(protein_seq, conditional_matrices, forbidden_mask = None, predictor_params = predictor_params,
+                     verbose = False):
     '''
     Scans a protein sequence for the motif of interest
 
@@ -186,6 +187,7 @@ def scan_protein_seq(protein_seq, conditional_matrices, forbidden_mask = None, p
         conditional_matrices (ConditionalMatrices): object containing conditional weighted matrices
         forbidden_mask (np.ndarray|None):           forbidden secondary structure mask
         predictor_params (dict):                    dictionary of user-defined parameters from predictor_config.py
+        verbose (bool):                             whether to display verbose messages
 
     Returns:
         best_score, best_motif, second_best_score, second_best_motif
@@ -229,7 +231,9 @@ def scan_protein_seq(protein_seq, conditional_matrices, forbidden_mask = None, p
             sliced_mask_2d = sliced_mask_2d[:,ss_bounds[0]:ss_bounds[1]+1]
             sliced_mask = sliced_mask_2d.any(axis=1)
             sliced_seqs_2d = sliced_seqs_2d[~sliced_mask]
-            print(f"Removed {sliced_mask.sum()} of {len(sliced_mask)} slices for protein seq of length {len(protein_seq)}")
+            if verbose:
+                print(f"Removed {sliced_mask.sum()} of {len(sliced_mask)} slices for "
+                      f"protein seq of length {len(protein_seq)}")
 
         # Enforce position rules
         enforced_position_rules = predictor_params.get("enforced_position_rules")
@@ -334,13 +338,14 @@ def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
     matching_classical_col_names = [f"{suffix_number}_classical_score" for suffix_number in suffix_numbers]
 
     # Assemble a partial function for scoring individual proteins
+    forbidden_masks = df_chunk.loc[:,"forbidden_secondary_structure"]
     scan_seq_partial = partial(scan_protein_seq, conditional_matrices = conditional_matrices,
                                predictor_params = predictor_params)
 
     # Loop over the protein sequences to score them
-    for i, protein_seq in enumerate(protein_seqs_list):
+    for i, (protein_seq, forbidden_mask) in enumerate(zip(protein_seqs_list, forbidden_masks)):
         # Score the protein sequence using conditional matrices
-        protein_results = scan_seq_partial(protein_seq)
+        protein_results = scan_seq_partial(protein_seq, forbidden_mask = forbidden_mask)
         motifs, total_scores, binding_scores = protein_results[0:3]
         positive_scores, suboptimal_scores, forbidden_scores, final_calls = protein_results[3:]
         zipped_results = zip(motifs, total_scores, binding_scores,
@@ -447,11 +452,10 @@ def score_proteins(protein_seqs_df, predictor_params = predictor_params, dssp_ex
         if use_alphafold:
             alphadssp_results = generate_dssp(alphafold_tar_dir, dssp_executable,
                                               forbidden_dssp_codes, alphafold_plddt_thres, use_cached=True)
-            df_chunk = filter_dssp(df_chunk, alphadssp_results, seq_col = seq_col)
+            df_chunk = filter_dssp(df_chunk, alphadssp_results, seq_col = seq_col,
+                                   uniprot_col = "uniprot", trembl_col = "trembl")
 
         df_chunks.append(df_chunk)
-
-    df_chunks = [protein_seqs_df.iloc[i:i + chunk_size] for i in range(0, len(protein_seqs_df), chunk_size)]
 
     score_chunk_partial = partial(score_proteins_chunk, predictor_params = predictor_params)
 
