@@ -55,20 +55,36 @@ def apply_ensembl_tm(df, ensembl_id_col = "ensembl_peptide_id", seq_col = "seque
         df (pd.DataFrame):      modified input dataframe
     '''
 
+    df = df.copy()
+
     if ensembl_tm_dict is None and isinstance(ensembl_tm_path, str):
         ensembl_tm_dict = parse_ensembl_tm(ensembl_tm_path)
     elif ensembl_tm_dict is None:
         raise ValueError(f"ensembl_tm_path must be a valid path, but was set to {ensembl_tm_path}")
+
+    if "forbidden_secondary_structure" not in df.columns:
+        df.loc[:,"forbidden_secondary_structure"] = None
+        fss_col_existed = False
+    else:
+        fss_col_existed = True
 
     for idx in df.index:
         ensembl_peptide_id = df.at[idx, ensembl_id_col]
         tm_ranges = ensembl_tm_dict.get(ensembl_peptide_id)
         if tm_ranges is not None:
             protein_seq = df.at[idx, seq_col]
+            forbidden_secondary_structure = np.full(shape=len(protein_seq), fill_value=False, dtype=bool)
             for start, end in reversed(tm_ranges):
                 start = start + start_tolerance - 1 # convert to 0-indexing
-                end = end + end_tolerance - 1
-                protein_seq = protein_seq[:start] + "X" + protein_seq[end+1:]
-                df.at[idx, seq_col] = protein_seq
+                end = end - end_tolerance - 1
+                forbidden_secondary_structure[start:end+1] = True
+
+            if not fss_col_existed:
+                df.at[idx, "forbidden_secondary_structure"] = forbidden_secondary_structure
+            elif isinstance(df.at[idx, "forbidden_secondary_structure"], np.ndarray):
+                existing_arr = df.at[idx, "forbidden_secondary_structure"]
+                df.at[idx, "forbidden_secondary_structure"] = np.logical_or(existing_arr, forbidden_secondary_structure)
+            else:
+                raise Exception(f"df has forbidden_secondary_structure col, but it is not np.ndarray")
 
     return df

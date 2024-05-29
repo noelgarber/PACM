@@ -8,6 +8,7 @@ from tqdm import trange
 from functools import partial
 from Matrix_Generator.ConditionalMatrix import ConditionalMatrices
 from Motif_Predictor.filter_ensembl_tm import parse_ensembl_tm, apply_ensembl_tm
+from Motif_Predictor.filter_alphafold import filter_dssp
 from general_utils.general_utils import add_number_suffix
 
 # Import the user-specified params, either from a local version or the git-linked version
@@ -19,6 +20,14 @@ except:
 # If selected, import a parallel method for comparison
 if predictor_params["compare_classical_method"]:
     from Motif_Predictor.classical_method import classical_protein_method, classical_single_motif
+
+# If selected, import AlphaDSSP for secondary structure filtering
+use_alphafold = predictor_params.get("use_alphafold")
+if use_alphafold:
+    try:
+        from alphadssp import generate_dssp
+    except ModuleNotFoundError:
+        raise ModuleNotFoundError(f"AlphaDSSP is not installed. Use `pip install alphadssp`, then try again.")
 
 def score_sliced_protein(sequences_2d, conditional_matrices, score_addition_method, return_count = 3):
     '''
@@ -168,13 +177,14 @@ def score_sliced_protein(sequences_2d, conditional_matrices, score_addition_meth
 
     return output_lists
 
-def scan_protein_seq(protein_seq, conditional_matrices, predictor_params = predictor_params):
+def scan_protein_seq(protein_seq, conditional_matrices, forbidden_mask = None, predictor_params = predictor_params):
     '''
+    Scans a protein sequence for the motif of interest
 
     Args:
         protein_seq (str):                          full length protein sequence to score
         conditional_matrices (ConditionalMatrices): object containing conditional weighted matrices
-        weights_tuple (tuple):                      tuple of arrays of weights values
+        forbidden_mask (np.ndarray|None):           forbidden secondary structure mask
         predictor_params (dict):                    dictionary of user-defined parameters from predictor_config.py
 
     Returns:
@@ -184,6 +194,7 @@ def scan_protein_seq(protein_seq, conditional_matrices, predictor_params = predi
     # Get necessary arguments
     motif_length = predictor_params["motif_length"]
     return_count = predictor_params["return_count"]
+    ss_bounds = predictor_params["motif_secondary_structure_bounds"]
 
     # Get N-term and C-term trailing residue info
     leading_glycines = np.repeat("G", predictor_params["leading_glycines"])
@@ -209,6 +220,16 @@ def scan_protein_seq(protein_seq, conditional_matrices, predictor_params = predi
         seq_array = np.concatenate([leading_glycines, seq_array, trailing_glycines])
         slice_indices = np.arange(len(seq_array) - motif_length + 1)[:, np.newaxis] + np.arange(motif_length)
         sliced_seqs_2d = seq_array[slice_indices]
+
+        # Screen out forbidden secondary structures if desired
+        if forbidden_mask is not None:
+            forbidden_mask = np.concatenate([np.zeros(len(leading_glycines), dtype=bool),
+                                             forbidden_mask, np.zeros(len(trailing_glycines), dtype=bool)])
+            sliced_mask_2d = forbidden_mask[slice_indices]
+            sliced_mask_2d = sliced_mask_2d[:,ss_bounds[0]:ss_bounds[1]+1]
+            sliced_mask = sliced_mask_2d.any(axis=1)
+            sliced_seqs_2d = sliced_seqs_2d[~sliced_mask]
+            print(f"Removed {sliced_mask.sum()} of {len(sliced_mask)} slices for protein seq of length {len(protein_seq)}")
 
         # Enforce position rules
         enforced_position_rules = predictor_params.get("enforced_position_rules")
@@ -385,7 +406,7 @@ def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
 
     return results_tuple
 
-def score_proteins(protein_seqs_df, predictor_params = predictor_params):
+def score_proteins(protein_seqs_df, predictor_params = predictor_params, dssp_executable = "/usr/bin/dssp"):
     '''
     Upper level function to score protein sequences in parallel based on conditional matrices
 
@@ -404,15 +425,30 @@ def score_proteins(protein_seqs_df, predictor_params = predictor_params):
     ensembl_tm_path = predictor_params["ensembl_tm_path"]
     ensembl_tm_dict = parse_ensembl_tm(ensembl_tm_path)
 
+    # Filter out forbidden secondary structures if desired
+    use_alphafold = predictor_params.get("use_alphafold")
+    forbidden_dssp_codes = predictor_params.get("forbidden_dssp_codes")
+    alphafold_plddt_thres = predictor_params.get("alphafold_plddt_thres")
+    alphafold_tar_dir = predictor_params.get("alphafold_tar_dir")
+    seq_col = predictor_params["seq_col"]
+
     chunk_size = predictor_params["chunk_size"]
     df_chunks = []
     for i in range(0, len(protein_seqs_df), chunk_size):
         df_chunk = protein_seqs_df.iloc[i:i + chunk_size]
+
+        # Filter out transmembrane helices using Ensembl annotations
         if filter_transmembrane_helices:
-            seq_col = predictor_params["seq_col"]
             start_tol = predictor_params["transmembrane_start_tolerance"]
             end_tol = predictor_params["transmembrane_end_tolerance"]
             df_chunk = apply_ensembl_tm(df_chunk, "ensembl_peptide_id", seq_col, start_tol, end_tol, ensembl_tm_dict)
+
+        # Filter out forbidden secondary structures with AlphaFold
+        if use_alphafold:
+            alphadssp_results = generate_dssp(alphafold_tar_dir, dssp_executable,
+                                              forbidden_dssp_codes, alphafold_plddt_thres, use_cached=True)
+            df_chunk = filter_dssp(df_chunk, alphadssp_results, seq_col = seq_col)
+
         df_chunks.append(df_chunk)
 
     df_chunks = [protein_seqs_df.iloc[i:i + chunk_size] for i in range(0, len(protein_seqs_df), chunk_size)]
