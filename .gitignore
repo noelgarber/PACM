@@ -29,7 +29,7 @@ Old*
 #Ignore private files
 /Motif_Predictor/Private/*
 .githooks
-*config_local.py
+*_local.*
 *proteome_dataset*.csv
 *uniprot_sprot*
 *.xsd
