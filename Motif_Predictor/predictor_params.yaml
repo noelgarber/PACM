@@ -28,7 +28,7 @@ homology_params:
   homolog_score_chunk_size: 500
   homolog_selection_mode: "similarity"
   homolog_scoring_verbose: false
-  similarity_position_weights: "import and replace manually with np.array"
+  similarity_position_weights: [0,0,0,0,0,0,1,1,1,1,1,0,1,0,0]
 
 # Topology screening params; ensures that the topology of motifs faces cytosol (more compartments to be added in future)
 topo_params:
