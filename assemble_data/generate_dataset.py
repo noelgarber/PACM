@@ -191,7 +191,7 @@ def retrieve_matches(input_df, reference_taxid, target_taxids, homologene_path =
 
 def generate_dataset(protein_fasta_path = None, retrieve_matching_homologs = True, homologene_path = None,
                      reference_taxid = 9606, target_taxids = (3702,), separate_target_taxids = True,
-                     accession_dataset_name = "hsapiens_gene_ensembl", save_folder = None, verbose = True):
+                     accession_dataset_name = "hsapiens_gene_ensembl", verbose = True):
     '''
     Main function that generates the dataset
 
