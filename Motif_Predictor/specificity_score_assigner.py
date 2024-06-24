@@ -6,7 +6,9 @@ import pickle
 import multiprocessing
 from tqdm import trange
 from functools import partial
-from Motif_Predictor.predictor_config import predictor_params
+from Motif_Predictor.load_predictor_config import load_config
+
+predictor_params = load_config()
 
 def evaluate_chunk(chunk_tuple, specificity_matrix, use_specificity_weighted):
     '''

@@ -184,7 +184,7 @@ def scan_protein_seq(protein_seq, conditional_matrices, forbidden_mask = None, p
         protein_seq (str):                          full length protein sequence to score
         conditional_matrices (ConditionalMatrices): object containing conditional weighted matrices
         forbidden_mask (np.ndarray|None):           forbidden secondary structure mask
-        predictor_params (dict):                    dictionary of user-defined parameters from predictor_config.py
+        predictor_params (dict):                    dictionary of user-defined parameters from predictor_config
         verbose (bool):                             whether to display verbose messages
 
     Returns:
@@ -296,7 +296,7 @@ def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
 
     Args:
         df_chunk (pd.DataFrame):        chunk of protein sequences dataframe
-        predictor_params (dict):        dictionary of user-defined parameters from predictor_config.py
+        predictor_params (dict):        dictionary of user-defined parameters from predictor_config
 
     Returns:
         df_chunk_scored (pd.DataFrame): dataframe with protein sequences and found motifs
@@ -418,7 +418,7 @@ def score_proteins(protein_seqs_df, predictor_params = predictor_params, dssp_ex
 
     Args:
         protein_seqs_df (pd.DataFrame):   protein sequences dataframe
-        predictor_params (dict):          dictionary of user-defined parameters from predictor_config.py
+        predictor_params (dict):          dictionary of user-defined parameters from predictor_config
 
     Returns:
         final_results (tuple): tuple of (scored_protein_df, novel_motif_cols, novel_total_score_cols,

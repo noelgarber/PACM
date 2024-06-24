@@ -6,7 +6,9 @@ import multiprocessing
 from tqdm import trange
 from functools import partial
 from uniparser import get_topological_domains
-from Motif_Predictor.predictor_config import predictor_params
+from Motif_Predictor.load_predictor_config import load_config
+
+predictor_params = load_config()
 
 def predict_chunk(motifs_ids_tuple, topology_trim_begin, topology_trim_end, topological_domains, sequences):
     '''

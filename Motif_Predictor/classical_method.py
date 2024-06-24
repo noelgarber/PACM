@@ -1,11 +1,8 @@
-
-import os
 import numpy as np
 import pandas as pd
-try:
-    from Motif_Predictor.predictor_config import predictor_params
-except ModuleNotFoundError:
-    from predictor_config import predictor_params
+from Motif_Predictor.load_predictor_config import load_config
+
+predictor_params = load_config()
 
 ''' ---------------------------------------------------------------------------------------------------------------- 
             It is sometimes useful to compare the predictions of the PACM workflow against known algorithms. 

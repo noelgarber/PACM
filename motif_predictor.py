@@ -35,14 +35,18 @@ def main(predictor_params = predictor_params):
             topological_domains, sequences = get_topological_domains(path = uniprot_path)
 
     # Get CSV paths with protein sequences to score
-    protein_seqs_path = predictor_params["protein_seqs_paths"]
-    if isinstance(protein_seqs_path, list):
-        protein_seqs_paths = protein_seqs_path
-    else:
-        protein_seqs_paths = [protein_seqs_path]
+    keys = list(predictor_params["protein_seqs_paths"].keys())
+    protein_seqs_paths = []
+    df_chunk_counts = []
+    for key in keys:
+        protein_seqs_path = predictor_params["protein_seqs_paths"][key]
+        protein_seqs_paths.append(protein_seqs_path)
+        df_chunk_count = predictor_params["df_chunks"].get(key)
+        if df_chunk_count is None:
+            raise Exception(f"df_chunks key mismatch: key \"{key}\" not found")
+        else:
+            df_chunk_counts.append(df_chunk_count)
 
-    # Also get dataframe chunk sizes for memory management
-    df_chunk_counts = predictor_params["df_chunks"]
     seq_col = predictor_params["seq_col"]
 
     output_paths = []
