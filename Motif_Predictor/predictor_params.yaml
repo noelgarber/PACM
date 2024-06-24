@@ -1,0 +1,65 @@
+# Motif Prediction Config File (User-Modifiable)
+
+# Protein sequence-containing spreadsheets; keys refer to reference TaxID (vs. homolog TaxID if homology is being tested)
+protein_seqs_paths:
+  "9606_vs_10090": "/home/user/datasets/proteome_dataset_10090_homologs.csv"
+  "9606_vs_10116": "/home/user/datasets/proteome_dataset_10116_homologs.csv"
+  "9606_vs_7955": "/home/user/datasets/proteome_dataset_7955_homologs.csv"
+  "9606_vs_6239": "/home/user/datasets/proteome_dataset_6239_homologs.csv"
+  "9606_vs_7227": "/home/user/datasets/proteome_dataset_7227_homologs.csv"
+  "9606_vs_4932": "/home/user/datasets/proteome_dataset_4932_homologs.csv"
+  "9606_vs_4896": "/home/user/datasets/proteome_dataset_4896_homologs.csv"
+  "9606_vs_3702": "/home/user/datasets/proteome_dataset_3702_homologs.csv"
+
+# Chunks to divide each spreadsheet into; decrease to improve speed, but increase if memory usage is too high
+df_chunks:
+  "9606_vs_10090": 30
+  "9606_vs_10116": 30
+  "9606_vs_7955": 30
+  "9606_vs_6239": 30
+  "9606_vs_7227": 30
+  "9606_vs_4932": 30
+  "9606_vs_4896": 30
+  "9606_vs_3702": 30
+
+# Homologous motif scanning params; mode can be "best" (finds best motif in homolog) or "closest" (maximizes similarity)
+homology_params:
+  homology_mode: "best"
+  homolog_score_chunk_size: 500
+  homolog_selection_mode: "similarity"
+  homolog_scoring_verbose: false
+  similarity_position_weights: "import and replace manually with np.array"
+
+# Topology screening params; ensures that the topology of motifs faces cytosol (more compartments to be added in future)
+topo_params:
+  filter_transmembrane_helices: true
+  transmembrane_start_tolerance: 4
+  transmembrane_end_tolerance: 2
+  ensembl_tm_path: "/home/user/your_directory/ensembl_transmembrane_human.csv"
+  parse_topologies_upfront: true
+  topology_trim_begin: 6
+  topology_trim_end: 2
+  topology_chunk_size: 500
+  uniprot_path: "/home/user/your_directory/uniprot_sprot_human.pkl"
+
+# AlphaFold secondary structure screening params; requires a directory containing the AlphaFold database as tar shards
+alphafold_params:
+  use_alphafold: true
+  forbidden_dssp_codes: ["H", "B", "E", "G", "I", "T"]
+  alphafold_plddt_thres: 70
+  alphafold_tar_dir: "/home/user/Documents/Alphafold Data"
+  motif_secondary_structure_bounds: [6, 10]
+
+# General params
+predictor_params:
+  motif_length: 15
+  convert_phospho: true
+  assign_specificity_scores: true
+  use_specificity_weighted: true
+  return_count: 3
+  compare_classical_method: true
+  enforced_position_rules:
+    "7": ["F", "Y"]
+    "9": ["D", "E", "S", "T"]
+  conditional_matrices_path: "/home/user/your_directory/Matrix_Data/conditional_matrices.pkl"
+  specificity_matrix_path: "/home/user/your_directory/Matrix_Data/weighted_specificity_matrix.pkl"
