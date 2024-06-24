@@ -224,25 +224,57 @@ def generate_dataset(protein_fasta_path = None, retrieve_matching_homologs = Tru
                 subset_data_df.to_csv(save_path)
         else:
             data_df = retrieve_matches(data_df, reference_taxid, target_taxids, homologene_path, homologs, verbose)
-            save_path = os.path.join(save_folder, f"proteome_dataset_all_homologs.csv")
+            save_path = os.path.join(save_folder, f"{reference_taxid}_proteome_dataset_all_homologs.csv")
             data_df.to_csv(save_path)
     else:
-        save_path = os.path.join(save_folder, f"proteome_dataset.csv")
+        save_path = os.path.join(save_folder, f"{reference_taxid}_proteome_dataset.csv")
         data_df.to_csv(save_path)
 
 if __name__ == "__main__":
     default_fasta_path = os.path.join(os.getcwd(), "default_source_data/Homo_sapiens.GRCh38.pep.all.fa")
-    fasta_path = default_fasta_path if os.path.isfile(default_fasta_path) else None
+    if os.path.isfile(default_fasta_path):
+        use_default = input(f"Use default fasta path ({default_fasta_path})? (Y/N)  ")
+        if use_default == "Y":
+            fasta_path = default_fasta_path
+        else:
+            fasta_path = input(f"Enter the new FASTA path to use:  ")
+    else:
+        fasta_path = input(f"Default FASTA path does not exist; enter the path here:  ")
 
-    retrieve_matching_homologs = True
-    separate_target_str = input("Separate homologs by target taxid? (Y/n):  ")
-    separate_target_taxids = separate_target_str == "Y" or separate_target_str == "y"
+    retrieve_matching_homologs = input("Retrieve matching homologs? (Y/N)  ") == "Y"
+    if retrieve_matching_homologs:
+        separate_target_str = input("Separate homologs by target taxid? (Y/n):  ")
+        separate_target_taxids = separate_target_str == "Y" or separate_target_str == "y"
+    else:
+        separate_target_taxids = False
     homologene_default_path = os.path.join(os.getcwd(), "default_source_data/homologene.data")
     homologene_path = homologene_default_path if os.path.isfile(homologene_default_path) else None
 
-    reference_taxid = 9606 # human
-    target_taxids = (10090, 10116, 7955, 6239, 7227, 4932, 4896, 3702)
+    while True:
+        reference_taxid = input("Enter reference taxid (e.g. 9606):  ")
+        try:
+            reference_taxid = int(reference_taxid)
+            break
+        except:
+            print(f"The input given was not an integer: {reference_taxid}")
 
-    accession_dataset_name = "hsapiens_gene_ensembl"
+    target_taxids = []
+    while True:
+        target_taxid = input(f"Enter a target taxid; hit enter when done:  ")
+        if target_taxid == "":
+            break
+        else:
+            try:
+                target_taxid = int(target_taxid)
+                target_taxids.append(target_taxid)
+            except:
+                print(f"The input given was not an integer: {target_taxid}")
+
+    target_taxids = tuple(target_taxids)
+
+    accession_dataset_name = input("Enter the accession dataset name, or leave blank to use default (hsapiens_gene_ensembl):  ")
+    if accession_dataset_name == "":
+        accession_dataset_name = "hsapiens_gene_ensembl"
+
     generate_dataset(fasta_path, retrieve_matching_homologs, homologene_path, reference_taxid, target_taxids,
                      separate_target_taxids, accession_dataset_name, verbose=True)
