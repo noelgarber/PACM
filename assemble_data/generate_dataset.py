@@ -4,12 +4,12 @@ import numpy as np
 import pandas as pd
 import os
 import pickle
-from biomart import BiomartServer
+from biomart import BiomartServer, BiomartException
 from io import StringIO
 from Bio import SeqIO
 from assemble_data.retrieve_homologs import get_homologs
 
-def fetch_accessions(dataset_name = "hsapiens_gene_ensembl", biomart_url = "http://useast.ensembl.org/biomart"):
+def fetch_accessions(dataset_name = "hsapiens_gene_ensembl", biomart_url = "http://www.ensembl.org/biomart"):
     '''
     Accession retrieval function
 
@@ -29,7 +29,16 @@ def fetch_accessions(dataset_name = "hsapiens_gene_ensembl", biomart_url = "http
     attributes = ["ensembl_gene_id", "ensembl_transcript_id", "ensembl_peptide_id",
                   "external_gene_name", "gene_biotype", "refseq_peptide", "refseq_peptide_predicted"]
     print("Requesting Ensembl and NCBI accessions...")
-    response = dataset.search({"attributes": attributes})
+    while True:
+        try:
+            response = dataset.search({"attributes": attributes})
+            break
+        except BiomartException as e:
+            if "refseq_peptide_predicted" in str(e):
+                print(f"\tBiomartException encountered; trying again without refseq_peptide_predicted...")
+                attributes.remove("refseq_peptide_predicted")
+            else:
+                raise e
 
     print("\tStreaming data...")
     response_tsv = StringIO(response.text)
@@ -64,7 +73,8 @@ def fetch_accessions(dataset_name = "hsapiens_gene_ensembl", biomart_url = "http
 
     return accessions_df
 
-def generate_base_dataset(protein_fasta_path = None, accession_dataset_name = "hsapiens_gene_ensembl"):
+def generate_base_dataset(protein_fasta_path = None, accession_dataset_name = "hsapiens_gene_ensembl",
+                          biomart_url = "http://www.ensembl.org/biomart"):
     '''
     Main function that generates the dataset
 
@@ -85,11 +95,11 @@ def generate_base_dataset(protein_fasta_path = None, accession_dataset_name = "h
             with open(accessions_path, "rb") as f:
                 data_df = pickle.load(f)
         else:
-            data_df = fetch_accessions(accession_dataset_name)
+            data_df = fetch_accessions(accession_dataset_name, biomart_url)
             with open(accessions_path, "wb") as f:
                 pickle.dump(data_df, f)
     else:
-        data_df = fetch_accessions(accession_dataset_name)
+        data_df = fetch_accessions(accession_dataset_name, biomart_url)
         with open(accessions_path, "wb") as f:
             pickle.dump(data_df, f)
 
@@ -103,6 +113,7 @@ def generate_base_dataset(protein_fasta_path = None, accession_dataset_name = "h
 
     # Apply sequences to corresponding IDs in the dataframe
     ensembl_ids = data_df["ensembl_peptide_id"].to_list()
+    ensembl_ids = [pep_id.rsplit(".", 1)[0] for pep_id in ensembl_ids]
     seqs = [ensembl_sequence_dict.get(ensembl_id) for ensembl_id in ensembl_ids]
     data_df["sequence"] = seqs
 
@@ -191,7 +202,8 @@ def retrieve_matches(input_df, reference_taxid, target_taxids, homologene_path =
 
 def generate_dataset(protein_fasta_path = None, retrieve_matching_homologs = True, homologene_path = None,
                      reference_taxid = 9606, target_taxids = (3702,), separate_target_taxids = True,
-                     accession_dataset_name = "hsapiens_gene_ensembl", verbose = True):
+                     accession_dataset_name = "hsapiens_gene_ensembl", biomart_url = "http://www.ensembl.org/biomart",
+                     verbose = True):
     '''
     Main function that generates the dataset
 
@@ -211,7 +223,7 @@ def generate_dataset(protein_fasta_path = None, retrieve_matching_homologs = Tru
     save_folder = os.getcwd().rsplit("/",1)[0]
 
     # Generate main dataframe with host accessions and sequences
-    data_df = generate_base_dataset(protein_fasta_path, accession_dataset_name)
+    data_df = generate_base_dataset(protein_fasta_path, accession_dataset_name, biomart_url)
 
     # Assign homolog accessions and sequences
     if retrieve_matching_homologs:
@@ -276,5 +288,10 @@ if __name__ == "__main__":
     if accession_dataset_name == "":
         accession_dataset_name = "hsapiens_gene_ensembl"
 
+    default_biomart_url = "http://www.ensembl.org/biomart"
+    biomart_url = input(f"Enter the BioMart URL to use, or leave blank to use default (http://www.ensembl.org/biomart):  ")
+    if biomart_url == "":
+        biomart_url = default_biomart_url
+
     generate_dataset(fasta_path, retrieve_matching_homologs, homologene_path, reference_taxid, target_taxids,
-                     separate_target_taxids, accession_dataset_name, verbose=True)
+                     separate_target_taxids, accession_dataset_name, biomart_url, verbose=True)
