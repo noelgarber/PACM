@@ -10,12 +10,9 @@ from Matrix_Generator.ConditionalMatrix import ConditionalMatrices
 from Motif_Predictor.filter_ensembl_tm import parse_ensembl_tm, apply_ensembl_tm
 from Motif_Predictor.filter_alphafold import filter_dssp
 from general_utils.general_utils import add_number_suffix
+from Motif_Predictor.load_predictor_config import load_config
 
-# Import the user-specified params, either from a local version or the git-linked version
-try:
-    from Motif_Predictor.predictor_config_local import predictor_params
-except:
-    from Motif_Predictor.predictor_config import predictor_params
+predictor_params = load_config()
 
 # If selected, import a parallel method for comparison
 if predictor_params["compare_classical_method"]:

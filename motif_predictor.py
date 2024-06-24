@@ -9,10 +9,9 @@ from Motif_Predictor.check_conservation import evaluate_homologs
 from Motif_Predictor.score_homolog_motifs import score_homolog_motifs
 from Motif_Predictor.motif_topology_predictor import predict_topology
 from Motif_Predictor.combine_dfs import fuse_dfs, make_gene_df
-try:
-    from Motif_Predictor.predictor_config_local import predictor_params
-except:
-    from Motif_Predictor.predictor_config import predictor_params
+from Motif_Predictor.load_predictor_config import load_config
+
+predictor_params = load_config()
 
 def main(predictor_params = predictor_params):
     '''
@@ -36,7 +35,7 @@ def main(predictor_params = predictor_params):
             topological_domains, sequences = get_topological_domains(path = uniprot_path)
 
     # Get CSV paths with protein sequences to score
-    protein_seqs_path = predictor_params["protein_seqs_path"]
+    protein_seqs_path = predictor_params["protein_seqs_paths"]
     if isinstance(protein_seqs_path, list):
         protein_seqs_paths = protein_seqs_path
     else:
