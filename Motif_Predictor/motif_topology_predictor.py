@@ -105,12 +105,13 @@ def predict_topology(data_df, motif_cols, predictor_params = predictor_params,
         data_df (pd.DataFrame):   data_df with topology columns added
     '''
 
-    topology_trim_begin = predictor_params["topology_trim_begin"]
-    topology_trim_end = predictor_params["topology_trim_end"]
-    chunk_size = predictor_params["topology_chunk_size"]
+    topo_params = predictor_params["topo_params"]
+    topology_trim_begin = topo_params["topology_trim_begin"]
+    topology_trim_end = topo_params["topology_trim_end"]
+    chunk_size = topo_params["topology_chunk_size"]
 
     if topological_domains is None or sequences is None:
-        uniprot_path = predictor_params["uniprot_path"]
+        uniprot_path = topo_params["uniprot_path"]
         topological_domains, sequences = get_topological_domains(path = uniprot_path)
 
     uniprot_ids = data_df["uniprot"]

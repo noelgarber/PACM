@@ -22,7 +22,8 @@ if predictor_params["compare_classical_method"]:
     from Motif_Predictor.classical_method import classical_protein_method, classical_single_motif
 
 # If selected, import AlphaDSSP for secondary structure filtering
-use_alphafold = predictor_params.get("use_alphafold")
+alphafold_params = predictor_params.get("alphafold_params")
+use_alphafold = alphafold_params.get("use_alphafold") if isinstance(alphafold_params, dict) else False
 if use_alphafold:
     try:
         from alphadssp import generate_dssp
@@ -196,7 +197,10 @@ def scan_protein_seq(protein_seq, conditional_matrices, forbidden_mask = None, p
     # Get necessary arguments
     motif_length = predictor_params["motif_length"]
     return_count = predictor_params["return_count"]
-    ss_bounds = predictor_params["motif_secondary_structure_bounds"]
+    if isinstance(predictor_params.get("alphafold_params"), dict):
+        ss_bounds = predictor_params["alphafold_params"]["motif_secondary_structure_bounds"]
+    else:
+        ss_bounds = None
 
     # Get N-term and C-term trailing residue info
     leading_glycines = np.repeat("G", predictor_params["leading_glycines"])
@@ -425,16 +429,27 @@ def score_proteins(protein_seqs_df, predictor_params = predictor_params, dssp_ex
                                classical_motif_cols, classical_score_cols)
     '''
 
-    # Filter out transmembrane helices before scoring
-    filter_transmembrane_helices = predictor_params["filter_transmembrane_helices"]
-    ensembl_tm_path = predictor_params["ensembl_tm_path"]
-    ensembl_tm_dict = parse_ensembl_tm(ensembl_tm_path)
+    # Filter out transmembrane helices before scoring if desired
+    topo_params = predictor_params.get("topo_params")
+    if isinstance(topo_params, dict):
+        filter_transmembrane_helices = topo_params["filter_transmembrane_helices"]
+        ensembl_tm_path = topo_params["ensembl_tm_path"]
+        ensembl_tm_dict = parse_ensembl_tm(ensembl_tm_path)
+    else:
+        filter_transmembrane_helices = False
+        ensembl_tm_path, ensembl_tm_dict = None, None
 
     # Filter out forbidden secondary structures if desired
-    use_alphafold = predictor_params.get("use_alphafold")
-    forbidden_dssp_codes = predictor_params.get("forbidden_dssp_codes")
-    alphafold_plddt_thres = predictor_params.get("alphafold_plddt_thres")
-    alphafold_tar_dir = predictor_params.get("alphafold_tar_dir")
+    alphafold_params = predictor_params.get("alphafold_params")
+    if isinstance(alphafold_params, dict):
+        use_alphafold = alphafold_params.get("use_alphafold")
+        forbidden_dssp_codes = alphafold_params.get("forbidden_dssp_codes")
+        alphafold_plddt_thres = alphafold_params.get("alphafold_plddt_thres")
+        alphafold_tar_dir = alphafold_params.get("alphafold_tar_dir")
+    else:
+        use_alphafold = False
+        forbidden_dssp_codes, alphafold_plddt_thres, alphafold_tar_dir = None, None, None
+
     seq_col = predictor_params["seq_col"]
 
     chunk_size = predictor_params["chunk_size"]
@@ -444,8 +459,8 @@ def score_proteins(protein_seqs_df, predictor_params = predictor_params, dssp_ex
 
         # Filter out transmembrane helices using Ensembl annotations
         if filter_transmembrane_helices:
-            start_tol = predictor_params["transmembrane_start_tolerance"]
-            end_tol = predictor_params["transmembrane_end_tolerance"]
+            start_tol = topo_params["transmembrane_start_tolerance"]
+            end_tol = topo_params["transmembrane_end_tolerance"]
             df_chunk = apply_ensembl_tm(df_chunk, "ensembl_peptide_id", seq_col, start_tol, end_tol, ensembl_tm_dict)
 
         # Filter out forbidden secondary structures with AlphaFold

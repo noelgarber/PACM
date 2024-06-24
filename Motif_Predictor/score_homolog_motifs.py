@@ -249,7 +249,7 @@ def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, 
         model_score_cols (list):    shortened list of col names containing homologous motif scores according to model
     '''
 
-    verbose = predictor_params["homolog_scoring_verbose"]
+    verbose = predictor_params["homology_params"]["homolog_scoring_verbose"]
 
     # Load ConditionalMatrices object to be used in scoring
     conditional_matrices_path = predictor_params["conditional_matrices_path"]
@@ -273,7 +273,7 @@ def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, 
     enforced_position_rules = predictor_params["enforced_position_rules"]
     selenocysteine_substitute = predictor_params["selenocysteine_substitute"]
     gap_substitute = predictor_params["gap_substitute"]
-    chunk_size = predictor_params["homolog_score_chunk_size"]
+    chunk_size = predictor_params["homology_params"]["homolog_score_chunk_size"]
     score_addition_method = predictor_params["score_addition_method"]
     compare_classical_method = predictor_params["compare_classical_method"]
     classical_func = classical_motif_method if compare_classical_method else None
@@ -315,7 +315,7 @@ def score_homolog_motifs(data_df, homolog_motif_cols, homolog_motif_col_groups, 
     final_homolog_motif_cols = []
     final_call_cols = []
     drop_cols = []
-    selection_mode = predictor_params["homolog_selection_mode"]
+    selection_mode = predictor_params["homology_params"]["homolog_selection_mode"]
     description = "\tAssigning best homologous motifs to dataframe and removing others..."
     with trange(int(21*len(homolog_motif_col_groups)), desc=description) as pbar:
         # Get the grids of scores from the dataframe

@@ -26,14 +26,14 @@ def main(predictor_params = predictor_params):
     '''
 
     # Optionally pre-parse topological domains from Uniprot instead of doing so for each chunk
-    parse_topologies_upfront = predictor_params.get("parse_topologies_upfront")
-    if parse_topologies_upfront:
-        print("Parsing topologies upfront from Uniprot...")
-        from uniparser import get_topological_domains
-        uniprot_path = predictor_params["uniprot_path"]
-        topological_domains, sequences = get_topological_domains(path = uniprot_path)
-    else:
-        topological_domains, sequences = None, None
+    topological_domains, sequences = None, None
+    if isinstance(predictor_params.get("topo_params"), dict):
+        parse_topologies_upfront = predictor_params["topo_params"].get("parse_topologies_upfront")
+        if parse_topologies_upfront:
+            print("Parsing topologies upfront from Uniprot...")
+            from uniparser import get_topological_domains
+            uniprot_path = predictor_params["topo_params"]["uniprot_path"]
+            topological_domains, sequences = get_topological_domains(path = uniprot_path)
 
     # Get CSV paths with protein sequences to score
     protein_seqs_path = predictor_params["protein_seqs_path"]
@@ -86,7 +86,12 @@ def main(predictor_params = predictor_params):
                     homolog_id_cols.append(col)
 
             # Evaluate motif homology
-            similarity_weights = predictor_params.get("similarity_position_weights")
+            homology_params = predictor_params.get("homology_params")
+            if isinstance(homology_params, dict):
+                similarity_weights = homology_params.get("similarity_position_weights")
+            else:
+                similarity_weights = None
+
             replace_selenocysteine = predictor_params["replace_selenocysteine"]
             selenocysteine_substitute = predictor_params.get("selenocysteine_substitute")
             homology_results = evaluate_homologs(chunk_df, all_motif_cols, homolog_seq_cols, similarity_weights,
