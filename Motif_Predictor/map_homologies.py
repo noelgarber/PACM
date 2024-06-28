@@ -282,7 +282,7 @@ def map_homologies(reference_taxid = 9606, target_taxids = (10090, 10116, 7955, 
                 reference_response = ensembl.search({"filters": {}, "attributes": reference_attributes})
                 target_response = None
             except BiomartException as e:
-                print(f"\tTarget species {target_species} was not found in reference dataset {reference_datasets[0]};"
+                print(f"\tTarget species {target_species} was not found in reference dataset {reference_datasets[0]}; "
                       f"attempting in reverse direction...")
                 reference_response = None
 
