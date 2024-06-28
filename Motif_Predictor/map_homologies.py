@@ -263,7 +263,6 @@ def map_homologies(reference_taxid = 9606, target_taxids = (10090, 10116, 7955, 
         reference_subdomain = reference_url.split("//", 1)[1].split(".", 1)[0]
         ensembl = server.datasets[reference_datasets[0]]
         target_dicts = {}
-        exception_species = []
         for target_taxid in target_taxids:
             print(f"Querying BioMart for target taxid {target_taxid}...")
             target_datasets, target_url = targets_datasets[target_taxid]
@@ -299,7 +298,6 @@ def map_homologies(reference_taxid = 9606, target_taxids = (10090, 10116, 7955, 
                     target_response = ensembl.search({"filters": {}, "attributes": target_attributes})
                 except BiomartException as e:
                     target_response = None
-                    exception_species.append(target_species)
                     print(f"\tReference species {reference_species_name} was not found in "
                           f"target dataset {target_datasets[0]} either; adding {target_species} to exceptions list")
 
