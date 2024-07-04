@@ -46,14 +46,31 @@ def fetch_accessions(dataset_name = "hsapiens_gene_ensembl", biomart_url = "http
     accessions_df.columns = attributes
 
     # Get the Uniprot accession numbers separately (requesting with NCBI accessions results in an error)
-    uniprot_attributes = ["ensembl_peptide_id", "uniprotswissprot", "uniprotsptrembl"]
-    print("Requesting UniProt accessions...")
+    available_attributes = list(dataset.attributes.keys())
+    has_swissprot = "uniprotswissprot" in available_attributes
+    has_trembl = "uniprotsptrembl" in available_attributes
+    if has_swissprot and has_trembl:
+        uniprot_attributes = ["ensembl_peptide_id", "uniprotswissprot", "uniprotsptrembl"]
+        print("Requesting UniProt accessions (SwissProt and TrEMBL)...")
+    elif has_swissprot:
+        uniprot_attributes = ["ensembl_peptide_id", "uniprotswissprot"]
+        print("Requesting UniProt accessions (SwissProt only)...")
+    elif has_trembl:
+        uniprot_attributes = ["ensembl_peptide_id", "uniprotsptrembl"]
+        print("Requesting UniProt accessions (TrEMBL only)...")
+    else:
+        raise BiomartException(f"Current dataset ({dataset_name}) does not have attributes `uniprotswissprot` or "
+                               f"`uniprotsptrembl`, but at least one is required")
     uniprot_response = dataset.search({"attributes": uniprot_attributes})
 
     print("\tStreaming data...")
     uniprot_tsv = StringIO(uniprot_response.text)
     uniprot_df = pd.read_csv(uniprot_tsv, header=None, sep="\t")
     uniprot_df.columns = uniprot_attributes
+    if not has_swissprot:
+        uniprot_df["uniprotswissprot"] = ""
+    if not has_trembl:
+        uniprot_df["uniprotsptrembl"] = ""
 
     ensembl_ids = uniprot_df["ensembl_peptide_id"].to_list()
     uniprot_ids = uniprot_df["uniprotswissprot"].to_list()
