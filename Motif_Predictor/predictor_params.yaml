@@ -1,46 +1,51 @@
 # Motif Prediction Config File (User-Modifiable)
 
-# Protein sequence-containing spreadsheets; keys refer to reference TaxID (vs. homolog TaxID if homology is being tested)
+# Protein sequence-containing spreadsheets; keys have different requirements depending on homolog_selection_mode:
+#   - if homolog_selection_mode = "best", keys = TaxIDs (e.g. 9606), & first entry is treated as reference species
+#   - otherwise, keys are reference vs. target TaxIDs (e.g. "9606_vs_10090")
 protein_seqs_paths:
-  "9606_vs_10090": "/home/user/datasets/proteome_dataset_10090_homologs.csv"
-  "9606_vs_10116": "/home/user/datasets/proteome_dataset_10116_homologs.csv"
-  "9606_vs_7955": "/home/user/datasets/proteome_dataset_7955_homologs.csv"
-  "9606_vs_6239": "/home/user/datasets/proteome_dataset_6239_homologs.csv"
-  "9606_vs_7227": "/home/user/datasets/proteome_dataset_7227_homologs.csv"
-  "9606_vs_4932": "/home/user/datasets/proteome_dataset_4932_homologs.csv"
-  "9606_vs_4896": "/home/user/datasets/proteome_dataset_4896_homologs.csv"
-  "9606_vs_3702": "/home/user/datasets/proteome_dataset_3702_homologs.csv"
+  9606: "/home/user/Documents/GitHub/PACM/9606_proteome_dataset.csv"
+  10090: "/home/user/Documents/GitHub/PACM/10090_proteome_dataset.csv"
+  10116: "/home/user/Documents/GitHub/PACM/10116_proteome_dataset.csv"
+  7955: "/home/user/Documents/GitHub/PACM/7955_proteome_dataset.csv"
+  6239: "/home/user/Documents/GitHub/PACM/6239_proteome_dataset.csv"
+  7227: "/home/user/Documents/GitHub/PACM/7227_proteome_dataset.csv"
+  4932: "/home/user/Documents/GitHub/PACM/4932_proteome_dataset.csv"
+  4896: "/home/user/Documents/GitHub/PACM/4896_proteome_dataset.csv"
+  3702: "/home/user/Documents/GitHub/PACM/3702_proteome_dataset.csv"
 
 # Chunks to divide each spreadsheet into; decrease to improve speed, but increase if memory usage is too high
 df_chunks:
-  "9606_vs_10090": 30
-  "9606_vs_10116": 30
-  "9606_vs_7955": 30
-  "9606_vs_6239": 30
-  "9606_vs_7227": 30
-  "9606_vs_4932": 30
-  "9606_vs_4896": 30
-  "9606_vs_3702": 30
+  9606: 10
+  10090: 10
+  10116: 5
+  7955: 5
+  6239: 5
+  7227: 5
+  4932: 1
+  4896: 1
+  3702: 2
 
-# Homologous motif scanning params; mode can be "best" (finds best motif in homolog) or "closest" (maximizes similarity)
+# Homologous motif scanning params; mode can be homology-related ("similarity", "identity", "score") or "best" to pick best motif in whole homolog sequence, regardless of similarity
 homology_params:
-  homology_mode: "best"
   homolog_score_chunk_size: 500
-  homolog_selection_mode: "similarity"
+  homolog_selection_mode: "best"
   homolog_scoring_verbose: false
   similarity_position_weights: [0,0,0,0,0,0,1,1,1,1,1,0,1,0,0]
+  identity_thres: 0.3
+  ref_gene_col: "ensembl_gene_id"
 
 # Topology screening params; ensures that the topology of motifs faces cytosol (more compartments to be added in future)
 topo_params:
   filter_transmembrane_helices: true
   transmembrane_start_tolerance: 4
   transmembrane_end_tolerance: 2
-  ensembl_tm_path: "/home/user/your_directory/ensembl_transmembrane_human.csv"
+  ensembl_tm_path: "/home/user/Dropbox/Genome-Wide Motif Scans/db dependencies/ensembl_transmembrane_human.csv"
   parse_topologies_upfront: true
   topology_trim_begin: 6
   topology_trim_end: 2
   topology_chunk_size: 500
-  uniprot_path: "/home/user/your_directory/uniprot_sprot_human.pkl"
+  uniprot_path: "/home/user/Dropbox/Genome-Wide Motif Scans/db dependencies/uniprot_sprot_human.pkl"
 
 # AlphaFold secondary structure screening params; requires a directory containing the AlphaFold database as tar shards
 alphafold_params:
@@ -52,14 +57,22 @@ alphafold_params:
 
 # General params
 predictor_params:
+  seq_col: "sequence"
+  chunk_size: 500
   motif_length: 15
+  leading_glycines: 6
+  trailing_glycines: 2
+  replace_selenocysteine: true
+  selenocysteine_substitute: "C"
+  gap_substitute: "G"
+  score_addition_method: "suboptimal"
   convert_phospho: true
   assign_specificity_scores: true
   use_specificity_weighted: true
   return_count: 3
   compare_classical_method: true
   enforced_position_rules:
-    "7": ["F", "Y"]
-    "9": ["D", "E", "S", "T"]
-  conditional_matrices_path: "/home/user/your_directory/Matrix_Data/conditional_matrices.pkl"
-  specificity_matrix_path: "/home/user/your_directory/Matrix_Data/weighted_specificity_matrix.pkl"
+    7: ["F", "Y"]
+    9: ["D", "E", "S", "T"]
+  conditional_matrices_path: "/home/user/Dropbox/SPOT Peptide Screens/Straightened_TIFFs/Sharpened/Matrix_Data/conditional_matrices.pkl"
+  specificity_matrix_path: "/home/user/Dropbox/SPOT Peptide Screens/Straightened_TIFFs/Sharpened/Matrix_Data/weighted_specificity_matrix.pkl"
