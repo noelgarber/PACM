@@ -41,7 +41,9 @@ def filter_dssp(df, alphafold_dssp_results, uniprot_col = "uniprot", trembl_col 
             if dssp_results is not None:
                 forbidden_mask = dssp_results[0]
                 existing_val = df.at[idx, "forbidden_secondary_structure"]
-                if len(forbidden_mask) == len(protein_seq):
+
+                same_length = len(forbidden_mask) == len(protein_seq) if isinstance(protein_seq, str) else False
+                if same_length:
                     match_count += 1
                     if not fss_col_existed or existing_val is None:
                         df.at[idx, "forbidden_secondary_structure"] = forbidden_mask
