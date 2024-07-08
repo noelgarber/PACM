@@ -68,11 +68,11 @@ def apply_ensembl_tm(df, ensembl_id_col = "ensembl_peptide_id", seq_col = "seque
     else:
         fss_col_existed = True
 
-    for idx in df.index:
-        ensembl_peptide_id = df.at[idx, ensembl_id_col]
+    ensembl_peptide_ids = df[ensembl_id_col]
+    protein_seqs = df[seq_col]
+    for idx, ensembl_peptide_id, protein_seq in zip(df.index, ensembl_peptide_ids, protein_seqs):
         tm_ranges = ensembl_tm_dict.get(ensembl_peptide_id)
-        if tm_ranges is not None:
-            protein_seq = df.at[idx, seq_col]
+        if tm_ranges is not None and isinstance(protein_seq, str):
             forbidden_secondary_structure = np.full(shape=len(protein_seq), fill_value=False, dtype=bool)
             for start, end in reversed(tm_ranges):
                 start = start + start_tolerance - 1 # convert to 0-indexing
