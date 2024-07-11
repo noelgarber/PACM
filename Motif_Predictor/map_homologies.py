@@ -3,6 +3,7 @@ import tarfile
 import io
 import os
 import pickle
+import pandas as pd
 from biomart import BiomartServer, BiomartException
 
 # Define common mismatches
@@ -88,7 +89,8 @@ def fetch_taxonomy_dump(url = names_dmp_url, save_folder = cwd):
 
     return taxid_species_dict
 
-def infer_taxid(species_name, species_prefix_dict, prefix_name_dict, dataset_descriptions, subdomain = "www"):
+def infer_taxid(species_name, species_prefix_dict, prefix_name_dict, dataset_descriptions, subdomain = "www",
+                verbose = False):
     # Infer TaxID by species name
 
     species_taxid = None
@@ -115,7 +117,7 @@ def infer_taxid(species_name, species_prefix_dict, prefix_name_dict, dataset_des
                 Gen_Spe_within = tax_Gen_Spe.lower() in dataset_description.lower()
                 gen_spe_found = GenSpe_within or Gen_Spe_within
                 if gen_spe_found:
-                    print(f"\tInferred that {dataset_description} is {full_name}")
+                    print(f"\tInferred that {dataset_description} is {full_name}") if verbose else None
                     species_taxid = taxid
                     break
 
@@ -143,7 +145,7 @@ def infer_taxid(species_name, species_prefix_dict, prefix_name_dict, dataset_des
 
     return species_taxid
 
-def fetch_dataset_names(url = names_dmp_url, save_folder = cwd):
+def fetch_dataset_names(url = names_dmp_url, save_folder = cwd, infer_verbose = False):
     save_path = os.path.join(save_folder, "datasets_dict.pkl")
 
     if os.path.exists(save_path):
@@ -189,11 +191,13 @@ def fetch_dataset_names(url = names_dmp_url, save_folder = cwd):
 
             if any(["gene_ensembl" in dataset for dataset in datasets]):
                 for i, species_name in enumerate(gspecies_list):
-                    species_taxid = infer_taxid(species_name, species_prefix_dict, prefix_name_dict, dataset_descriptions, subdomain)
+                    species_taxid = infer_taxid(species_name, species_prefix_dict, prefix_name_dict,
+                                                dataset_descriptions, subdomain, infer_verbose)
                     datasets_dict[url][species_taxid] = (f"{species_name}_gene_ensembl", f"{species_name}_genomic_sequence")
             elif any(["eg_gene" in dataset for dataset in datasets]):
                 for i, species_name in enumerate(gspecies_list):
-                    species_taxid = infer_taxid(species_name, species_prefix_dict, prefix_name_dict, dataset_descriptions, subdomain)
+                    species_taxid = infer_taxid(species_name, species_prefix_dict, prefix_name_dict,
+                                                dataset_descriptions, subdomain, infer_verbose)
                     datasets_dict[url][species_taxid] = (f"{species_name}_eg_gene", f"{species_name}_eg_genomic_sequence")
             else:
                 raise Exception("gene_ensembl and eg_gene datasets were not found in the biomart server")
@@ -225,8 +229,53 @@ def parse_biomart_response(response, invert_order = False):
 
     return homologs
 
+hgd_names = {9031: "Chicken", 9646: "Giant panda", 9913: "Cattle", 9615: "Dog", 9796: "Horse", 9685: "Cat",
+             9606: "Human", 9823: "Pig", 7091: "Silkworm", 7460: "Honey bee", 9103: "Turkey", 3702: "Thale cress",
+             6239: "Roundworm", 7955: "Zebrafish", 7227: "Fruit fly", 10090: "Mouse", 10116: "Rat",
+             8364: "Tropical clawed frog", 562: "E. coli", 4932: "Brewer's yeast", 3708: "Rapeseed", 4072: "Pepper",
+             3659: "Cucumber", 3635: "Cotton", 3983: "Cassava", 4530: "Rice", 3847: "Soybean", 42345: "Date palm",
+             3694: "Poplor", 4081: "Tomato", 4558: "Sorghum", 4565: "Bread wheat", 29760: "Grape", 4577: "Maize",
+             4113: "Potato", 9544: "Rhesus monkey", 9598: "Chimpanzee"}
+
+def fetch_from_hgd(taxid_1, taxid_2, base_url = "https://download.cncb.ac.cn/hgd/homolog/"):
+    # Simple function for fetching homology dicts from the Homologous Gene Database (HGB) (Duan et al., 2023)
+
+    species_name_1 = hgd_names.get(taxid_1)
+    if species_name_1 is None:
+        raise ValueError(f"TaxID {taxid_1} could not be found in species covered by the HGB database")
+    species_name_2 = hgd_names.get(taxid_2)
+    if species_name_2 is None:
+        raise ValueError(f"TaxID {taxid_2} could not be found in species covered by the HGB database")
+
+    filename = f"{species_name_1}_{species_name_2}_Homolog_protein.txt.gz"
+    complete_url = base_url + filename
+    complete_url = complete_url.replace(" ", "%20")
+    hgb_df = pd.read_csv(complete_url, sep="\t", compression="gzip")
+
+    ref_taxids = hgb_df["tax_id1"]
+    ref_ensembl_ids = hgb_df["ensembl_id1"]
+    target_taxids = hgb_df["tax_id2"]
+    target_ensembl_ids = hgb_df["ensemb_id2"] # typo exists in database, so it is used here as well
+    zipped_elements = zip(ref_taxids, ref_ensembl_ids, target_taxids, target_ensembl_ids)
+
+    homology_dict = {}
+    for ref_taxid, ref_ensembl_id, target_taxid, target_ensembl_id in zipped_elements:
+        if ref_taxid == taxid_1 and target_taxid == taxid_2:
+            key, value = ref_ensembl_id, target_ensembl_id
+        elif ref_taxid == taxid_2 and target_taxid == taxid_1:
+            key, value = target_ensembl_id, ref_ensembl_id
+        else:
+            raise Exception(f"TaxID mismatch in database vs. reference")
+
+        if homology_dict.get(key) is None:
+            homology_dict[key] = [value]
+        else:
+            homology_dict[key].append(value)
+
+    return homology_dict
+
 def map_homologies(reference_taxid = 9606, target_taxids = (10090, 10116, 7955, 7227, 6239, 4932, 4896, 3702),
-                   save_folder = cwd):
+                   save_folder = cwd, infer_verbose = False):
     # Main function for creating a dictionary of dictionaries of reference and homolog genes for given target taxids
 
     save_path = os.path.join(save_folder, "target_dicts.pkl")
@@ -235,7 +284,7 @@ def map_homologies(reference_taxid = 9606, target_taxids = (10090, 10116, 7955, 
             target_dicts = pickle.load(f)
     else:
         # Find datasets for reference and targets, and the biomart urls they are found within
-        datasets_dict = fetch_dataset_names()
+        datasets_dict = fetch_dataset_names(infer_verbose = infer_verbose)
         reference_datasets, reference_url = None, None
         for url, subdomain_dict in datasets_dict.items():
             reference_datasets = subdomain_dict.get(reference_taxid)
@@ -262,6 +311,7 @@ def map_homologies(reference_taxid = 9606, target_taxids = (10090, 10116, 7955, 
         server = BiomartServer(reference_url)
         reference_subdomain = reference_url.split("//", 1)[1].split(".", 1)[0]
         ensembl = server.datasets[reference_datasets[0]]
+        exceptions_taxids = []
         target_dicts = {}
         for target_taxid in target_taxids:
             print(f"Querying BioMart for target taxid {target_taxid}...")
@@ -300,6 +350,7 @@ def map_homologies(reference_taxid = 9606, target_taxids = (10090, 10116, 7955, 
                     target_response = None
                     print(f"\tReference species {reference_species_name} was not found in "
                           f"target dataset {target_datasets[0]} either; adding {target_species} to exceptions list")
+                    exceptions_taxids.append(target_taxid)
 
             if reference_response is not None:
                 reference_target_homologs = parse_biomart_response(reference_response)
@@ -310,6 +361,15 @@ def map_homologies(reference_taxid = 9606, target_taxids = (10090, 10116, 7955, 
 
             target_dicts[target_taxid] = reference_target_homologs
 
+        # For TaxIDs not found in Ensembl homology database, use Homologous Gene Database
+        for target_taxid in exceptions_taxids:
+            if hgd_names.get(target_taxid) is not None:
+                reference_target_homologs = fetch_from_hgd(reference_taxid, target_taxid)
+                target_dicts[target_taxid] = reference_target_homologs
+                print(f"Found {reference_taxid}/{target_taxid} homologs in HGD database instead of Ensembl Biomart")
+                exceptions_taxids.remove(target_taxid)
+
+        # Cache target_dicts for easy re-use
         with open(save_path, "wb") as f:
             pickle.dump(target_dicts, f)
 
