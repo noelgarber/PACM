@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import pickle
+import time
 import multiprocessing
 from tqdm import trange
 from functools import partial
@@ -412,7 +413,8 @@ def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
 
     return results_tuple
 
-def score_proteins(protein_seqs_df, predictor_params = predictor_params, dssp_executable = "/usr/bin/dssp"):
+def score_proteins(protein_seqs_df, predictor_params = predictor_params, ensembl_tm_dict = None,
+                   filter_transmembrane_helices = None, current_taxid = 9606, dssp_executable = "/usr/bin/dssp"):
     '''
     Upper level function to score protein sequences in parallel based on conditional matrices
 
@@ -428,13 +430,14 @@ def score_proteins(protein_seqs_df, predictor_params = predictor_params, dssp_ex
 
     # Filter out transmembrane helices before scoring if desired
     topo_params = predictor_params.get("topo_params")
-    if isinstance(topo_params, dict):
-        filter_transmembrane_helices = topo_params["filter_transmembrane_helices"]
-        ensembl_tm_path = topo_params["ensembl_tm_path"]
-        ensembl_tm_dict = parse_ensembl_tm(ensembl_tm_path)
-    else:
-        filter_transmembrane_helices = False
-        ensembl_tm_path, ensembl_tm_dict = None, None
+    if ensembl_tm_dict is None or filter_transmembrane_helices is None:
+        if isinstance(topo_params, dict):
+            filter_transmembrane_helices = topo_params["filter_transmembrane_helices"]
+            ensembl_tm_path = topo_params["ensembl_tm_path"]
+            ensembl_tm_dict = parse_ensembl_tm(ensembl_tm_path)
+        else:
+            filter_transmembrane_helices = False
+            ensembl_tm_path, ensembl_tm_dict = None, None
 
     # Filter out forbidden secondary structures if desired
     alphafold_params = predictor_params.get("alphafold_params")
@@ -442,10 +445,16 @@ def score_proteins(protein_seqs_df, predictor_params = predictor_params, dssp_ex
         use_alphafold = alphafold_params.get("use_alphafold")
         forbidden_dssp_codes = alphafold_params.get("forbidden_dssp_codes")
         alphafold_plddt_thres = alphafold_params.get("alphafold_plddt_thres")
-        alphafold_tar_dir = alphafold_params.get("alphafold_tar_dir")
+        alphafold_tar_dir = alphafold_params["alphafold_tar_dirs"].get(current_taxid)
     else:
         use_alphafold = False
         forbidden_dssp_codes, alphafold_plddt_thres, alphafold_tar_dir = None, None, None
+
+    if use_alphafold:
+        alphadssp_results = generate_dssp(alphafold_tar_dir, None, dssp_executable,
+                                          forbidden_dssp_codes, alphafold_plddt_thres, use_cached=True)
+    else:
+        alphadssp_results = None
 
     seq_col = predictor_params["seq_col"]
 
@@ -462,8 +471,6 @@ def score_proteins(protein_seqs_df, predictor_params = predictor_params, dssp_ex
 
         # Filter out forbidden secondary structures with AlphaFold
         if use_alphafold:
-            alphadssp_results = generate_dssp(alphafold_tar_dir, dssp_executable,
-                                              forbidden_dssp_codes, alphafold_plddt_thres, use_cached=True)
             df_chunk = filter_dssp(df_chunk, alphadssp_results, seq_col = seq_col,
                                    uniprot_col = "uniprot", trembl_col = "trembl")
 

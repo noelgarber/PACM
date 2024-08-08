@@ -3,54 +3,39 @@
 import numpy as np
 import pandas as pd
 import os
-from Motif_Predictor.score_protein_motifs import score_proteins
+import pickle
+from Motif_Predictor.score_protein_motifs import score_proteins, parse_ensembl_tm
 from Motif_Predictor.specificity_score_assigner import apply_specificity_scores
 from Motif_Predictor.check_conservation import evaluate_homologs
 from Motif_Predictor.score_homolog_motifs import score_homolog_motifs
 from Motif_Predictor.motif_topology_predictor import predict_topology
-from Motif_Predictor.combine_dfs import fuse_dfs, make_gene_df
+from Motif_Predictor.combine_dfs import fuse_dfs, infer_cytosolic_accessibility, make_gene_df
 from Motif_Predictor.load_predictor_config import load_config
 
-predictor_params = load_config()
+predictor_params = load_config(verbose=True)
 
-def main(predictor_params = predictor_params):
+def process_chunks(protein_seqs_paths, keys, df_chunk_counts, topological_domains, sequences,
+                   predictor_params = predictor_params):
     '''
-    Main function that integrates conditional matrices scoring and specificity scoring of discovered motifs
+    Helper function that processes dataframes in chunks; only used when homology_selection_mode is not "best"
 
     Args:
-        predictor_params (dict): dict of user_defined parameters
+        protein_seqs_paths (list|tuple): list of paths for retrieving dataframes
+        keys (list):                     corresponding keys for paths
+        df_chunk_counts (list|tuple):    corresponding list of number of chunks to split each dataframe into
+        topological_domains (dict):      dict of accession --> topological features list
+        sequences (dict):                dict of accession --> sequence
+        predictor_params (dict):         dict of user_defined parameters
 
     Returns:
-        protein_seqs_df (pd.DataFrame): dataframe of scored protein sequences
+        output_paths (list):             list of paths to processed data
     '''
 
-    # Optionally pre-parse topological domains from Uniprot instead of doing so for each chunk
-    topological_domains, sequences = None, None
-    if isinstance(predictor_params.get("topo_params"), dict):
-        parse_topologies_upfront = predictor_params["topo_params"].get("parse_topologies_upfront")
-        if parse_topologies_upfront:
-            print("Parsing topologies upfront from Uniprot...")
-            from uniparser import get_topological_domains
-            uniprot_path = predictor_params["topo_params"]["uniprot_path"]
-            topological_domains, sequences = get_topological_domains(path = uniprot_path)
-
-    # Get CSV paths with protein sequences to score
-    keys = list(predictor_params["protein_seqs_paths"].keys())
-    protein_seqs_paths = []
-    df_chunk_counts = []
-    for key in keys:
-        protein_seqs_path = predictor_params["protein_seqs_paths"][key]
-        protein_seqs_paths.append(protein_seqs_path)
-        df_chunk_count = predictor_params["df_chunks"].get(key)
-        if df_chunk_count is None:
-            raise Exception(f"df_chunks key mismatch: key \"{key}\" not found")
-        else:
-            df_chunk_counts.append(df_chunk_count)
-
     seq_col = predictor_params["seq_col"]
-
     output_paths = []
-    for path, chunk_count in zip(protein_seqs_paths, df_chunk_counts):
+    for key, path, chunk_count in zip(keys, protein_seqs_paths, df_chunk_counts):
+        current_taxid = int(key.split("_vs_")[0]) if "_vs_" in key else int(key)
+
         # Get row count for the whole spreadsheet
         with open(path, "r", encoding="utf-8") as file:
             row_count = sum(1 for row in file) - 1
@@ -62,7 +47,7 @@ def main(predictor_params = predictor_params):
             print(f"Processing chunk #{i+1} of {path}...")
 
             # Apply conditional matrices motif scoring
-            results = score_proteins(chunk_df, predictor_params)
+            results = score_proteins(chunk_df, predictor_params, current_taxid = current_taxid)
 
             chunk_df = results[0]
             novel_motif_cols = results[1]
@@ -141,15 +126,195 @@ def main(predictor_params = predictor_params):
             os.remove(cache_path)
         print(f"Done!")
 
-    # Combine dataframes
-    print(f"Combining dataframes for homolog species into one simplified dataframe...")
-    combined_df = fuse_dfs(output_paths)
+    return output_paths
+
+def process_existing(protein_seqs_paths, keys, df_chunk_counts, topological_domains, sequences,
+                     predictor_params = predictor_params, debug_caching = True):
+    '''
+    Helper function that processes dataframes in chunks; only used when homology_selection_mode is not "best"
+
+    Args:
+        protein_seqs_paths (list|tuple): list of paths for retrieving dataframes
+        keys (list):                     corresponding keys for paths
+        df_chunk_counts (list|tuple):    corresponding list of number of chunks to split each dataframe into
+        topological_domains (dict):      dict of accession --> topological features list
+        sequences (dict):                dict of accession --> sequence
+        predictor_params (dict):         dict of user_defined parameters
+        debug_caching (bool):            if set to True, pickles an interim copy of data_dfs so that it doesn't need to
+                                         be repeatedly generated during debugging
+
+    Returns:
+        output_paths (list):             list of paths to processed data
+    '''
+
+    seq_col = predictor_params["seq_col"]
+
+    # Generate ensembl_tm_dict upfront
+    topo_params = predictor_params.get("topo_params")
+    if isinstance(topo_params, dict):
+        filter_transmembrane_helices = topo_params["filter_transmembrane_helices"]
+        ensembl_tm_path = topo_params["ensembl_tm_path"]
+        ensembl_tm_dict = parse_ensembl_tm(ensembl_tm_path)
+    else:
+        filter_transmembrane_helices = False
+        ensembl_tm_path, ensembl_tm_dict = None, None
+
+    # Perform the main scoring
+    pickling_path = os.path.join(os.getcwd(), "data_dfs.pkl")
+    if not debug_caching or not os.path.exists(pickling_path):
+        data_dfs = []
+        output_paths = []
+        for key, path, chunk_count in zip(keys, protein_seqs_paths, df_chunk_counts):
+            print(f"Key: {key} | Scoring path: {path}")
+            current_taxid = int(key.split("_vs_")[0]) if "_vs_" in str(key) else int(key)
+
+            # Get row count for the whole spreadsheet
+            with open(path, "r", encoding="utf-8") as file:
+                row_count = sum(1 for row in file) - 1
+
+            # Load dataframe
+            chunk_size = np.ceil(row_count / chunk_count)
+            cache_paths = []
+            for i, chunk_df in enumerate(pd.read_csv(path, chunksize=chunk_size)):
+                print(f"\tProcessing chunk #{i+1}...")
+
+                # Apply conditional matrices motif scoring
+                results = score_proteins(chunk_df, predictor_params, ensembl_tm_dict, filter_transmembrane_helices,
+                                         current_taxid)
+                chunk_df, novel_motif_cols = results[:2]
+                classical_motif_cols = results[9]
+                all_motif_cols = novel_motif_cols + classical_motif_cols
+
+                # Apply bait specificity scoring of discovered motifs
+                assign_specificities = predictor_params["assign_specificity_scores"]
+                if assign_specificities:
+                    chunk_df = apply_specificity_scores(chunk_df, all_motif_cols, predictor_params)
+
+                # Get topology for predicted motifs
+                chunk_df = predict_topology(chunk_df, all_motif_cols, predictor_params, topological_domains, sequences)
+
+                # Delete forbidden secondary structure column
+                if "forbidden_secondary_structure" in chunk_df.columns:
+                    chunk_df.drop("forbidden_secondary_structure", axis=1, inplace=True)
+
+                # Drop sequence column, which is no longer needed, as motifs have already been extracted
+                pd.options.mode.chained_assignment = None  # suppress SettingWithCopyWarning, which has no effect
+                chunk_df.drop(seq_col, axis=1, inplace=True)
+                pd.options.mode.chained_assignment = "warn" # restore to default
+
+                # Dump current data to save memory; will be concatenated later
+                print("\tCaching current chunk to save memory...") if chunk_count > 1 else None
+                temp_path = os.path.join(os.getcwd(), f"temp_df_dump_{i}.csv")
+                chunk_df.to_csv(temp_path)
+                cache_paths.append(temp_path)
+                del chunk_df
+
+            print("\tConcatenating cached dataframes...") if chunk_count > 1 else None
+            cache_dfs = []
+            for cache_path in cache_paths:
+                df = pd.read_csv(cache_path)
+                cache_dfs.append(df)
+            data_df = pd.concat(cache_dfs, ignore_index=True)
+
+            # Add cytosolic accessibility column
+            print("\tAdding cytosolic accessibility column...")
+            motif_prefixes = [col.split("_motif_topology_type")[0] for col in data_df.columns if "topology_type" in col]
+            data_df = infer_cytosolic_accessibility(data_df, motif_prefixes)
+
+            # Save scored data
+            output_path = path[:-4] + "_scored.csv"
+            data_df.to_csv(output_path)
+            print(f"\tSaved scored motifs to {output_path}")
+            output_paths.append(output_path)
+            data_dfs.append(data_df)
+
+            # Delete temporary files
+            print(f"\tDeleting temporary files...")
+            for cache_path in cache_paths:
+                os.remove(cache_path)
+            print(f"\tDone!")
+
+        if debug_caching:
+            with open(pickling_path, "wb") as f:
+                pickle.dump((data_dfs, output_paths), f)
+
+    else:
+        with open(pickling_path, "rb") as f:
+            data_dfs, output_paths = pickle.load(f)
+
+    # Look for homologous motifs in target species compared to reference species
+    data_df, final_homolog_motif_cols = score_homolog_motifs(data_dfs, predictor_params=predictor_params)
+
+    # Apply bait specificity scoring to homologous motifs
+    assign_specificities = predictor_params["assign_specificity_scores"]
+    if assign_specificities:
+        data_df = apply_specificity_scores(data_df, final_homolog_motif_cols, predictor_params)
+
+    return output_paths, data_df
+
+cwd = os.getcwd()
+def main(predictor_params = predictor_params):
+    '''
+    Main function that integrates conditional matrices scoring and specificity scoring of discovered motifs
+
+    Args:
+        predictor_params (dict): dict of user_defined parameters
+
+    Returns:
+        protein_seqs_df (pd.DataFrame): dataframe of scored protein sequences
+    '''
+
+    # Optionally pre-parse topological domains from Uniprot instead of doing so for each chunk
+    topological_domains, sequences = None, None
+    if isinstance(predictor_params.get("topo_params"), dict):
+        parse_topologies_upfront = predictor_params["topo_params"].get("parse_topologies_upfront")
+        if parse_topologies_upfront:
+            print("Parsing topologies upfront from Uniprot...")
+            from uniparser import get_topological_domains
+            uniprot_path = predictor_params["topo_params"]["uniprot_path"]
+            base_uniprot_path = os.path.basename(uniprot_path)
+            pickled_uniprot_path = base_uniprot_path.rsplit(".", 1)[0] + "_parsed.pkl"
+            pickled_uniprot_path = os.path.join(cwd, pickled_uniprot_path)
+            if os.path.exists(pickled_uniprot_path):
+                print("\tLoading from pickled version...")
+                with open(pickled_uniprot_path, "rb") as f:
+                    topological_domains, sequences = pickle.load(f)
+            else:
+                topological_domains, sequences = get_topological_domains(path = uniprot_path)
+                print("\tPickling for later re-use...")
+                with open(pickled_uniprot_path, "wb") as f:
+                    pickle.dump((topological_domains, sequences), f)
+
+    # Get CSV paths with protein sequences to score
+    protein_seqs_paths, df_chunk_counts = [], []
+    keys = list(predictor_params["protein_seqs_paths"].keys())
+    for key in keys:
+        protein_seqs_paths.append(predictor_params["protein_seqs_paths"][key])
+        df_chunk_count = predictor_params["df_chunks"].get(key)
+        if df_chunk_count is None:
+            raise Exception(f"df_chunks key mismatch: key \"{key}\" not found")
+        df_chunk_counts.append(df_chunk_count)
+
+    # Homologous motif detection is done differently if each dataframe contains data for only one species
+    homolog_selection_mode = predictor_params["homology_params"]["homolog_selection_mode"]
+    if homolog_selection_mode == "best":
+        output_paths, combined_df = process_existing(protein_seqs_paths, keys, df_chunk_counts, topological_domains,
+                                                     sequences, predictor_params)
+        taxids = keys[1:]
+    else:
+        output_paths = process_chunks(protein_seqs_paths, keys, df_chunk_counts, topological_domains, sequences,
+                                      predictor_params)
+        print(f"Combining dataframes for homolog species into one simplified dataframe...")
+        combined_df = fuse_dfs(output_paths)
+        taxids = [key.split("_vs_")[1] for key in keys]
+
+    # Save combined_df
     parent_path = output_paths[0].rsplit("/",1)[0]
     combined_path = os.path.join(parent_path, "proteome_datasets_combined_scored.csv")
     combined_df.to_csv(combined_path)
 
     print(f"Generating dataframe with only one row per gene ID...")
-    unique_df = make_gene_df(combined_df)
+    unique_df = make_gene_df(combined_df, homolog_selection_mode, taxids)
     unique_path = os.path.join(parent_path, "proteome_datasets_combined_scored_by_gene.csv")
     unique_df.to_csv(unique_path)
 

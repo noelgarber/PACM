@@ -1,5 +1,27 @@
 import numpy as np
 import pandas as pd
+from Bio import pairwise2
+
+def alignment_identity(alignment):
+    # Calculate identity percentage for the given alignment.
+    matches = sum(1 for a, b in zip(alignment[0], alignment[1]) if a == b)
+    return (matches / len(alignment[0])) * 100
+
+def subset_identity(host_seq, homolog_seq, forbidden_mask):
+    # Perform global alignment for whole query
+    alignments = pairwise2.align.globalxx(host_seq, homolog_seq)
+    whole_query_alignment = alignments[0]
+    whole_query_identity = alignment_identity(whole_query_alignment)
+
+    # Perform global alignment for the subset of the query
+    host_gap_mask = np.equal(np.array(list(host_seq)), "-")
+    host_align_indices = np.where(~host_gap_mask)[0]
+    subset_indices = np.where(~forbidden_mask)[0]
+    subset_align_indices = host_align_indices[subset_indices]
+
+    subset_alignments = pairwise2.align.globalxx(subset_query_seq, homolog_seq)
+    subset_query_alignment = subset_alignments[0]
+    subset_query_identity = alignment_identity(subset_query_alignment)
 
 def filter_dssp(df, alphafold_dssp_results, uniprot_col = "uniprot", trembl_col = "trembl", seq_col = "sequence",
                 verbose = False):
