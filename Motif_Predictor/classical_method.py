@@ -79,12 +79,20 @@ def classical_motif_method(motif_seqs, classical_matrix = classical_matrix):
         total_points_motifs (np.ndarray): array of corresponding classical motif scores for the input sequences
     '''
 
+    # Replace blank-containing strings
+    for i, seq in enumerate(motif_seqs):
+        if " " in str(seq) or isinstance(seq, float):
+            motif_seqs[i] = ""
+
     if not isinstance(motif_seqs, np.ndarray):
         motif_seqs = np.array(motif_seqs)
 
     if motif_seqs.ndim == 1:
         correct_lengths = np.array([len(seq) == motif_length for seq in motif_seqs])
         valid_indices = np.where(correct_lengths)[0]
+        if len(valid_indices) == 0:
+            total_points_motifs = np.full(len(motif_seqs), fill_value=np.nan, dtype=float)
+            return total_points_motifs
         valid_motif_seqs = motif_seqs[valid_indices]
         valid_motif_seqs_2d = np.array([list(seq) for seq in valid_motif_seqs])
     elif motif_seqs.ndim == 2:
