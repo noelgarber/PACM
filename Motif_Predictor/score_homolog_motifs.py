@@ -678,6 +678,7 @@ def construct_new_data_dict(target_taxid, motif_cols, final_homolog_motif_cols, 
     for motif_col in motif_cols:
         homolog_motif_col = f"{target_taxid}_{motif_col}_homolog"
         new_data[homolog_motif_col] = []
+        new_data[f"{homolog_motif_col}_seq"] = []
         new_data[f"{homolog_motif_col}_identity"] = []
         new_data[f"{homolog_motif_col}_classification_score"] = []
         new_data[f"{homolog_motif_col}_binding_score"] = []
@@ -701,6 +702,7 @@ def assign_novel_data(new_data, best_homolog_dict, target_gene_dict, motif_cols,
         # Get results from novel model
         best_homolog_id = best_homolog_dict[target_taxid].get(ref_gene_id)
         if best_homolog_id:
+            new_data[f"{target_taxid}_best_homolog_id"].append(best_homolog_id)
             entry = target_gene_dict[target_taxid].get(best_homolog_id)
             for motif_col in motif_cols:
                 homolog_motif_col = f"{target_taxid}_{motif_col}_homolog"
@@ -728,6 +730,7 @@ def assign_novel_data(new_data, best_homolog_dict, target_gene_dict, motif_cols,
         else:
             print(f"\tNote: {best_homolog_id} could not be found in the gene_dict for {target_taxid}, "
                   f"so its values are nan") if best_homolog_id is not None else None
+            new_data[f"{target_taxid}_best_homolog_id"].append("")
             for motif_col in motif_cols:
                 homolog_motif_col = f"{target_taxid}_{motif_col}_homolog"
                 new_data[homolog_motif_col].append(np.nan)
