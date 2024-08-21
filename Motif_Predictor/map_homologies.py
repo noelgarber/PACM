@@ -3,6 +3,7 @@ import tarfile
 import io
 import os
 import pickle
+import warnings
 import pandas as pd
 from biomart import BiomartServer, BiomartException
 
@@ -237,27 +238,37 @@ hgd_names = {9031: "Chicken", 9646: "Giant panda", 9913: "Cattle", 9615: "Dog", 
              3694: "Poplor", 4081: "Tomato", 4558: "Sorghum", 4565: "Bread wheat", 29760: "Grape", 4577: "Maize",
              4113: "Potato", 9544: "Rhesus monkey", 9598: "Chimpanzee"}
 
-def fetch_from_hgd(taxid_1, taxid_2, base_url = "https://download.cncb.ac.cn/hgd/homolog/"):
+def fetch_from_hgd(taxid_1, taxid_2, ensembl_protein_gene_dict, base_url = "https://download.cncb.ac.cn/hgd/homolog/"):
     # Simple function for fetching homology dicts from the Homologous Gene Database (HGB) (Duan et al., 2023)
 
     species_name_1 = hgd_names.get(taxid_1)
     if species_name_1 is None:
-        raise ValueError(f"TaxID {taxid_1} could not be found in species covered by the HGB database")
+        warnings.warn(f"TaxID {taxid_1} could not be found in species covered by the HGD database")
+        return {}
     species_name_2 = hgd_names.get(taxid_2)
     if species_name_2 is None:
-        raise ValueError(f"TaxID {taxid_2} could not be found in species covered by the HGB database")
+        warnings.warn(f"TaxID {taxid_2} could not be found in species covered by the HGD database")
+        return {}
 
     filename = f"{species_name_1}_{species_name_2}_Homolog_protein.txt.gz"
     complete_url = base_url + filename
     complete_url = complete_url.replace(" ", "%20")
-    hgb_df = pd.read_csv(complete_url, sep="\t", compression="gzip")
+    hgd_df = pd.read_csv(complete_url, sep="\t", compression="gzip")
 
-    ref_taxids = hgb_df["tax_id1"]
-    ref_ensembl_ids = hgb_df["ensembl_id1"]
-    target_taxids = hgb_df["tax_id2"]
-    target_ensembl_ids = hgb_df["ensemb_id2"] # typo exists in database, so it is used here as well
-    zipped_elements = zip(ref_taxids, ref_ensembl_ids, target_taxids, target_ensembl_ids)
+    # Extract TaxIDs and Ensembl Protein IDs
+    ref_taxids = hgd_df["tax_id1"]
+    ref_ensembl_ids = [ensembl_protein_gene_dict.get(str(item).rsplit(".",1)[0]) for item in hgd_df["ensembl_id1"]]
+    target_taxids = hgd_df["tax_id2"]
+    # There is a typo for Ensembl ID #2 in the HGD database that may be fixed in the future
+    id2_col = "ensemb_id2" if "ensemb_id2" in hgd_df.columns else "ensembl_id2"
+    target_ensembl_ids = [ensembl_protein_gene_dict.get(str(item).rsplit(".",1)[0]) for item in hgd_df[id2_col]]
 
+    # Convert Ensembl Protein IDs to Ensembl Gene IDs
+    ref_ensembl_gene_ids = [ensembl_protein_gene_dict.get(item) for item in ref_ensembl_ids]
+    target_ensembl_gene_ids = [ensembl_protein_gene_dict.get(item) for item in target_ensembl_ids]
+
+    # Parse dataframe into a dictionary
+    zipped_elements = zip(ref_taxids, ref_ensembl_gene_ids, target_taxids, target_ensembl_gene_ids)
     homology_dict = {}
     for ref_taxid, ref_ensembl_id, target_taxid, target_ensembl_id in zipped_elements:
         if ref_taxid == taxid_1 and target_taxid == taxid_2:
@@ -274,6 +285,138 @@ def fetch_from_hgd(taxid_1, taxid_2, base_url = "https://download.cncb.ac.cn/hgd
 
     return homology_dict
 
+def get_reference_datasets(datasets_dict, reference_taxid):
+    # Helper function to identify reference_datasets for reference taxid
+
+    reference_datasets, reference_url = None, None
+    for url, subdomain_dict in datasets_dict.items():
+        reference_datasets = subdomain_dict.get(reference_taxid)
+        if reference_datasets is not None:
+            reference_url = url
+            break
+
+    if reference_datasets is None:
+        raise Exception(f"BioMart dataset could not be found for reference taxid {reference_taxid}")
+
+    return reference_datasets, reference_url
+
+def get_targets_datasets(target_taxids, datasets_dict):
+    # Helper function to get targets_datasets dict
+
+    targets_datasets = {}
+    for target_taxid in target_taxids:
+        for url, subdomain_dict in datasets_dict.items():
+            target_datasets = subdomain_dict.get(target_taxid)
+            if target_datasets is not None:
+                target_url = url
+                targets_datasets[target_taxid] = (target_datasets, target_url)
+                break
+
+    if all(target_datasets is None for target_datasets in targets_datasets):
+        raise Exception(f"BioMart datasets could not be found for any of the target taxids: {target_taxids}")
+
+    return targets_datasets
+
+def fetch_biomart_attributes(species, subdomain):
+    if subdomain == "www":
+        # Different naming in main db
+        attributes = ["ensembl_gene_id", f"{species}_homolog_ensembl_gene"]
+    else:
+        attributes = ["ensembl_gene_id", f"{species}_eg_homolog_ensembl_gene"]
+
+    return attributes
+
+def bidirectional_biomart_query(reference_url, reference_datasets, reference_species_name,
+                                targets_datasets, target_taxid):
+    reference_subdomain = reference_url.split("//", 1)[1].split(".", 1)[0]
+
+    server = BiomartServer(reference_url)
+    ensembl = server.datasets[reference_datasets[0]]
+
+    target_datasets, target_url = targets_datasets[target_taxid]
+    target_subdomain = target_url.split("//", 1)[1].split(".", 1)[0]
+    target_species = target_datasets[0].split("_", 1)[0]
+
+    # Query the Ensembl database for this reference/target pair
+    reference_attributes = fetch_biomart_attributes(target_species, reference_subdomain)
+    not_found = False
+    try:
+        reference_response = ensembl.search({"filters": {}, "attributes": reference_attributes})
+        target_response = None
+    except BiomartException as e:
+        print(f"\t\tTarget species {target_species} was not found in reference dataset {reference_datasets[0]}; "
+              f"attempting in reverse direction...")
+        reference_response = None
+
+        # Query the Ensembl database for this target/reference pair
+        server = BiomartServer(target_url)
+        ensembl = server.datasets[target_datasets[0]]
+        target_attributes = fetch_biomart_attributes(reference_species_name, target_subdomain)
+        try:
+            target_response = ensembl.search({"filters": {}, "attributes": target_attributes})
+        except BiomartException as e:
+            target_response = None
+            print(f"\t\tReference species {reference_species_name} was not found in "
+                  f"target dataset {target_datasets[0]} either; adding {target_species} to exceptions list")
+            not_found = True
+
+    if reference_response is not None:
+        reference_target_homologs = parse_biomart_response(reference_response)
+    elif target_response is not None:
+        reference_target_homologs = parse_biomart_response(target_response, invert_order=True)
+    else:
+        reference_target_homologs = None
+
+    return reference_target_homologs, not_found
+
+def get_ensp_ensg_dict(reference_taxid, target_taxids, datasets_dict):
+    # Generates a dictionary of Ensembl Peptide ID --> Ensembl Gene ID for all given TaxIDs
+
+    taxids = (reference_taxid,) + tuple(target_taxids)
+    datasets = get_targets_datasets(taxids, datasets_dict)
+    ensp_ensg_dict = {}
+    for taxid in taxids:
+        taxid_datasets, taxid_url = datasets[taxid]
+
+        server = BiomartServer(taxid_url)
+        ensembl = server.datasets[taxid_datasets[0]]
+
+        attributes = ["ensembl_gene_id", "ensembl_peptide_id"]
+        response = ensembl.search({"filters": {}, "attributes": attributes})
+        taxid_ensp_ensg_dict = {}
+        for line in response.iter_lines():
+            line = line.decode("utf-8")
+            columns = line.split("\t")
+            if len(columns) == 2:
+                ensembl_gene_id, ensembl_peptide_id = columns
+                if len(ensembl_gene_id) > 0 and len(ensembl_peptide_id) > 0:
+                    taxid_ensp_ensg_dict[ensembl_peptide_id] = ensembl_gene_id
+
+        ensp_ensg_dict = ensp_ensg_dict | taxid_ensp_ensg_dict
+
+    return ensp_ensg_dict
+
+def merge_reference_target_homologs(biomart_reference_target_homologs, hgd_reference_target_homologs):
+    # Helper function to merge the two dicts when both Biomart and HGD produce results for a target taxid
+
+    reference_target_homologs = {}
+    key_genes = list(biomart_reference_target_homologs.keys()) + list(hgd_reference_target_homologs.keys())
+    key_genes = list(set(key_genes))
+    for key_gene in key_genes:
+        biomart_result_genes = biomart_reference_target_homologs.get(key_gene)
+        hgd_result_genes = hgd_reference_target_homologs.get(key_gene)
+        if biomart_result_genes and hgd_result_genes:
+            total_result_genes = list(set(biomart_result_genes + hgd_result_genes))
+        elif biomart_result_genes:
+            total_result_genes = biomart_result_genes
+        elif hgd_result_genes:
+            total_result_genes = hgd_result_genes
+        else:
+            total_result_genes = []
+        reference_target_homologs[key_gene] = total_result_genes
+
+    return reference_target_homologs
+
 def map_homologies(reference_taxid = 9606, target_taxids = (10090, 10116, 7955, 7227, 6239, 4932, 4896, 3702),
                    save_folder = cwd, infer_verbose = False):
     # Main function for creating a dictionary of dictionaries of reference and homolog genes for given target taxids
@@ -285,89 +428,44 @@ def map_homologies(reference_taxid = 9606, target_taxids = (10090, 10116, 7955, 
     else:
         # Find datasets for reference and targets, and the biomart urls they are found within
         datasets_dict = fetch_dataset_names(infer_verbose = infer_verbose)
-        reference_datasets, reference_url = None, None
-        for url, subdomain_dict in datasets_dict.items():
-            reference_datasets = subdomain_dict.get(reference_taxid)
-            if reference_datasets is not None:
-                reference_url = url
-                break
 
-        targets_datasets = {}
-        for target_taxid in target_taxids:
-            for url, subdomain_dict in datasets_dict.items():
-                target_datasets = subdomain_dict.get(target_taxid)
-                if target_datasets is not None:
-                    target_url = url
-                    targets_datasets[target_taxid] = (target_datasets, target_url)
-                    break
+        reference_datasets, reference_url = get_reference_datasets(datasets_dict, reference_taxid)
+        targets_datasets = get_targets_datasets(target_taxids, datasets_dict)
 
-        if reference_datasets is None:
-            raise Exception(f"BioMart dataset could not be found for reference taxid {reference_taxid}")
-        if all(target_datasets is None for target_datasets in targets_datasets):
-            raise Exception(f"BioMart datasets could not be found for any of the target taxids: {target_taxids}")
+        print(f"Querying BioMart for Ensembl Peptide IDs and Gene IDs for generating a conversion dict...")
+        ensp_ensg_dict = get_ensp_ensg_dict(reference_taxid, target_taxids, datasets_dict)
 
         # Query BioMart reference with target species homologs
         reference_species_name = reference_datasets[0].split("_", 1)[0]
-        server = BiomartServer(reference_url)
-        reference_subdomain = reference_url.split("//", 1)[1].split(".", 1)[0]
-        ensembl = server.datasets[reference_datasets[0]]
         exceptions_taxids = []
         target_dicts = {}
         for target_taxid in target_taxids:
-            print(f"Querying BioMart for target taxid {target_taxid}...")
-            target_datasets, target_url = targets_datasets[target_taxid]
+            print(f"Querying databases for target taxid {target_taxid}...")
 
-            target_subdomain = target_url.split("//", 1)[1].split(".", 1)[0]
-            target_species = target_datasets[0].split("_", 1)[0]
+            print(f"\tQuerying BioMart...")
+            biomart_out = bidirectional_biomart_query(reference_url, reference_datasets, reference_species_name,
+                                                      targets_datasets, target_taxid)
+            biomart_reference_target_homologs, not_found = biomart_out
 
-            # Define attributes for querying reference dataset for target species
-            if reference_subdomain == "www":
-                reference_attributes = ["ensembl_gene_id", f"{target_species}_homolog_ensembl_gene"] # different naming in main db
-            else:
-                reference_attributes = ["ensembl_gene_id", f"{target_species}_eg_homolog_ensembl_gene"]
+            print(f"\tQuerying HGD...")
+            hgd_reference_target_homologs = fetch_from_hgd(reference_taxid, target_taxid, ensp_ensg_dict)
+            if not hgd_reference_target_homologs and not_found:
+                exceptions_taxids.append(target_taxid)
 
-            # Query the Ensembl database for this reference/target pair
-            try:
-                reference_response = ensembl.search({"filters": {}, "attributes": reference_attributes})
-                target_response = None
-            except BiomartException as e:
-                print(f"\tTarget species {target_species} was not found in reference dataset {reference_datasets[0]}; "
-                      f"attempting in reverse direction...")
-                reference_response = None
-
-                # Define attributes for querying target dataset for reference species
-                if target_subdomain == "www":
-                    target_attributes = ["ensembl_gene_id", f"{reference_species_name}_homolog_ensembl_gene"]
-                else:
-                    target_attributes = ["ensembl_gene_id", f"{reference_species_name}_eg_homolog_ensembl_gene"]
-
-                # Query the Ensembl database for this target/reference pair
-                server = BiomartServer(target_url)
-                ensembl = server.datasets[target_datasets[0]]
-                try:
-                    target_response = ensembl.search({"filters": {}, "attributes": target_attributes})
-                except BiomartException as e:
-                    target_response = None
-                    print(f"\tReference species {reference_species_name} was not found in "
-                          f"target dataset {target_datasets[0]} either; adding {target_species} to exceptions list")
-                    exceptions_taxids.append(target_taxid)
-
-            if reference_response is not None:
-                reference_target_homologs = parse_biomart_response(reference_response)
-            elif target_response is not None:
-                reference_target_homologs = parse_biomart_response(target_response, invert_order=True)
+            if biomart_reference_target_homologs and not hgd_reference_target_homologs:
+                print(f"\tUsed only Biomart for target taxid {target_taxid}")
+                reference_target_homologs = biomart_reference_target_homologs
+            elif hgd_reference_target_homologs and not biomart_reference_target_homologs:
+                print(f"\tUsed only HGD for target taxid {target_taxid}")
+                reference_target_homologs = hgd_reference_target_homologs
+            elif biomart_reference_target_homologs and hgd_reference_target_homologs:
+                print(f"\tMerging data from Biomart and HGD for target taxid {target_taxid}")
+                reference_target_homologs = merge_reference_target_homologs(biomart_reference_target_homologs,
+                                                                            hgd_reference_target_homologs)
             else:
                 reference_target_homologs = None
 
             target_dicts[target_taxid] = reference_target_homologs
-
-        # For TaxIDs not found in Ensembl homology database, use Homologous Gene Database
-        for target_taxid in exceptions_taxids:
-            if hgd_names.get(target_taxid) is not None:
-                reference_target_homologs = fetch_from_hgd(reference_taxid, target_taxid)
-                target_dicts[target_taxid] = reference_target_homologs
-                print(f"Found {reference_taxid}/{target_taxid} homologs in HGD database instead of Ensembl Biomart")
-                exceptions_taxids.remove(target_taxid)
 
         # Cache target_dicts for easy re-use
         with open(save_path, "wb") as f:
