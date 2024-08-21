@@ -317,6 +317,7 @@ def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
     return_count = predictor_params["return_count"]
     compare_classical_method = predictor_params["compare_classical_method"]
 
+    ordered_motifs_starts = [[] for i in np.arange(return_count)]
     ordered_motifs_cols = [[] for i in np.arange(return_count)]
     ordered_total_scores_cols = [[] for i in np.arange(return_count)]
     ordered_binding_scores_cols = [[] for i in np.arange(return_count)]
@@ -331,6 +332,7 @@ def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
     # Generate names for the aforementioned columns
     suffix_numbers = [add_number_suffix(i) for i in np.arange(1, return_count + 1)]
     motif_col_names = [f"{suffix_number}_motif" for suffix_number in suffix_numbers]
+    motif_col_start_names = [f"{suffix_number}_motif_start" for suffix_number in suffix_numbers]
     total_score_col_names = [f"{suffix_number}_total_motif_score" for suffix_number in suffix_numbers]
     binding_score_col_names = [f"{suffix_number}_binding_motif_score" for suffix_number in suffix_numbers]
     positive_score_col_names = [f"{suffix_number}_positive_motif_score" for suffix_number in suffix_numbers]
@@ -353,6 +355,8 @@ def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
         zipped_results = zip(motifs, total_scores, binding_scores,
                              positive_scores, suboptimal_scores, forbidden_scores, final_calls)
         for j, (motif, total, binding, positive, suboptimal, forbidden, call) in enumerate(zipped_results):
+            motif_start = protein_seq.find(motif) if isinstance(protein_seq, str) else np.nan
+            ordered_motifs_starts[j].append(motif_start)
             ordered_motifs_cols[j].append(motif)
             ordered_total_scores_cols[j].append(total)
             ordered_binding_scores_cols[j].append(binding)
@@ -376,6 +380,7 @@ def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
 
     # Apply motifs and scores as columns to the dataframe, and record col names
     novel_motif_cols = [f"Novel_{col}" if compare_classical_method else col for col in motif_col_names]
+    novel_motif_start_cols = [f"Novel_{col}" if compare_classical_method else col for col in motif_col_start_names]
     novel_total_cols = [f"Novel_{col}" if compare_classical_method else col for col in total_score_col_names]
     novel_binding_cols = [f"Novel_{col}" if compare_classical_method else col for col in binding_score_col_names]
     novel_positive_cols = [f"Novel_{col}" if compare_classical_method else col for col in positive_score_col_names]
@@ -385,6 +390,7 @@ def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
     novel_classical_cols = [f"Novel_{col}" if compare_classical_method else col for col in matching_classical_col_names]
 
     for i in np.arange(len(motif_col_names)):
+        df_chunk_scored[novel_motif_start_cols[i]] = ordered_motifs_starts[i]
         df_chunk_scored[novel_motif_cols[i]] = ordered_motifs_cols[i]
         df_chunk_scored[novel_total_cols[i]] = ordered_total_scores_cols[i]
         df_chunk_scored[novel_binding_cols[i]] = ordered_binding_scores_cols[i]
