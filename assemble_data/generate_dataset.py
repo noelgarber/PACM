@@ -124,7 +124,7 @@ def generate_base_dataset(protein_fasta_path = None, accession_dataset_name = "h
     if protein_fasta_path is None:
         protein_fasta_path = input("Enter the path to Ensembl protein sequences (FASTA):  ")
     records = [record for record in SeqIO.parse(protein_fasta_path, "fasta")]
-    ensembl_base_keys = [record.id.split(".")[0] for record in records]
+    ensembl_base_keys = [record.id.rsplit(".", 1)[0] for record in records]
     ensembl_base_values = [str(record.seq) for record in records]
     ensembl_sequence_dict = {key:value for key, value in zip(ensembl_base_keys, ensembl_base_values)}
 
