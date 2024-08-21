@@ -109,7 +109,7 @@ def apply_specificity_scores(protein_seqs_df, motif_cols, predictor_params=predi
             chunk_valid_scores, specificity_score_col = chunk_results
 
             if chunk_valid_scores is None:
-                results[specificity_score_col] = None
+                results[specificity_score_col] = np.nan
             elif results.get(specificity_score_col) is None:
                 results[specificity_score_col] = chunk_valid_scores
             else:
@@ -139,10 +139,7 @@ def apply_specificity_scores(protein_seqs_df, motif_cols, predictor_params=predi
                 else:
                     specificity_insert_idx = motif_col_idx + 2 if "Classical" in motif_col else motif_col_idx + 7
 
-                try:
-                    protein_seqs_df.insert(specificity_insert_idx, specificity_score_col, specificity_scores)
-                except Exception as e:
-                    raise e
+                protein_seqs_df.insert(specificity_insert_idx, specificity_score_col, specificity_scores)
 
         pbar.update()
 
