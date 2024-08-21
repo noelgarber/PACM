@@ -675,10 +675,12 @@ def construct_new_data_dict(target_taxid, motif_cols, final_homolog_motif_cols, 
             final_homolog_classical_motif_cols.append(classical_homolog_motif_col)
 
     new_data = {}
+    new_data[f"{target_taxid}_best_homolog_id"] = []
+    if include_classical:
+        new_data[f"{target_taxid}_classical_best_homolog_id"] = []
     for motif_col in motif_cols:
         homolog_motif_col = f"{target_taxid}_{motif_col}_homolog"
         new_data[homolog_motif_col] = []
-        new_data[f"{homolog_motif_col}_seq"] = []
         new_data[f"{homolog_motif_col}_identity"] = []
         new_data[f"{homolog_motif_col}_classification_score"] = []
         new_data[f"{homolog_motif_col}_binding_score"] = []
@@ -751,6 +753,7 @@ def assign_classical_data(new_data, best_classical_homolog_dict, target_classica
         else:
             classical_entry = None
 
+        new_data[f"{target_taxid}_classical_best_homolog_id"].append(best_classical_homolog_id)
         for motif_col in motif_cols:
             classical_motif_col = motif_col.replace("Novel", "Classical")
             homolog_motif_col = f"{target_taxid}_{classical_motif_col}_homolog"
@@ -883,7 +886,8 @@ def generate_merged_df(best_homolog_dict, target_gene_dict, motif_cols, referenc
 
 cwd = os.getcwd()
 def score_best_homologs(reference_taxid, reference_df, target_taxids, target_dfs, ref_gene_col = "ensembl_gene_id",
-                        identity_thres = 0.3, motif_length = 15, classical_inverted = True, mapping_verbose = False):
+                        identity_thres = 0.3, motif_length = 15, classical_inverted = True, mapping_verbose = False,
+                        target_homology_dicts = None):
 
     args_hash = hash_args(reference_taxid, reference_df, target_taxids, target_dfs, ref_gene_col,
                           identity_thres, motif_length, hash_len=8)
@@ -895,7 +899,8 @@ def score_best_homologs(reference_taxid, reference_df, target_taxids, target_dfs
             merged_df, final_homolog_motif_cols, final_homolog_call_cols, final_homolog_classical_motif_cols = data
     else:
         # Get a dictionary of dictionaries, i.e. target_taxid --> reference_gene --> target_homologs
-        target_dicts = map_homologies(reference_taxid, target_taxids, infer_verbose = mapping_verbose)
+        if target_homology_dicts is None:
+            target_homology_dicts = map_homologies(reference_taxid, target_taxids, infer_verbose = mapping_verbose)
 
         # Extract column names containing motif sequences; assume they are the same in all dataframes
         novel_motif_cols = [col for col in reference_df.columns if col[:6] == "Novel_" and col[-6:] == "_motif"]
@@ -928,9 +933,9 @@ def score_best_homologs(reference_taxid, reference_df, target_taxids, target_dfs
 
         # Make a dictionary of best homologs by taxid for each reference gene, based on masked binding score
         print("Generating dictionary of best homologs by taxid for each reference gene...")
-        best_novel_homolog_dict = get_best_homologs(reference_df, ref_gene_col, target_dicts, target_score_dict)
+        best_novel_homolog_dict = get_best_homologs(reference_df, ref_gene_col, target_homology_dicts, target_score_dict)
         if target_classical_score_dict:
-            best_classical_homolog_dict = get_best_homologs(reference_df, ref_gene_col, target_dicts,
+            best_classical_homolog_dict = get_best_homologs(reference_df, ref_gene_col, target_homology_dicts,
                                                             target_classical_score_dict)
         else:
             best_classical_homolog_dict = None
