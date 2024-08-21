@@ -29,7 +29,7 @@ def load_config(verbose = False):
     predictor_params["topo_params"] = config["topo_params"]
     predictor_params["homology_params"] = config["homology_params"]
     predictor_params["alphafold_params"] = config["alphafold_params"]
-    predictor_params["sql_params"] = config["sql_params"]
+    predictor_params["db_params"] = config["db_params"]
 
     # Convert arrays to numpy arrays
     similarity_position_weights = np.array(predictor_params["homology_params"]["similarity_position_weights"])
