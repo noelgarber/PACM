@@ -134,7 +134,11 @@ def generate_base_dataset(protein_fasta_path = None, accession_dataset_name = "h
     seqs = [ensembl_sequence_dict.get(ensembl_id) for ensembl_id in ensembl_ids]
     data_df["sequence"] = seqs
 
-    return data_df
+    protein_lengths = {}
+    for ensembl_protein_id, protein_seq in zip(ensembl_ids, seqs):
+        protein_lengths[ensembl_protein_id] = len(protein_seq) if isinstance(protein_seq, str) else 0
+
+    return data_df, protein_lengths
 
 def retrieve_matches(input_df, reference_taxid, target_taxids, homologene_path = None, homologs = None, verbose = True):
     '''
@@ -240,7 +244,11 @@ def generate_dataset(protein_fasta_path = None, retrieve_matching_homologs = Tru
     save_folder = os.getcwd().rsplit("/",1)[0]
 
     # Generate main dataframe with host accessions and sequences
-    data_df = generate_base_dataset(protein_fasta_path, accession_dataset_name, biomart_url)
+    data_df, base_protein_lengths = generate_base_dataset(protein_fasta_path, accession_dataset_name, biomart_url)
+    if base_protein_lengths:
+        protein_lengths_path = os.path.join(save_folder, f"{reference_taxid}_protein_lengths.pkl")
+        with open(protein_lengths_path, "wb") as file:
+            pickle.dump(base_protein_lengths, file)
 
     # Assign homolog accessions and sequences
     if retrieve_matching_homologs:
