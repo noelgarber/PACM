@@ -103,7 +103,7 @@ def generate_novel_motif_map(gene_id, protein_id, protein_len, motif_len, query_
                 motif_seq = motif_vals_dict.get("sequence")
                 if masked_binding_score > 0:
                     motif_domain_map.add_motif(start, motif_seq, masked_binding_score, motif_len, min_thickness_ratio)
-            leftovers = motif_domain_map.rasterize(nudging_rounds_max = 5, min_sep = 5)
+            leftovers = motif_domain_map.rasterize(nudging_rounds_max = 5, min_sep = 10)
 
             if display:
                 motif_domain_map.show()

@@ -197,7 +197,7 @@ class MotifDomainMap:
 
         return (new_bounding_box, leftover)
 
-    def resolve_overlaps(self, min_sep = 5):
+    def resolve_overlaps(self, min_sep = 10):
         # Check for overlaps and resolve them by nudging layers
 
         # Get bounding boxes for each text_arr, representing the edges of the non-background text
@@ -243,7 +243,7 @@ class MotifDomainMap:
 
         return leftovers
 
-    def rasterize(self, nudging_rounds_max, min_sep = 5):
+    def rasterize(self, nudging_rounds_max, min_sep = 10):
         # Rasterize text layers into main image, correcting overlapping labels first
 
         # Correct overlapping labels
