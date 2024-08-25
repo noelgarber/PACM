@@ -49,3 +49,5 @@ pickle
 
 # Ignore logs
 logs
+
+/query_gui/*.tif
