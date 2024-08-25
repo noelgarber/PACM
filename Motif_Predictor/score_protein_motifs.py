@@ -355,7 +355,7 @@ def score_proteins_chunk(df_chunk, predictor_params = predictor_params):
         zipped_results = zip(motifs, total_scores, binding_scores,
                              positive_scores, suboptimal_scores, forbidden_scores, final_calls)
         for j, (motif, total, binding, positive, suboptimal, forbidden, call) in enumerate(zipped_results):
-            motif_start = protein_seq.find(motif) if isinstance(protein_seq, str) else np.nan
+            motif_start = int(protein_seq.find(motif)) if isinstance(protein_seq, str) else np.nan
             ordered_motifs_starts[j].append(motif_start)
             ordered_motifs_cols[j].append(motif)
             ordered_total_scores_cols[j].append(total)
@@ -466,6 +466,7 @@ def score_proteins(protein_seqs_df, predictor_params = predictor_params, ensembl
 
     chunk_size = predictor_params["chunk_size"]
     df_chunks = []
+    valid_seqs_exist = False
     for i in range(0, len(protein_seqs_df), chunk_size):
         df_chunk = protein_seqs_df.iloc[i:i + chunk_size]
 
@@ -479,6 +480,9 @@ def score_proteins(protein_seqs_df, predictor_params = predictor_params, ensembl
         if use_alphafold:
             df_chunk = filter_dssp(df_chunk, alphadssp_results, seq_col = seq_col,
                                    uniprot_col = "uniprot", trembl_col = "trembl")
+
+        if any(df_chunk[seq_col].notna()) and any(df_chunk[seq_col].ne("")):
+            valid_seqs_exist = True
 
         df_chunks.append(df_chunk)
 
@@ -503,7 +507,7 @@ def score_proteins(protein_seqs_df, predictor_params = predictor_params, ensembl
 
     scored_protein_df = pd.concat(scored_chunks, ignore_index=True)
 
-    final_results = (scored_protein_df, novel_motif_cols, novel_total_cols, novel_binding_cols,
+    final_results = (scored_protein_df, valid_seqs_exist, novel_motif_cols, novel_total_cols, novel_binding_cols,
                      novel_positive_cols, novel_suboptimal_cols, novel_forbidden_cols,
                      novel_call_cols, novel_classical_cols, classical_motif_cols, classical_score_cols)
 
