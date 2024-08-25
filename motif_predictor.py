@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import os
 import pickle
+import warnings
 from Motif_Predictor.score_protein_motifs import score_proteins, parse_ensembl_tm
 from Motif_Predictor.specificity_score_assigner import apply_specificity_scores
 from Motif_Predictor.check_conservation import evaluate_homologs
@@ -11,6 +12,7 @@ from Motif_Predictor.score_homolog_motifs import score_homolog_motifs
 from Motif_Predictor.motif_topology_predictor import predict_topology
 from Motif_Predictor.combine_dfs import fuse_dfs, infer_cytosolic_accessibility, make_gene_df
 from Motif_Predictor.load_predictor_config import load_config
+from Motif_Predictor.make_json import convert_to_json
 
 predictor_params = load_config(verbose=True)
 
@@ -50,16 +52,26 @@ def process_chunks(protein_seqs_paths, keys, df_chunk_counts, topological_domain
             results = score_proteins(chunk_df, predictor_params, current_taxid = current_taxid)
 
             chunk_df = results[0]
-            novel_motif_cols = results[1]
-            classical_motif_cols = results[9]
+            valid_seqs_exist = results[1]
+            novel_motif_cols = results[2]
+            classical_motif_cols = results[10]
 
             all_motif_cols = novel_motif_cols.copy()
             all_motif_cols.extend(classical_motif_cols)
 
             # Apply bait specificity scoring of discovered motifs
             assign_specificities = predictor_params["assign_specificity_scores"]
-            if assign_specificities:
+            if assign_specificities and valid_seqs_exist:
                 chunk_df = apply_specificity_scores(chunk_df, all_motif_cols, predictor_params)
+            elif assign_specificities:
+                # Insert NaN for specificity score columns when no valid sequences exist
+                for motif_col in all_motif_cols:
+                    motif_col_idx = chunk_df.columns.get_loc(motif_col)
+                    specificity_col = f"{motif_col}_specificity_score"
+                    chunk_df.insert(motif_col_idx+1, specificity_col, np.nan)
+
+            if not any(["_specificity_score" in col for col in chunk_df.columns]):
+                raise Exception(f"Specificity scores were not applied to chunk {i+1} of {path}")
 
             # Get topology for predicted motifs
             chunk_df = predict_topology(chunk_df, all_motif_cols, predictor_params, topological_domains, sequences)
@@ -163,6 +175,7 @@ def process_existing(protein_seqs_paths, keys, df_chunk_counts, topological_doma
     pickling_path = os.path.join(os.getcwd(), "data_dfs.pkl")
     if not debug_caching or not os.path.exists(pickling_path):
         data_dfs = []
+        taxid_dfs = {}
         output_paths = []
         for key, path, chunk_count in zip(keys, protein_seqs_paths, df_chunk_counts):
             print(f"Key: {key} | Scoring path: {path}")
@@ -181,14 +194,18 @@ def process_existing(protein_seqs_paths, keys, df_chunk_counts, topological_doma
                 # Apply conditional matrices motif scoring
                 results = score_proteins(chunk_df, predictor_params, ensembl_tm_dict, filter_transmembrane_helices,
                                          current_taxid)
-                chunk_df, novel_motif_cols = results[:2]
-                classical_motif_cols = results[9]
+                chunk_df, valid_seqs_exist, novel_motif_cols = results[:3]
+                classical_motif_cols = results[10]
                 all_motif_cols = novel_motif_cols + classical_motif_cols
 
                 # Apply bait specificity scoring of discovered motifs
                 assign_specificities = predictor_params["assign_specificity_scores"]
                 if assign_specificities:
                     chunk_df = apply_specificity_scores(chunk_df, all_motif_cols, predictor_params)
+                valid_cols = [col for col in chunk_df.columns if isinstance(col, str)]
+                if len(valid_cols) > 0:
+                    if not any(["_specificity_score" in col for col in valid_cols]):
+                        warnings.warn(f"\tSpecificity scores were not applied to chunk {i+1} of {path}")
 
                 # Get topology for predicted motifs
                 chunk_df = predict_topology(chunk_df, all_motif_cols, predictor_params, topological_domains, sequences)
@@ -221,12 +238,19 @@ def process_existing(protein_seqs_paths, keys, df_chunk_counts, topological_doma
             motif_prefixes = [col.split("_motif_topology_type")[0] for col in data_df.columns if "topology_type" in col]
             data_df = infer_cytosolic_accessibility(data_df, motif_prefixes)
 
+            # Check if specificities were calculated
+            valid_cols = [col for col in data_df.columns if isinstance(col, str)]
+            if len(valid_cols) > 0:
+                if not any(["_specificity_score" in col for col in valid_cols]):
+                    warnings.warn(f"Specificity scores were not applied to dataframe for {path}")
+
             # Save scored data
             output_path = path[:-4] + "_scored.csv"
             data_df.to_csv(output_path)
             print(f"\tSaved scored motifs to {output_path}")
             output_paths.append(output_path)
             data_dfs.append(data_df)
+            taxid_dfs[current_taxid] = data_df
 
             # Delete temporary files
             print(f"\tDeleting temporary files...")
@@ -236,21 +260,16 @@ def process_existing(protein_seqs_paths, keys, df_chunk_counts, topological_doma
 
         if debug_caching:
             with open(pickling_path, "wb") as f:
-                pickle.dump((data_dfs, output_paths), f)
+                pickle.dump((data_dfs, taxid_dfs, output_paths), f)
 
     else:
         with open(pickling_path, "rb") as f:
-            data_dfs, output_paths = pickle.load(f)
+            data_dfs, taxid_dfs, output_paths = pickle.load(f)
 
-    # Look for homologous motifs in target species compared to reference species
-    data_df, final_homolog_motif_cols = score_homolog_motifs(data_dfs, predictor_params=predictor_params)
+    data_dict, correlated_homolog_dict, correlated_homolog_df = convert_to_json(taxid_dfs, predictor_params,
+                                                                                correlate_homology=True)
 
-    # Apply bait specificity scoring to homologous motifs
-    assign_specificities = predictor_params["assign_specificity_scores"]
-    if assign_specificities:
-        data_df = apply_specificity_scores(data_df, final_homolog_motif_cols, predictor_params)
-
-    return output_paths, data_df
+    return output_paths, correlated_homolog_df
 
 cwd = os.getcwd()
 def main(predictor_params = predictor_params):
@@ -298,9 +317,7 @@ def main(predictor_params = predictor_params):
     # Homologous motif detection is done differently if each dataframe contains data for only one species
     homolog_selection_mode = predictor_params["homology_params"]["homolog_selection_mode"]
     if homolog_selection_mode == "best":
-        output_paths, combined_df = process_existing(protein_seqs_paths, keys, df_chunk_counts, topological_domains,
-                                                     sequences, predictor_params)
-        taxids = keys[1:]
+        process_existing(protein_seqs_paths, keys, df_chunk_counts, topological_domains, sequences, predictor_params)
     else:
         output_paths = process_chunks(protein_seqs_paths, keys, df_chunk_counts, topological_domains, sequences,
                                       predictor_params)
@@ -308,15 +325,15 @@ def main(predictor_params = predictor_params):
         combined_df = fuse_dfs(output_paths)
         taxids = [key.split("_vs_")[1] for key in keys]
 
-    # Save combined_df
-    parent_path = output_paths[0].rsplit("/",1)[0]
-    combined_path = os.path.join(parent_path, "proteome_datasets_combined_scored.csv")
-    combined_df.to_csv(combined_path)
+        # Save combined_df
+        parent_path = output_paths[0].rsplit("/",1)[0]
+        combined_path = os.path.join(parent_path, "proteome_datasets_combined_scored.csv")
+        combined_df.to_csv(combined_path)
 
-    print(f"Generating dataframe with only one row per gene ID...")
-    unique_df = make_gene_df(combined_df, homolog_selection_mode, taxids)
-    unique_path = os.path.join(parent_path, "proteome_datasets_combined_scored_by_gene.csv")
-    unique_df.to_csv(unique_path)
+        print(f"Generating dataframe with only one row per gene ID...")
+        unique_df = make_gene_df(combined_df, homolog_selection_mode, taxids)
+        unique_path = os.path.join(parent_path, "proteome_datasets_combined_scored_by_gene.csv")
+        unique_df.to_csv(unique_path)
 
     print(f"Process completed!")
 
