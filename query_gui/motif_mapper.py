@@ -1,5 +1,5 @@
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from tifffile import imwrite, imshow
 import matplotlib.pyplot as plt
 import os
@@ -9,14 +9,77 @@ predictor_params = load_config(verbose=True)
 default_db_path = predictor_params["db_params"]["db_path"]
 cwd = os.getcwd()
 
+def interpolate_color(color1, color2, t):
+    t = np.clip(t, 0, 1)
+    interpolated_color = color1 + t * (color2 - color1)
+    return interpolated_color
+
+regular_font_path = os.path.join(os.getcwd(), "fonts", "DejaVuSans.ttf")
+bold_font_path = os.path.join(os.getcwd(), "fonts", "DejaVuSans-Bold.ttf")
+def render_text(text, vertical_resolution, use_bold = False, trim_vertical = True):
+    """
+    Renders a line of text at a specified vertical resolution with antialiasing.
+
+    Args:
+        text (str):                    text to render
+        vertical_resolution (int):     vertical resolution
+        use_bold (bool):               whether to use bold font
+        trim_vertical (bool):          whether to trim top and bottom whitespace;
+                                       may result in vertical shape not matching vertical resolution
+
+    Returns:
+        cropped_img (np.ndarray):      the rendered text as a numpy image array
+    """
+    # Determine the font size and load the font
+    font_size = vertical_resolution
+    font_path = bold_font_path if use_bold else regular_font_path
+    font = ImageFont.truetype(font_path, font_size)
+
+    # Create a dummy image to calculate text size and position
+    dummy_img = Image.new("RGB", (1, 1), (0, 0, 0))
+    draw = ImageDraw.Draw(dummy_img)
+
+    # Get the full text bounding box (considering any characters that extend above or below the typical bounds)
+    text_bbox = draw.textbbox((0, 0), text, font=font)
+    text_width, text_height = text_bbox[2] - text_bbox[0], text_bbox[3] - text_bbox[1]
+
+    # Draw the text with antialiasing at a calculated position
+    img = Image.new("RGB", (text_width, vertical_resolution), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    vertical_position = (vertical_resolution - text_height) // 2 - text_bbox[1]
+    draw.text((0, vertical_position), text, font=font, fill=(0, 0, 0))
+
+    # Convert the image to a numpy array
+    img = np.array(img).astype(float) / 255
+
+    # Crop the image to remove any excess whitespace
+    background_mask = img.min(axis=2) == 1
+    background_cols = background_mask.min(axis=0).astype(bool)
+    foreground_col_indices = np.where(~background_cols)[0]
+    left_edge = foreground_col_indices.min()
+    right_edge = foreground_col_indices.max()
+
+    if trim_vertical:
+        background_rows = background_mask.min(axis=1).astype(bool)
+        foreground_row_indices = np.where(~background_rows)[0]
+        top_edge = foreground_row_indices.min()
+        bottom_edge = foreground_row_indices.max()
+        cropped_img = img[top_edge:bottom_edge+1, left_edge:right_edge+1, :]
+    else:
+        cropped_img = img[:, left_edge:right_edge+1, :]
+
+    return cropped_img
+
 class MotifDomainMap:
     # Object for mapping motifs onto a domain map image for a protein of interest
 
-    def __init__(self, total_residues, scaling_factor = 1.0, protein_id = None):
+    def __init__(self, total_residues, scaling_factor = 1.0, protein_id = None,
+                 protein_label_fontsize = 42, protein_label_offset = 28, legend_fontsize = 36):
         self.total_residues = total_residues
         self.height = round(150 * scaling_factor)
         self.width = round(2000 * scaling_factor)
         self.scaling_factor = scaling_factor
+        self.legend_fontsize = legend_fontsize
 
         self.arr = np.ones(shape=(self.height, self.width, 3), dtype=float)
         midline_thickness = round(10 * scaling_factor)
@@ -24,250 +87,338 @@ class MotifDomainMap:
         h2 = h1 + midline_thickness
         self.arr[h1:h2, :, :] = 0  # set horizontal midline to black
 
-        self.text_layers = []
+        self.legend_exists = False
+        self.tick_placements = []
         self.protein_id = protein_id
         if protein_id:
+            self.protein_label_fontsize = protein_label_fontsize
+            self.protein_label_offset = protein_label_offset
             self.label_protein_id(protein_id)
 
-    def label_protein_id(self, protein_id):
-        # Place label text using Matplotlib
-        protein_label = f"{protein_id}:"
-        label_center_position = (0, round(5 * self.scaling_factor))
+    def label_protein_id(self, protein_id, left_offset=0):
+        # Place protein label in top left corner
 
-        # Use 'Agg' backend for off-screen rendering
-        original_backend = plt.get_backend()
-        plt.switch_backend('Agg')
-        plt.figure(figsize=(self.arr.shape[1] / 100, self.arr.shape[0] / 100), dpi=100)
-        plt.imshow(self.arr)
-        plt.text(label_center_position[1], label_center_position[0], protein_label, fontsize=20, ha='left', va='top',
-                 color='black')
-        plt.axis('off')
+        protein_label = render_text(f"Isoform {protein_id}:", round(self.protein_label_fontsize * self.scaling_factor))
+        top = self.protein_label_offset
+        bottom = top + protein_label.shape[0]
+        left = left_offset
+        right = left + protein_label.shape[1]
+        self.arr[top:bottom, left:right, :] = protein_label
 
-        # Convert plot to image array
-        plt.gca().set_position([0, 0, 1, 1])  # Remove padding
-        plt.gca().set_axis_off()  # Hide axes
-        plt.subplots_adjust(top=1, bottom=0, right=1, left=0, hspace=0, wspace=0)
-        plt.margins(0, 0)
-        plt.gca().xaxis.set_major_locator(plt.NullLocator())
-        plt.gca().yaxis.set_major_locator(plt.NullLocator())
+    def infer_color(self, motif_score, specificity_score=None, bottom_color=None, mid_color=None, top_color=None,
+                    color_ranges=None):
+        # Interpolate tick color based on score
 
-        # Render the canvas and convert to numpy array
-        plt.gcf().canvas.draw()  # Force the canvas to render
-        self.arr = np.frombuffer(plt.gcf().canvas.tostring_rgb(), dtype=np.uint8)
-        self.arr = self.arr.reshape(plt.gcf().canvas.get_width_height()[::-1] + (3,))
-        self.arr = self.arr.astype(float) / 255
-        plt.close()
+        if specificity_score is not None:
+            bottom_color = np.array([0.0, 1.0, 0.0]) if bottom_color is None else bottom_color
+            mid_color = np.array([1.0, 1.0, 1.0]) if mid_color is None else mid_color
+            top_color = np.array([1.0, 0.35, 0.35]) if top_color is None else top_color
+            color_ranges = (-2.0, 0.0, 2.0) if color_ranges is None else color_ranges
+            color_score = specificity_score
+        else:
+            bottom_color = np.array([0.75, 0.75, 0.75]) if bottom_color is None else bottom_color
+            top_color = np.array([0.0, 0.5, 1.0]) if top_color is None else top_color
+            color_ranges = (0.0, 1.0) if color_ranges is None else color_ranges
+            color_score = motif_score
 
-        plt.switch_backend(original_backend)
+        if len(color_ranges) == 2:
+            scaling_score = (color_score - color_ranges[0]) / (color_ranges[1] - color_ranges[0])
+            interpolated_color = interpolate_color(bottom_color, top_color, t=scaling_score)
+        elif len(color_ranges) == 3:
+            if color_score <= color_ranges[0]:
+                interpolated_color = bottom_color
+            elif color_score == color_ranges[1]:
+                interpolated_color = mid_color
+            elif color_score >= color_ranges[2]:
+                interpolated_color = top_color
+            elif color_score > color_ranges[0] and color_score < color_ranges[1]:
+                scaling_score = (color_score - color_ranges[0]) / (color_ranges[1] - color_ranges[0])
+                interpolated_color = interpolate_color(bottom_color, mid_color, t=scaling_score)
+            elif color_score > color_ranges[1] and color_score < color_ranges[2]:
+                scaling_score = (color_score - color_ranges[1]) / (color_ranges[2] - color_ranges[1])
+                interpolated_color = interpolate_color(mid_color, top_color, t=scaling_score)
+            else:
+                print(f"color_score out of range: {color_score}")
+        else:
+            raise Exception(f"color_ranges requires an ascending series of 2 or 3 values, "
+                            f"but {len(color_ranges)} were given")
 
-    def interpolate_color(self, color1, color2, t):
-        t = np.clip(t, 0, 1)
-        interpolated_color = color1 + t * (color2 - color1)
         return interpolated_color
 
-    def add_motif_tick(self, motif_start, motif_score, motif_len, min_thickness_ratio=0.005,
-                       bottom_color=None, top_color=None):
-        # Place the actual motif tick
-        distance_from_left = round((motif_start / self.total_residues) * self.arr.shape[1])
+    def get_tick_dims(self, motif_start, motif_len, min_thickness_ratio=0.005):
+        '''
+        Calculates the dimensions of the tick to denote the motif of interest.
+
+        Args:
+            motif_start (int):           motif starting position in the protein sequence
+            motif_len (int):             motif length
+            min_thickness_ratio (float): minimum thickness of the tick as a fraction of the total domain map width
+        '''
+
+        tick_horizontal_midpoint = round((motif_start / self.total_residues) * self.arr.shape[1])
         motif_width = round(motif_len / self.total_residues)
         min_thickness = round(min_thickness_ratio * self.arr.shape[1])
         if motif_width >= min_thickness:
             delta_width = 0
-            w1 = distance_from_left
-            w2 = distance_from_left + motif_width
+            w1 = tick_horizontal_midpoint
+            w2 = tick_horizontal_midpoint + motif_width
         else:
             delta_width = min_thickness - motif_width
-            w1 = distance_from_left - round(delta_width / 2)
-            w2 = distance_from_left + motif_width + round(delta_width / 2)
+            w1 = tick_horizontal_midpoint - round(delta_width / 2)
+            w2 = tick_horizontal_midpoint + motif_width + round(delta_width / 2)
 
         motif_height = round(30 * self.scaling_factor)
         h1 = self.arr.shape[0] - motif_height
         h2 = self.arr.shape[0]
 
-        if bottom_color is None:
-            bottom_color = np.array([0.75, 0.75, 0.75])
-        if top_color is None:
-            top_color = np.array([0.0, 0.5, 1.0])
-        interpolated_color = self.interpolate_color(bottom_color, top_color, t=motif_score)
+        return (h1, h2, w1, w2, tick_horizontal_midpoint)
 
-        self.arr[h1:h2, w1:w2, :] = interpolated_color
+    def add_motif_tick(self, motif_start, score, motif_len, specificity=None, min_thickness_ratio=0.005, tick_outline=0,
+                       bottom_color=None, mid_color=None, top_color=None, color_ranges=None, opacity_range=(0,1)):
+        '''
+        Function for adding a motif tick to the domain map.
 
-        return distance_from_left, delta_width
+        Args:
+            motif_start (int):           motif starting position in the protein sequence
+            score (float):               motif confidence score
+            motif_len (int):             motif length
+            specificity (float):         motif specificity score (optional)
+            min_thickness_ratio (float): minimum thickness of the tick as a fraction of the total domain map width
+            tick_outline (int):          thickness of black outline around tick
+            bottom_color (tuple):        base color for lowest score
+            mid_color (tuple):           midpoint color
+            top_color (tuple):           top color for highest score
+            color_ranges (tuple):        score ranges for interpolating tick color
+            opacity_range (tuple):       score range for determining opacity; only applies when specficity score exists
 
-    def add_motif_text(self, motif_start, motif_seq, motif_score, motif_len, distance_from_left, delta_width):
-        # Place label text using Matplotlib
-        text_arr = np.ones_like(self.arr)
-        fontsize = 16 * self.scaling_factor
+        Returns:
+            tick_horizontal_midpoint (int): horizontal midpoint of drawn tick
+            tick_top_edge (int):            top edge of drawn tick
+        '''
 
-        position_label = f"range={motif_start}:{motif_start + motif_len - 1}"
-        score_label = f"score={motif_score:.2f}"
+        # Get the tick dimensions and interpolate the tick color
+        h1, h2, w1, w2, tick_horizontal_midpoint = self.get_tick_dims(motif_start, motif_len, min_thickness_ratio)
+        tick_top_edge = h1
+        interpolated_color = self.infer_color(score, specificity, bottom_color, mid_color, top_color, color_ranges)
 
-        seq_center_position = (round(45 * self.scaling_factor), distance_from_left + round(motif_len / 2) - round(delta_width / 2))
-        start_center_position = (round(75 * self.scaling_factor), distance_from_left + round(motif_len / 2) - round(delta_width / 2))
-        score_center_position = (round(105 * self.scaling_factor), distance_from_left + round(motif_len / 2) - round(delta_width / 2))
+        # Apply the tick onto the image
+        if specificity is not None:
+            opacity = (score - opacity_range[0]) / (opacity_range[1] - opacity_range[0])
+            old_tick_region = self.arr[h1:h2, w1:w2, :]
+            new_tick = np.zeros_like(old_tick_region, dtype=float)
+            new_tick[:,:,:] = interpolated_color
+            blended_tick = ((1-opacity) * old_tick_region) + (opacity * new_tick)
+            self.arr[h1:h2, w1:w2, :] = blended_tick
+        else:
+            self.arr[h1:h2, w1:w2, :] = interpolated_color
 
-        # Use 'Agg' backend for off-screen rendering
-        original_backend = plt.get_backend()
-        plt.switch_backend('Agg')
-        plt.figure(figsize=(text_arr.shape[1] / 100, text_arr.shape[0] / 100), dpi=100)
-        plt.imshow(text_arr)
-        plt.text(seq_center_position[1], seq_center_position[0], motif_seq, fontsize=fontsize, ha='center', va='center', color='black')
-        plt.text(start_center_position[1], start_center_position[0], position_label, fontsize=fontsize, ha='center', va='center', color='black')
-        plt.text(score_center_position[1], score_center_position[0], score_label, fontsize=fontsize, ha='center', va='center', color='black')
-        plt.axis('off')
+        # Apply the tick outline if desired
+        if tick_outline > 0:
+            if specificity is not None:
+                weakest_outline_color = np.array([1.0, 1.0, 1.0])
+                strongest_outline_color = np.array([0.0, 0.5, 1.0])
+                confidence = (score - opacity_range[0]) / (opacity_range[1] - opacity_range[0])
+                tick_outline_color = interpolate_color(weakest_outline_color, strongest_outline_color, t=confidence)
+            else:
+                tick_outline_color = np.array([0.0, 0.0, 0.0])
 
-        # Convert plot to image array
-        plt.gca().set_position([0, 0, 1, 1])  # Remove padding
-        plt.gca().set_axis_off()  # Hide axes
-        plt.subplots_adjust(top=1, bottom=0, right=1, left=0, hspace=0, wspace=0)
-        plt.margins(0, 0)
-        plt.gca().xaxis.set_major_locator(plt.NullLocator())
-        plt.gca().yaxis.set_major_locator(plt.NullLocator())
+            tick_outline = round(self.scaling_factor * tick_outline)
+            self.arr[h1:h1+tick_outline, w1-tick_outline:w2+tick_outline] = tick_outline_color # top line
+            self.arr[h2-tick_outline:h2, w1-tick_outline:w2+tick_outline] = tick_outline_color # bottom line
+            self.arr[h1:h2, w1-tick_outline:w1] = tick_outline_color # left line
+            self.arr[h1:h2, w2:w2+tick_outline] = tick_outline_color # right line
 
-        # Render the canvas and convert to numpy array
-        plt.gcf().canvas.draw()  # Force the canvas to render
-        text_arr = np.frombuffer(plt.gcf().canvas.tostring_rgb(), dtype=np.uint8)
-        text_arr = text_arr.reshape(plt.gcf().canvas.get_width_height()[::-1] + (3,))
-        text_arr = text_arr.astype(float) / 255
-        plt.close()
+        return (tick_horizontal_midpoint, tick_top_edge)
 
-        plt.switch_backend(original_backend)
+    def add_tick_numbers(self):
+        '''
+        Adds numbered labels to the motif ticks and corresponding label lines to the list of legend lines.
+        '''
 
-        self.text_layers.append(text_arr)
+        # Sort the tick midpoints and iterate over them from left to right
+        tick_horizontal_midpoints = [placement[0] for placement in self.tick_placements]
+        sorted_tick_indices = np.argsort(tick_horizontal_midpoints)
+        legend_lines = []
 
-    def add_motif(self, motif_start, motif_seq, motif_score, motif_len, min_thickness_ratio = 0.005,
-                  bottom_color = None, top_color = None):
-        if motif_score > 0:
+        for tick_num, tick_idx in zip(np.arange(1, len(sorted_tick_indices)+1), sorted_tick_indices):
+            placement = self.tick_placements[tick_idx]
+            tick_horizontal_midpoint, tick_top_edge, start, end, motif_seq, score, specificity = placement
+
+            # Add a numbered label to the motif tick
+            tick_num_label = render_text(str(tick_num), round(42 * self.scaling_factor), use_bold=True)
+            label_top = tick_top_edge - round(1.25 * tick_num_label.shape[0])
+            label_bottom = tick_top_edge - round(0.25 * tick_num_label.shape[0]) - 1
+            label_left = tick_horizontal_midpoint - round(tick_num_label.shape[1] / 2)
+            label_right = label_left + tick_num_label.shape[1] - 1
+            self.arr[label_top:label_bottom+1, label_left:label_right+1, :] = tick_num_label
+
+            # Add a line to the legend for this numbered motif
+            if specificity is None:
+                combined_label = f"Motif #{tick_num}: score = {score:.2f}, range = {start}:{end}, motif = {motif_seq}"
+            else:
+                combined_label = (f"Motif #{tick_num}: score = {score:.2f}, specificity = {specificity:.2f}, "
+                                  f"range = {start}:{end}, motif = {motif_seq}")
+            legend_lines.append(combined_label)
+
+        self.legend_lines = legend_lines
+
+    def get_legend_arr(self, legend_fontsize=36):
+        '''
+        Converts legend_lines into a legend image array.
+        '''
+
+        # Get the legend lines as image arrays
+        legend_line_arrs = []
+        for legend_line in self.legend_lines:
+            legend_line_arr = render_text(legend_line, round(legend_fontsize * self.scaling_factor), trim_vertical=False)
+            legend_line_arrs.append(legend_line_arr)
+
+        # Render the legend as one image
+        combined_height = sum([arr.shape[0] for arr in legend_line_arrs])
+        widest_line = max([arr.shape[1] for arr in legend_line_arrs])
+        legend_arr = np.ones(shape=(combined_height, widest_line, 3), dtype=float)
+
+        current_top_edge = 0
+        for legend_line_arr in legend_line_arrs:
+            bottom_edge = current_top_edge + legend_line_arr.shape[0]
+            right_edge = legend_line_arr.shape[1]
+            legend_arr[current_top_edge:bottom_edge, 0:right_edge, :] = legend_line_arr
+            current_top_edge = bottom_edge
+
+        self.legend_arr = legend_arr
+        self.legend_exists = True
+
+    def apply_corner_legend(self, outline=2, outline_offset=4):
+        # Try to apply legend into corner of image
+
+        outlined_within_vertical = (self.legend_arr.shape[0] + (4 * outline)) <= self.arr_with_legend.shape[0]
+        outlined_within_horizontal = (self.legend_arr.shape[1] + (4 * outline)) <= self.arr_with_legend.shape[1]
+
+        rendered_legend = False
+        if outlined_within_vertical and outlined_within_horizontal:
+            top = 0
+            bottom = top + self.legend_arr.shape[0] + (4 * outline)
+            right = self.arr_with_legend.shape[1]
+            left = right - self.legend_arr.shape[1] - (4 * outline)
+            top_right_space = self.arr_with_legend[top:bottom, left:right, :]
+
+            if np.all(np.equal(top_right_space, 1)):
+                if outline > 0:
+                    combined_offset = outline + outline_offset
+                    outlined_height = self.legend_arr.shape[0] + (2*combined_offset)
+                    outlined_width = self.legend_arr.shape[1] + (2*combined_offset)
+
+                    outlined_legend_arr = np.ones(shape=(outlined_height, outlined_width, 3), dtype=float) * 0.5
+                    outlined_legend_arr[outline:-outline, outline:-outline, :] = 1.0
+                    outlined_legend_arr[combined_offset:-combined_offset, combined_offset:-combined_offset, :] = self.legend_arr
+
+                    self.arr_with_legend[top:bottom, left:right, :] = outlined_legend_arr
+
+                else:
+                    self.arr_with_legend[top:bottom, left:right, :] = self.legend_arr
+
+                rendered_legend = True
+
+        return rendered_legend
+
+    def generate_legend(self, placement = "corner", corner_legend_outline = 0):
+        '''
+        Renders a version of the main array with the legend applied.
+
+        Args:
+            legend_arr (np.ndarray): the legend as an image array
+        '''
+
+        self.arr_with_legend = self.arr.copy()
+        self.get_legend_arr(self.legend_fontsize)
+
+        rendered_legend = False
+        if placement == "corner":
+            rendered_legend = self.apply_corner_legend(corner_legend_outline)
+            if not rendered_legend:
+                # Try again with a smaller font
+                self.get_legend_arr(self.legend_fontsize)
+                rendered_legend = self.apply_corner_legend(corner_legend_outline)
+                if rendered_legend:
+                    # Reassign legend font size if downsizing was successful
+                    self.legend_fontsize = round(self.legend_fontsize * 0.75)
+
+        # Warn the user if the selected placement is not possible
+        if not rendered_legend and placement == "corner":
+            print(f"Could not render legend in top right corner due to insufficient space; rendering at bottom.")
+        elif not rendered_legend and placement != "bottom":
+            print(f"Unrecognized placement argument \"{placement}\"; placing at bottom of image.")
+
+        # Render at bottom if not already rendered in the corner before
+        if not rendered_legend:
+            # Make array with whitespace for legend at the bottom
+            gap = round(self.scaling_factor * 10)
+            rendered_height = self.arr.shape[0] + gap + self.legend_arr.shape[0]
+            rendered_width = max(self.arr.shape[1], self.legend_arr.shape[1])
+            self.arr_with_legend = np.ones(shape=(rendered_height, rendered_width, 3), dtype=float)
+            self.arr_with_legend[0:self.arr.shape[0], 0:self.arr.shape[1], :] = self.arr
+
+            # Apply the legend
+            top = self.arr.shape[0] + gap
+            bottom = top + self.legend_arr.shape[0]
+            left = 0
+            right = left + self.legend_arr.shape[1]
+            self.arr_with_legend[top:bottom, left:right, :] = self.legend_arr
+            rendered_legend = True
+
+    def label_motifs(self, placement = "corner"):
+        '''
+        Adds numbered labels to the motif ticks and corresponding label lines to the list of legend lines.
+        '''
+
+        # Add tick numbers to main array and create legend lines for rendering later
+        self.add_tick_numbers()
+
+        # Render the legend as an image, then apply it to the main image
+        self.get_legend_arr()
+        self.generate_legend(placement)
+
+    def add_motif(self, start, seq, score, specificity, motif_len, min_thickness_ratio=0.005, tick_outline=0,
+                  bottom_color=None, mid_color=None, top_color=None, color_ranges=None, opacity_range=(0,1),
+                  legend_placement="corner"):
+        '''
+        Main function for adding a motif to the domain map and labelling it appropriately.
+
+        Args:
+            start (int):                 motif starting position in the protein sequence
+            seq (str):                   motif sequence
+            score (float):               motif confidence score
+            specificity (float):         motif specificity score (optional)
+            motif_len (int):             motif length
+            min_thickness_ratio (float): minimum thickness of the tick as a fraction of the total domain map width
+            tick_outline (int):          thickness of black outline around tick
+            bottom_color (tuple):        base color for lowest score
+            mid_color (tuple):           midpoint color
+            top_color (tuple):           top color for highest score
+            color_ranges (tuple):        score ranges for interpolating tick color
+            opacity_range (tuple):       score range for determining opacity; only applies when specficity score exists
+        '''
+
+        if score > 0:
             # Place the actual motif tick on the main image array
-            distance_from_left, delta_width = self.add_motif_tick(motif_start, motif_score, motif_len,
-                                                                  min_thickness_ratio, bottom_color, top_color)
-            # Create label text using Matplotlib and assign as separate layer; will be rasterized later
-            self.add_motif_text(motif_start, motif_seq, motif_score, motif_len, distance_from_left, delta_width)
+            placement_info = self.add_motif_tick(start, score, motif_len, specificity, min_thickness_ratio, tick_outline,
+                                                 bottom_color, mid_color, top_color, color_ranges, opacity_range)
+            tick_horizontal_midpoint, tick_top_edge = placement_info
 
-    def get_bounding_box(self, arr):
-        # Get the indices of the non-zero elements
-        flattened_arr = arr.min(axis=2) if arr.ndim == 3 else arr
-        foreground_mask = np.not_equal(flattened_arr, 1)
+            # Record the tick placement and motif info, then use for labelling and constructing a legend
+            end = start + motif_len - 1
+            self.tick_placements.append((tick_horizontal_midpoint, tick_top_edge, start, end, seq, score, specificity))
+            self.label_motifs(legend_placement)
 
-        foreground_indices = np.argwhere(foreground_mask)
-        if len(foreground_indices) == 0:
-            return None
-
-        # Determine the bounding box
-        top = np.min(foreground_indices[:, 0])
-        bottom = np.max(foreground_indices[:, 0]) + 1 # add 1, as these will be used as end indices
-        left = np.min(foreground_indices[:, 1])
-        right = np.max(foreground_indices[:, 1]) + 1 # Add 1, as these will be used as end indices
-
-        bounding_box = {"top": top, "bottom": bottom, "left": left, "right": right}
-
-        return bounding_box
-
-    def nudge_text_layer(self, text_layer_idx, nudge_amount, bounding_box):
-        # Nudge text layer; nudge_amount nudges right if positive or left if negative
-
-        left = bounding_box["left"]
-        right = bounding_box["right"]
-        top = bounding_box["top"]
-        bottom = bounding_box["bottom"]
-
-        width = right - left  # Calculate the width of the bounding box
-        new_layer = np.ones_like(self.text_layers[text_layer_idx])
-        new_left = left + nudge_amount
-        new_right = right + nudge_amount
-
-        # Check if new bounds are within layer dimensions and adjust if necessary
-        leftover = 0
-        if new_left < 0:
-            leftover = -new_left  # Leftover is the amount the left bound exceeds the left edge
-            new_left = 0  # Clamp to left edge
-            new_right = new_left + width
-        if new_right > new_layer.shape[1]:
-            leftover += new_right - new_layer.shape[1]  # Add the amount right bound exceeds the right edge
-            new_right = new_layer.shape[1]  # Clamp to right edge
-            new_left = new_right - width
-
-        # Update bounding box in case further rounds are needed
-        new_bounding_box = {"left": new_left, "right": new_right, "top": top, "bottom": bottom}
-
-        # Nudge the layer within valid bounds
-        bounded_snippet = self.text_layers[text_layer_idx][top:bottom, left:right, :]
-        new_layer[top:bottom, new_left:new_right, :] = bounded_snippet
-        self.text_layers[text_layer_idx] = new_layer
-
-        return (new_bounding_box, leftover)
-
-    def resolve_overlaps(self, min_sep = 10):
-        # Check for overlaps and resolve them by nudging layers
-
-        # Get bounding boxes for each text_arr, representing the edges of the non-background text
-        horizontal_boundaries = {}
-        for i, text_arr in enumerate(self.text_layers):
-            text_bounding_box = self.get_bounding_box(text_arr)
-            horizontal_boundaries[i] = text_bounding_box
-
-        # Iterate over bounding boxes and their corresponding text_arr layers to nudge if required
-        leftovers = {}
-        for i, bounding_box_1 in horizontal_boundaries.items():
-            left1 = bounding_box_1["left"]
-            right1 = bounding_box_1["right"]
-            mid1 = left1 + ((right1 - left1) / 2)
-
-            for j, bounding_box_2 in horizontal_boundaries.items():
-                if i != j:
-                    left2 = bounding_box_2["left"]
-                    right2 = bounding_box_2["right"]
-                    mid2 = left2 + ((right2 - left2) / 2)
-
-                    if mid1 < mid2:
-                        leftmost_idx, rightmost_idx = i, j
-                        leftmost_bounding_box, rightmost_bounding_box = bounding_box_1, bounding_box_2
-                    else:
-                        leftmost_idx, rightmost_idx = j, i
-                        leftmost_bounding_box, rightmost_bounding_box = bounding_box_2, bounding_box_1
-
-                    overlap_amount = leftmost_bounding_box["right"] - (rightmost_bounding_box["left"] - min_sep)
-                    if overlap_amount > 0:
-                        nudge_amount_left = -round(overlap_amount / 2) # negative means leftward direction
-                        left_nudge_info = self.nudge_text_layer(leftmost_idx, nudge_amount_left, leftmost_bounding_box)
-                        leftmost_bounding_box, leftmost_leftover = left_nudge_info
-                        horizontal_boundaries[leftmost_idx] = leftmost_bounding_box # update bounding box
-
-                        nudge_amount_right = overlap_amount - abs(nudge_amount_left) + abs(leftmost_leftover)
-                        right_nudge_info = self.nudge_text_layer(j, nudge_amount_right, bounding_box_2)
-                        rightmost_bounding_box, rightmost_leftover = right_nudge_info
-                        horizontal_boundaries[rightmost_idx] = rightmost_bounding_box # update bounding box
-
-                        final_leftover = rightmost_leftover
-                        leftovers[(i,j)] = final_leftover
-
-        return leftovers
-
-    def rasterize(self, nudging_rounds_max, min_sep = 10):
-        # Rasterize text layers into main image, correcting overlapping labels first
-
-        # Correct overlapping labels
-        for i in np.arange(nudging_rounds_max):
-            leftovers = self.resolve_overlaps(min_sep)
-            if len(leftovers) == 0:
-                break
-            elif max(leftovers.values()) == 0:
-                break
-
-        # Rasterize non-transparent pixels from text layers into the main image
-        for text_layer in self.text_layers:
-            mask = np.not_equal(text_layer, 1)
-            self.arr[mask] = text_layer[mask]
-        
-        return leftovers
-
-    def to_image(self):
-        im = Image.fromarray(self.arr.astype('uint8'))
-        return im
+    def get_arr(self):
+        if self.legend_exists:
+            return self.arr_with_legend
+        else:
+            return self.arr
 
     def show(self):
-        imshow(self.arr)
+        imshow(self.get_arr())
         plt.show()
 
     def save(self, path):
-        imwrite(path, self.arr)
+        imwrite(path, self.get_arr())

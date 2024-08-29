@@ -8,11 +8,17 @@ import pickle
 import tkinter as tk
 from Motif_Predictor.load_predictor_config import load_config
 from query_gui.gene_query_popup import GeneQueryPopup
-from query_gui.motif_mapper import MotifDomainMap
+from query_gui.motif_mapper import render_text, MotifDomainMap
 
 predictor_params = load_config(verbose=True)
 default_db_path = predictor_params["db_params"]["db_path"]
 cwd = os.getcwd()
+
+# TODO Specificity score color-coding
+# TODO Consider tying the masked FFAT binding score to transparency
+# TODO Check why our model doesn't find the Levine FFATs in VPS13D that did not bind; also compare to inferred structure
+# TODO Check VPS13A/C
+# TODO NBEAL2
 
 def load_db(db_path = default_db_path):
     pkl_path = db_path.replace(".json", ".pkl")
@@ -83,8 +89,9 @@ def extract_protein_gene_dict(data_dict):
 
     return protein_gene_dict, gene_name_id_dict, gene_id_name_dict
 
-def generate_novel_motif_map(gene_id, protein_id, protein_len, motif_len, query_dict, scaling_factor = 1.0,
-                             min_thickness_ratio = 0.005, display = False, save = True):
+def generate_novel_motif_map(gene_id, protein_id, protein_len, motif_len, query_dict, scaling_factor=1.0,
+                             min_thickness_ratio=0.01, color_ranges=None, opacity_range=(0,1),
+                             display=False, save=True):
     # Function to generate a MotifDomainMap object for a protein with detected motifs, color-coded by strength
 
     motif_domain_map = None
@@ -99,11 +106,13 @@ def generate_novel_motif_map(gene_id, protein_id, protein_len, motif_len, query_
             novel_results = protein_results.get("novel")
             for novel_num_motif, motif_vals_dict in novel_results.items():
                 start = int(motif_vals_dict.get("start"))
-                masked_binding_score = motif_vals_dict.get("masked_binding_score")
-                motif_seq = motif_vals_dict.get("sequence")
-                if masked_binding_score > 0:
-                    motif_domain_map.add_motif(start, motif_seq, masked_binding_score, motif_len, min_thickness_ratio)
-            leftovers = motif_domain_map.rasterize(nudging_rounds_max = 5, min_sep = 10)
+                score = motif_vals_dict.get("masked_binding_score")
+                specificity_score = motif_vals_dict.get("specificity_score")
+                seq = motif_vals_dict.get("sequence")
+                if score > 0:
+                    motif_domain_map.add_motif(start, seq, score, specificity_score, motif_len, min_thickness_ratio,
+                                               tick_outline=5, color_ranges=color_ranges, opacity_range=opacity_range,
+                                               legend_placement="bottom")
 
             if display:
                 motif_domain_map.show()
@@ -113,30 +122,33 @@ def generate_novel_motif_map(gene_id, protein_id, protein_len, motif_len, query_
 
     return motif_domain_map
 
-def merge_motif_maps(motif_domain_maps, gene_name):
+def merge_motif_maps(motif_domain_maps, gene_name, title_fontsize = 48, top_padding = 80, sep_padding = 60):
     # Merge maps into one image for the gene of interest
 
-    top_padding = 80
-    max_width = max([motif_domain_map.arr.shape[1] for motif_domain_map in motif_domain_maps.values()])
-    combined_height = sum([motif_domain_map.arr.shape[0] for motif_domain_map in motif_domain_maps.values()])
-    combined_height += top_padding
+    merged_scaling_factor = 0
+    max_width = max([motif_domain_map.get_arr().shape[1] for motif_domain_map in motif_domain_maps.values()])
+    combined_height = sum([motif_domain_map.get_arr().shape[0] for motif_domain_map in motif_domain_maps.values()])
     for protein_id, motif_domain_map in motif_domain_maps.items():
         scaling_factor = motif_domain_map.scaling_factor
-        sep_px = int(25 * scaling_factor)
+        sep_px = round(sep_padding * scaling_factor)
         combined_height += sep_px
+        if scaling_factor > merged_scaling_factor:
+            merged_scaling_factor = scaling_factor
+
+    top_padding = round(top_padding * merged_scaling_factor)
+    combined_height += top_padding
 
     # Generate the stacked images
-    scaling_factor = 1.0
     merged_img = np.ones(shape=(combined_height, max_width, 3), dtype=float)
     top = top_padding
     for protein_id, motif_domain_map in motif_domain_maps.items():
         scaling_factor = motif_domain_map.scaling_factor
-        sep_px = int(25 * scaling_factor)
+        sep_px = round(sep_padding * scaling_factor)
 
-        bottom = top + motif_domain_map.arr.shape[0] + sep_px
+        bottom = top + motif_domain_map.get_arr().shape[0] + sep_px
         left = 0
-        right = motif_domain_map.arr.shape[1]
-        arr = motif_domain_map.arr.copy()
+        right = motif_domain_map.get_arr().shape[1]
+        arr = motif_domain_map.get_arr().copy()
 
         padded_arr = np.ones(shape=(arr.shape[0] + sep_px, arr.shape[1], arr.shape[2]), dtype=float)
         padded_arr[sep_px:,:,:] = arr
@@ -146,29 +158,13 @@ def merge_motif_maps(motif_domain_maps, gene_name):
     
     # Add the title
     title = f"{gene_name} Motifs by Protein Isoform"
-    title_center_position = (round(10 * scaling_factor), round(merged_img.shape[1] / 2))
-
-    # Use 'Agg' backend for off-screen rendering
-    plt.switch_backend('Agg')
-    plt.figure(figsize=(merged_img.shape[1] / 100, merged_img.shape[0] / 100), dpi=100)
-    plt.imshow(merged_img)
-    plt.text(title_center_position[1], title_center_position[0], title, fontsize=28, ha='center', va='top', color='black')
-    plt.axis('off')
-
-    # Convert plot to image array
-    plt.gca().set_position([0, 0, 1, 1])  # Remove padding
-    plt.gca().set_axis_off()  # Hide axes
-    plt.subplots_adjust(top=1, bottom=0, right=1, left=0, hspace=0, wspace=0)
-    plt.margins(0, 0)
-    plt.gca().xaxis.set_major_locator(plt.NullLocator())
-    plt.gca().yaxis.set_major_locator(plt.NullLocator())
-
-    # Render the canvas and convert to numpy array
-    plt.gcf().canvas.draw()  # Force the canvas to render
-    merged_img = np.frombuffer(plt.gcf().canvas.tostring_rgb(), dtype=np.uint8)
-    merged_img = merged_img.reshape(plt.gcf().canvas.get_width_height()[::-1] + (3,))
-    merged_img = merged_img.astype(float) / 255
-    plt.close()
+    scaled_title_fontsize = round(title_fontsize * merged_scaling_factor)
+    title_arr = render_text(title, scaled_title_fontsize)
+    title_top = 0
+    title_bottom = title_top + title_arr.shape[0]
+    title_left = round(merged_img.shape[1] / 2) - round(title_arr.shape[1] / 2)
+    title_right = title_left + title_arr.shape[1]
+    merged_img[title_top:title_bottom, title_left:title_right, :] = title_arr
 
     return merged_img
 
@@ -263,7 +259,8 @@ def prompt_for_results(motif_len, protein_lengths_dict = None, gene_name_id_dict
         for gene_id in gene_ids:
             print(f"Current gene ID: {gene_id}")
             protein_ids = list(query_dict[gene_id].keys()) if query_dict.get(gene_id) is not None else []
-            protein_ids.remove("gene_name")
+            if "gene_name" in protein_ids:
+                protein_ids.remove("gene_name")
             for protein_id in protein_ids:
                 print_entry(gene_id, protein_id, query_dict)
                 if protein_lengths_dict is not None:
