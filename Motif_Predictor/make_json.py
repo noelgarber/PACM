@@ -34,41 +34,6 @@ def get_taxids(predictor_params = predictor_params):
 
     return reference_taxid, target_taxids
 
-def parse_dfs(csv_path, predictor_params = predictor_params):
-    # Parse dataframe into taxid-specific dataframes
-
-    df = pd.read_csv(csv_path)
-    reference_taxid, target_taxids = get_taxids(predictor_params)
-
-    # Get base cols for the reference taxid when homology is not being considered
-    base_cols = []
-    for col in df.columns:
-        if all([not str(taxid) in col for taxid in target_taxids]):
-            base_cols.append(col)
-
-    # Get cols for each compared homologous taxid
-    cols_by_taxid = {}
-    for taxid in target_taxids:
-        taxid_cols = [col for col in df.columns if str(taxid) in col]
-        host_cols, homolog_cols = [], []
-        if any(["Host" in col for col in taxid_cols]):
-            if "Host" in col:
-                host_cols.append(col)
-            else:
-                homolog_cols.append(col)
-        cols_by_taxid[taxid] = (host_cols, homolog_cols)
-
-    # Split dataframe into taxid-specific dataframes
-    reference_df = df[base_cols].copy()
-    target_taxid_dfs = {}
-    for target_taxid in target_taxids:
-        host_cols, homolog_cols = cols_by_taxid[target_taxid]
-        host_taxid_df = df[host_cols].copy()
-        homolog_taxid_df = df[homolog_cols].copy()
-        target_taxid_dfs[target_taxid] = (host_taxid_df, homolog_taxid_df)
-
-    return reference_taxid, reference_df, target_taxid_dfs
-
 def apply_num_suffix(num):
     # Applies suffixes to numbers, i.e. 1st, 2nd, 3rd, 4th, etc.
 
@@ -201,32 +166,35 @@ def parse_data(taxid_dfs, ref_gene_col, ref_gene_name_col, ref_protein_col, retu
 
     return unpaired_dict
 
-def find_homologous_motifs(ref_motif_seq, homolog_gene_ids, target_taxid_dict, folder = "novel",
-                           favor_cytoplasmic = True):
-    # Find homologous motifs
+def find_homologous_motifs(ref_motif_seq, homolog_gene_ids, target_taxid_dict, folder):
+    # Find homologous motifs with best identity to reference motif
 
     best_homolog_ids = []
     best_identity = 0.0
     for target_gene_id in homolog_gene_ids:
         target_gene_dict = target_taxid_dict[target_gene_id]
         target_gene_name = target_gene_dict.get("gene_name")
-        for target_protein_id, target_protein_dict in target_gene_dict.items():
+        target_protein_ids = list(target_gene_dict.keys())
+        target_protein_ids.remove("gene_name")
+        for target_protein_id in target_protein_ids:
+            target_protein_dict = target_gene_dict[target_protein_id]
             target_novel_dict = target_protein_dict[folder]
             for target_novel_num_key, target_vals_dict in target_novel_dict.items():
                 target_motif_seq = target_vals_dict["sequence"]
-                residue_matches = np.equal(list(ref_motif_seq), list(target_motif_seq))
-                identity_percent = residue_matches.mean()
-                if identity_percent > best_identity:
-                    best_homolog_ids = [(target_gene_id, target_gene_name, target_protein_id,
-                                         target_novel_num_key, identity_percent)]
-                    best_identity = identity_percent
-                elif identity_percent == best_identity:
-                    best_homolog_ids.append((target_gene_id, target_gene_name, target_protein_id,
-                                             target_novel_num_key, identity_percent))
+                if isinstance(target_motif_seq, str):
+                    residue_matches = np.equal(list(ref_motif_seq), list(target_motif_seq))
+                    identity_percent = residue_matches.mean()
+                    if identity_percent > best_identity:
+                        best_homolog_ids = [(target_gene_id, target_gene_name, target_protein_id,
+                                             target_novel_num_key, identity_percent)]
+                        best_identity = identity_percent
+                    elif identity_percent == best_identity:
+                        best_homolog_ids.append((target_gene_id, target_gene_name, target_protein_id,
+                                                 target_novel_num_key, identity_percent))
 
     # Get data for homologous motifs
-    best_homolog_motifs = {}
-    for i, id_tuple in enumerate(best_homolog_ids):
+    best_homolog_motifs = []
+    for id_tuple in best_homolog_ids:
         target_gene_id, target_gene_name, target_protein_id, target_novel_num_key, identity_percent = id_tuple
         target_protein_dict = target_taxid_dict[target_gene_id][target_protein_id]
         target_vals_dict = target_protein_dict[folder][target_novel_num_key].copy()
@@ -234,47 +202,87 @@ def find_homologous_motifs(ref_motif_seq, homolog_gene_ids, target_taxid_dict, f
         target_vals_dict["homolog_gene_name"] = target_gene_name
         target_vals_dict["homolog_protein_id"] = target_protein_id
         target_vals_dict["homology_identity"] = identity_percent
-        best_homolog_motifs[i] = target_vals_dict
-
-    # Pick preferred homologous motif; preference is given to entries with topology information
-    best_homolog_motif = next(best_homolog_motifs.values())
-    for i, homolog_vals_dict in best_homolog_motifs.items():
-        current_topology_type = homolog_vals_dict["topology"].get("type")
-        if current_topology_type is not None and current_topology_type != "":
-            best_topology_type = best_homolog_motif["topology"].get("type")
-            if best_topology_type is not None and best_topology_type != "" and favor_cytoplasmic:
-                current_cytoplasmic_accessible = homolog_vals_dict["topology"].get("cytoplasmic_accessible")
-                best_cytoplasmic_accessible = best_homolog_motif["topology"].get("cytoplasmic_accessible")
-                if current_cytoplasmic_accessible and not best_cytoplasmic_accessible:
-                    best_homolog_motif = homolog_vals_dict
-            else:
-                best_homolog_motif = homolog_vals_dict
-
-    best_homolog_motifs["best"] = best_homolog_motif
-
+        best_homolog_motifs.append(target_vals_dict)
+    
     return best_homolog_motifs
 
-def assign_homolog_motifs(best_homolog_motifs, target_taxid, ref_gene_id, ref_protein_id, ref_num_key, correlated_dict):
+def get_best_homologous_motif(best_homolog_motifs, favor_cytoplasmic = True):
+    # Pick preferred homologous motif; preference is given to entries with topology information
+
+    if len(best_homolog_motifs) == 0:
+        return None
+    
+    best_homolog_motif = best_homolog_motifs[0]
+    for homolog_vals_dict in best_homolog_motifs[1:]:
+        current_topology_type = homolog_vals_dict["topology"]["type"]
+        current_selection_has_topo = isinstance(current_topology_type, str) and len(str(current_topology_type)) > 0
+
+        best_topology_type = best_homolog_motif["topology"]["type"]
+        previous_selection_has_topo = isinstance(best_topology_type, str) and len(str(best_topology_type)) > 0
+
+        if favor_cytoplasmic:
+            # Disfavor non-cytoplasmic motifs discovered, and favor those with topological information
+            current_selection_cytoplasmic = homolog_vals_dict["topology"]["cytoplasmic_accessible"]
+            current_definitively_cytoplasmic = current_selection_cytoplasmic and current_selection_has_topo
+            
+            previous_selection_cytoplasmic = best_homolog_motif["topology"]["cytoplasmic_accessible"]
+            previous_definitively_cytoplasmic = previous_selection_cytoplasmic and previous_selection_has_topo
+            
+            if current_definitively_cytoplasmic and not previous_definitively_cytoplasmic:
+                # Always favor definitively cytoplasmic motifs with existing topological information
+                best_homolog_motif = homolog_vals_dict
+            elif current_selection_has_topo and not previous_selection_has_topo:
+                # Check if motif is the same and just missing a topological annotation
+                previous_seq = best_homolog_motif["sequence"]
+                current_seq = homolog_vals_dict["sequence"]
+                if previous_seq == current_seq:
+                    # Reassign, as it is better to have topological information even when it shows non-cytoplasmic
+                    best_homolog_motif = homolog_vals_dict
+            elif previous_selection_has_topo and not previous_selection_cytoplasmic: 
+                # Previous selection was definitively non-cytoplasmic; reassign if current motif is different
+                previous_seq = best_homolog_motif["sequence"]
+                current_seq = homolog_vals_dict["sequence"]
+                if current_seq != previous_seq:
+                    # Use new motif instead
+                    best_homolog_motif = homolog_vals_dict
+
+        elif current_selection_has_topo and not previous_selection_has_topo:
+            # Reassign if no topology info was present in the previously selected best homolog motif
+            best_homolog_motif = homolog_vals_dict
+
+    return best_homolog_motif
+
+def assign_homolog_motifs(result, correlated_dict):
     # Helper function that assigns best_homolog_motifs to correlated_dict at the appropriate sub-dict
 
-    if correlated_dict[ref_gene_id][ref_protein_id][ref_num_key].get("homologs") is None:
-        correlated_dict[ref_gene_id][ref_protein_id][ref_num_key]["homologs"] = {target_taxid: {}}
-    elif correlated_dict[ref_gene_id][ref_protein_id][ref_num_key]["homologs"].get(target_taxid) is None:
-        correlated_dict[ref_gene_id][ref_protein_id][ref_num_key]["homologs"][target_taxid] = {}
+    best_homolog_motifs = result["best_motifs"]
+    best_homolog_motif = result["best_motif"]
+    target_taxid = result["target_taxid"]
+    ref_gene = result["ref_gene_id"]
+    ref_protein = result["ref_protein_id"]
+    ref_num_key = result["ref_num_key"]
+    folder = "classical" if "Classical" in ref_num_key else "novel"
 
-    correlated_dict[ref_gene_id][ref_protein_id][ref_num_key]["homologs"][target_taxid] = best_homolog_motifs
+    if correlated_dict[ref_gene][ref_protein][folder][ref_num_key].get("homologs") is None:
+        correlated_dict[ref_gene][ref_protein][folder][ref_num_key]["homologs"] = {target_taxid: {}}
+    if correlated_dict[ref_gene][ref_protein][folder][ref_num_key]["homologs"].get(target_taxid) is None:
+        correlated_dict[ref_gene][ref_protein][folder][ref_num_key]["homologs"][target_taxid] = {}
 
-def correlate_homologs_gene(ref_gene_id, reference_gene_dict, homology_target_dict, target_taxid_dict,
-                            compare_classical_method = False):
+    correlated_dict[ref_gene][ref_protein][folder][ref_num_key]["homologs"][target_taxid]["best_motif"] = best_homolog_motif
+    correlated_dict[ref_gene][ref_protein][folder][ref_num_key]["homologs"][target_taxid]["best_motifs"] = best_homolog_motifs
+
+def correlate_homologs_gene(ref_gene_id, reference_gene_dict, target_taxid, homology_target_dict, target_taxid_dict,
+                            compare_classical_method = False, favor_cytoplasmic = True):
     '''
     Helper function that finds homologs for motifs belonging to a single reference gene
 
     Args:
         ref_gene_id (str):               Gene of interest
         reference_gene_dict (dict):      Main dictionary of motif results by taxid
-        homology_target_dict (dict):     Dictionary of homologous genes for target taxid
-        target_taxid_dict (dict):        Reference taxonomic identifier to look for homologs for
+        target_taxid (int):              Target taxonomic identifier
+        target_taxid_dict (dict):        Dictionary belonging to target_taxid
         compare_classical_method (bool): Whether to compare results from a classical model assessed in parallel
+        favor_cytoplasmic (bool):        Whether to favor cytoplasmic motifs with topological information
 
     Returns:
         novel_results (list):            List of novel motif homologs with keys for assigning back to the main dict
@@ -291,33 +299,49 @@ def correlate_homologs_gene(ref_gene_id, reference_gene_dict, homology_target_di
     if homolog_gene_ids:
         ref_protein_ids = list(reference_gene_dict.keys())
         ref_protein_ids.remove("gene_name")
-        for ref_protein in ref_protein_ids:
-            reference_protein_dict = reference_gene_dict[ref_protein]
+        for ref_protein_id in ref_protein_ids:
+            reference_protein_dict = reference_gene_dict[ref_protein_id]
             reference_novel_dict = reference_protein_dict["novel"]
 
             for ref_novel_num, reference_vals_dict in reference_novel_dict.items():
                 ref_motif_seq = reference_vals_dict["sequence"]
-                best_novel_homolog_motifs = find_homologous_motifs(ref_motif_seq, homolog_gene_ids, target_taxid_dict)
-                novel_results.append((best_novel_homolog_motifs, target_taxid, ref_gene, ref_protein, ref_novel_num))
+                if isinstance(ref_motif_seq, str):
+                    best_novel_homolog_motifs = find_homologous_motifs(ref_motif_seq, homolog_gene_ids, target_taxid_dict,
+                                                                       folder="novel")
+                    best_novel_homolog_motif = get_best_homologous_motif(best_novel_homolog_motifs, favor_cytoplasmic)
+                    novel_result = {"best_motifs": best_novel_homolog_motifs, "best_motif": best_novel_homolog_motif,
+                                    "target_taxid": target_taxid, "ref_gene_id": ref_gene_id,
+                                    "ref_protein_id": ref_protein_id, "ref_num_key": ref_novel_num}
+                    novel_results.append(novel_result)
 
             if compare_classical_method:
                 reference_classical_dict = reference_protein_dict["classical"]
                 for ref_classical_num, reference_classical_vals_dict in reference_classical_dict.items():
                     ref_motif_seq = reference_classical_vals_dict["sequence"]
-                    best_classical_homolog_motifs = find_homologous_motifs(ref_motif_seq, homolog_gene_ids, target_taxid_dict)
-                    classical_results.append((best_classical_homolog_motifs, target_taxid, ref_gene, ref_protein, ref_classical_num))
+                    if isinstance(ref_motif_seq, str):
+                        best_classical_homolog_motifs = find_homologous_motifs(ref_motif_seq, homolog_gene_ids,
+                                                                               target_taxid_dict, folder="classical")
+                        best_classical_homolog_motif = get_best_homologous_motif(best_classical_homolog_motifs, favor_cytoplasmic)
+                        classical_result = {"best_motifs": best_classical_homolog_motifs,
+                                            "best_motif": best_classical_homolog_motif, "target_taxid": target_taxid,
+                                            "ref_gene_id": ref_gene_id, "ref_protein_id": ref_protein_id,
+                                            "ref_num_key": ref_classical_num}
+                        classical_results.append(classical_result)
 
     return (novel_results, classical_results)
 
-def correlate_homologs_chunk(chunk, homology_target_dict, target_taxid_dict, compare_classical_method=False):
+def correlate_homologs_chunk(chunk, target_taxid, homology_target_dict, target_taxid_dict, 
+                             compare_classical_method = False, favor_cytoplasmic = True):
     '''
     Function for correlating results from other taxids with the reference taxid to find homologous motifs
 
     Args:
         chunk (list):                    List of tuples of (ref_gene_id, reference_gene_dict)
+        target_taxid (int):              Target taxonomic identifier
         homology_target_dict (dict):     Dictionary of homologous genes for current taxid
         target_taxid_dict (int):         Results dictionary for target taxid
         compare_classical_method (bool): Whether to compare results from a classical model assessed in parallel
+        favor_cytoplasmic (bool):        Whether to favor cytoplasmic motifs with topological information
 
     Returns:
         novel_results_chunk (list):      List of novel motif homologs with keys for assigning back to the main dict
@@ -328,17 +352,17 @@ def correlate_homologs_chunk(chunk, homology_target_dict, target_taxid_dict, com
     classical_results_chunk = []
 
     # Loop over Ensembl Gene IDs in the reference taxid data and their associated dictionaries
-    for ref_gene, reference_gene_dict in chunk:
-        gene_results = correlate_homologs_gene(ref_gene, reference_gene_dict, homology_target_dict, target_taxid_dict,
-                                               compare_classical_method)
+    for ref_gene_id, reference_gene_dict in chunk:
+        gene_results = correlate_homologs_gene(ref_gene_id, reference_gene_dict, target_taxid, homology_target_dict, 
+                                               target_taxid_dict, compare_classical_method, favor_cytoplasmic)
         novel_gene_results, classical_gene_results = gene_results
         novel_results_chunk.extend(novel_gene_results)
         classical_results_chunk.extend(classical_gene_results)
 
     return (novel_results_chunk, classical_results_chunk)
 
-def correlate_homologs(data_dict, homology_target_dicts, reference_taxid = 9606, compare_classical_method = False,
-                       chunk_size = 500):
+def correlate_homologs(data_dict, homology_target_dicts, reference_taxid = 9606, compare_classical_method = False, 
+                       favor_cytoplasmic = True, chunk_size = 50):
     '''
     Function for correlating results from other taxids with the reference taxid to find homologous motifs
 
@@ -347,6 +371,8 @@ def correlate_homologs(data_dict, homology_target_dicts, reference_taxid = 9606,
         homology_target_dicts (dict):    Dictionary of homologous genes across taxids
         reference_taxid (int):           Reference taxonomic identifier to look for homologs for
         compare_classical_method (bool): Whether to compare results from a classical model assessed in parallel
+        favor_cytoplasmic (bool):        Whether to favor cytoplasmic motifs with topological information
+        chunk_size (int):                Chunk size for parallelization
 
     Returns:
         correlated_dict (dict):          Dictionary for the reference taxid with homologous motifs added for each motif
@@ -358,9 +384,6 @@ def correlate_homologs(data_dict, homology_target_dicts, reference_taxid = 9606,
 
     reference_taxid_dict = data_dict[reference_taxid]
     correlated_dict = reference_taxid_dict.copy()
-
-    novel_results = []
-    classical_results = []
 
     # Loop over taxids to search for homologs within
     for target_taxid in target_taxids:
@@ -374,28 +397,28 @@ def correlate_homologs(data_dict, homology_target_dicts, reference_taxid = 9606,
         for i in np.arange(0, len(pairs), chunk_size):
             chunks.append(pairs[i:i+chunk_size])
 
-        correlate_partial_func = partial(correlate_homologs_chunk, homology_target_dict = homology_target_dict,
+        correlate_partial_func = partial(correlate_homologs_chunk, target_taxid = target_taxid, 
+                                         homology_target_dict = homology_target_dict,
                                          target_taxid_dict = target_taxid_dict,
-                                         compare_classical_method = compare_classical_method)
+                                         compare_classical_method = compare_classical_method, 
+                                         favor_cytoplasmic = favor_cytoplasmic)
         pool = multiprocessing.Pool()
 
         with trange(len(chunks), desc=f"Correlating homologs for target TaxID {target_taxid}...") as pbar:
             for results_chunk in pool.imap_unordered(correlate_partial_func, chunks):
                 novel_results_chunk, classical_results_chunk = results_chunk
-                novel_results.extend(novel_results_chunk)
-                classical_results.extend(classical_results_chunk)
+
+                for novel_result in novel_results_chunk:
+                    assign_homolog_motifs(novel_result, correlated_dict)
+                for classical_result in classical_results_chunk:
+                    assign_homolog_motifs(classical_result, correlated_dict)
+
+                # Free up memory by explicitly deleting chunks as they are processed
+                del novel_results_chunk, classical_results_chunk, results_chunk
                 pbar.update()
 
         pool.close()
         pool.join()
-
-    print(f"Assigning results to correlated dictionary...")
-    for best_novel_homolog_motifs, target_taxid, ref_gene, ref_protein, ref_novel_num in novel_results:
-        assign_homolog_motifs(best_novel_homolog_motifs, target_taxid, ref_gene, ref_protein, ref_novel_num,
-                              correlated_dict)
-    for best_classical_homolog_motifs, target_taxid, ref_gene, ref_protein, ref_classical_num in classical_results:
-        assign_homolog_motifs(best_classical_homolog_motifs, target_taxid, ref_gene, ref_protein, ref_classical_num,
-                              correlated_dict)
 
     return correlated_dict
 
@@ -448,6 +471,123 @@ def blank_correlated_df(return_count, target_taxids, compare_classical_method):
 
     return correlated_df
 
+def get_score_tuples(protein_isoform_ids, reference_gene_dict, compare_classical_method):
+    # Helper function to extract score tuples from a reference gene dictionary
+
+    novel_masked_tuples = []
+    novel_masked_scores = []
+    classical_tuples = []
+    classical_scores = []
+    for ref_protein_id in protein_isoform_ids:
+        novel_vals_dict = reference_gene_dict[ref_protein_id]["novel"]
+        for novel_num, novel_num_vals_dict in novel_vals_dict.items():
+            masked_binding_score = novel_num_vals_dict["masked_binding_score"]
+            novel_masked_tuples.append((ref_protein_id, novel_num, masked_binding_score))
+            novel_masked_scores.append(masked_binding_score)
+        if compare_classical_method:
+            classical_vals_dict = reference_gene_dict[ref_protein_id]["classical"]
+            for classical_num, classical_num_vals_dict in classical_vals_dict.items():
+                classical_score = classical_num_vals_dict["classical_score"]
+                classical_tuples.append((ref_protein_id, classical_num, classical_score))
+                classical_scores.append(classical_score)
+
+    return (novel_masked_tuples, novel_masked_scores, classical_tuples, classical_scores)
+
+def novel_motif_to_df(df, novel_num_vals_dict, novel_num, compare_classical_method, inplace=True):
+    # Helper function that assigns novel motifs for a given gene to the correlated dataframe
+    
+    correlated_df = df if inplace else df.copy()
+
+    correlated_df.at[i, f"{novel_num}_motif"] = novel_num_vals_dict["sequence"]
+    correlated_df.at[i, f"{novel_num}_motif_start"] = novel_num_vals_dict["start"]
+
+    topo_info = novel_num_vals_dict["topology"]
+    correlated_df.at[i, f"{novel_num}_motif_topology_type"] = topo_info["type"]
+    correlated_df.at[i, f"{novel_num}_motif_topology_description"] = topo_info["description"]
+    correlated_df.at[i, f"{novel_num}_motif_cytoplasmic_accessible"] = topo_info["cytoplasmic_accessible"]
+
+    correlated_df.at[i, f"{novel_num}_motif_classification_score"] = novel_num_vals_dict["classification_score"]
+    correlated_df.at[i, f"{novel_num}_motif_binding_score"] = novel_num_vals_dict["binding_score"]
+    correlated_df.at[i, f"{novel_num}_motif_final_call"] = novel_num_vals_dict["final_call"]
+    correlated_df.at[i, f"{novel_num}_motif_specificity_score"] = novel_num_vals_dict["specificity_score"]
+    if compare_classical_method:
+        correlated_df.at[i, f"{novel_num}_motif"] = novel_num_vals_dict["classical_score"]
+
+    if not inplace:
+        return correlated_df
+
+def novel_homologs_to_df(df, novel_homologs, novel_num, inplace=True):
+    # Helper function that assigns best novel motif homolog for a given protein
+
+    correlated_df = df if inplace else df.copy()
+
+    for target_taxid, target_homologs in novel_homologs.items():
+        best_homolog_motif = target_homologs.get("best_motif")
+        if best_homolog_motif is not None:
+            novel_homolog_num = f"{target_taxid}_{novel_num}_homolog"
+
+            correlated_df.at[i, f"{novel_homolog_num}_gene_id"] = best_homolog_motif["homolog_gene_id"]
+            correlated_df.at[i, f"{novel_homolog_num}_gene_name"] = best_homolog_motif["homolog_gene_name"]
+            correlated_df.at[i, f"{novel_homolog_num}_protein_id"] = best_homolog_motif["homolog_protein_id"]
+            correlated_df.at[i, f"{novel_homolog_num}_motif"] = best_homolog_motif["sequence"]
+            correlated_df.at[i, f"{novel_homolog_num}_motif_start"] = best_homolog_motif["start"]
+            correlated_df.at[i, f"{novel_homolog_num}_motif_identity"] = best_homolog_motif["homology_identity"]
+
+            homolog_topo_info = best_homolog_motif["topology"]
+            correlated_df.at[i, f"{novel_homolog_num}_motif_topology_type"] = homolog_topo_info["type"]
+            correlated_df.at[i, f"{novel_homolog_num}_motif_topology_description"] = homolog_topo_info["description"]
+            correlated_df.at[i, f"{novel_homolog_num}_motif_cytoplasmic_accessible"] = homolog_topo_info["cytoplasmic_accessible"]
+
+            correlated_df.at[i, f"{novel_homolog_num}_motif_classification_score"] = best_homolog_motif["classification_score"]
+            correlated_df.at[i, f"{novel_homolog_num}_motif_binding_score"] = best_homolog_motif["binding_score"]
+            correlated_df.at[i, f"{novel_homolog_num}_motif_final_call"] = best_homolog_motif["final_call"]
+            correlated_df.at[i, f"{novel_homolog_num}_motif_specificity_score"] = best_homolog_motif["specificity_score"]
+            if compare_classical_method:
+                correlated_df.at[i, f"{novel_homolog_num}_motif"] = best_homolog_motif["classical_score"]
+
+    if not inplace:
+        return correlated_df
+
+def classical_motif_to_df(df, classical_num_vals_dict, classical_num, inplace=True):
+    # Helper function that assigns classical motifs for a given gene to the correlated dataframe
+
+    correlated_df = df if inplace else df.copy()
+
+    correlated_df.at[i, f"{classical_num}_motif"] = classical_num_vals_dict["sequence"]
+
+    topo_info = classical_num_vals_dict["topology"]
+    correlated_df.at[i, f"{classical_num}_motif_topology_type"] = topo_info["type"]
+    correlated_df.at[i, f"{classical_num}_motif_topology_description"] = topo_info["description"]
+    correlated_df.at[i, f"{classical_num}_motif_cytoplasmic_accessible"] = topo_info["cytoplasmic_accessible"]
+
+    correlated_df.at[i, f"{classical_num}_motif"] = classical_num_vals_dict["classical_score"]
+
+    if not inplace:
+        return correlated_df
+
+def classical_homologs_to_df(classical_homologs):
+
+
+    for target_taxid, best_homolog_motifs in classical_homologs.items():
+        if best_homolog_motifs is not None:
+            best_homolog_motif = best_homolog_motifs["best"]
+            if best_homolog_motif is not None:
+                classical_homolog_num = f"{target_taxid}_{classical_num}_homolog"
+
+                correlated_df.at[i, f"{classical_homolog_num}_gene_id"] = best_homolog_motif["homolog_gene_id"]
+                correlated_df.at[i, f"{classical_homolog_num}_gene_name"] = best_homolog_motif["homolog_gene_name"]
+                correlated_df.at[i, f"{classical_homolog_num}_protein_id"] = best_homolog_motif["homolog_protein_id"]
+                correlated_df.at[i, f"{classical_homolog_num}_motif"] = best_homolog_motif["sequence"]
+                correlated_df.at[i, f"{classical_homolog_num}_motif_identity"] = best_homolog_motif["homology_identity"]
+
+                homolog_topo_info = best_homolog_motif["topology"]
+                correlated_df.at[i, f"{classical_homolog_num}_motif_topology_type"] = homolog_topo_info["type"]
+                correlated_df.at[i, f"{classical_homolog_num}_motif_topology_description"] = topo_info["description"]
+                correlated_df.at[i, f"{classical_homolog_num}_motif_cytoplasmic_accessible"] = topo_info[
+                    "cytoplasmic_accessible"]
+
+                correlated_df.at[i, f"{classical_homolog_num}_motif"] = best_homolog_motif["classical_score"]
+
 def generate_correlated_df(correlated_dict, target_taxids, return_count, compare_classical_method = False,
                            classical_lower_better = True):
 
@@ -460,24 +600,12 @@ def generate_correlated_df(correlated_dict, target_taxids, return_count, compare
 
             protein_isoform_ids = list(reference_gene_dict.keys())
             protein_isoform_ids.remove("gene_name") # gene_name is the only other non-protein-id key in this sub-dict
+            
+            # Get score tuples for sorting
+            score_tuples = get_score_tuples(protein_isoform_ids, reference_gene_dict, compare_classical_method)
+            novel_masked_tuples, novel_masked_scores, classical_tuples, classical_scores = score_tuples
 
-            novel_masked_tuples = []
-            novel_masked_scores = []
-            classical_tuples = []
-            classical_scores = []
-            for ref_protein_id in protein_isoform_ids:
-                novel_vals_dict = reference_gene_dict[ref_protein_id]["novel"]
-                for novel_num, novel_num_vals_dict in novel_vals_dict.items():
-                    masked_binding_score = novel_num_vals_dict["masked_binding_score"]
-                    novel_masked_tuples.append((ref_protein_id, novel_num, masked_binding_score))
-                    novel_masked_scores.append(masked_binding_score)
-                if compare_classical_method:
-                    classical_vals_dict = reference_gene_dict[ref_protein_id]["classical"]
-                    for classical_num, classical_num_vals_dict in classical_vals_dict.items():
-                        classical_score = classical_num_vals_dict["classical_score"]
-                        classical_tuples.append((ref_protein_id, classical_num, classical_score))
-                        classical_scores.append(classical_score)
-
+            # Sort by score
             ranked_novel_indices = np.argsort(novel_masked_scores)
             if classical_lower_better:
                 ranked_classical_indices = np.argsort(classical_scores)
@@ -488,62 +616,17 @@ def generate_correlated_df(correlated_dict, target_taxids, return_count, compare
                 # Process novel motifs
                 ref_protein_id, novel_num, masked_binding_score = novel_masked_tuples[ranked_novel_indices[j]]
                 novel_num_vals_dict = reference_gene_dict[ref_protein_id]["novel"][novel_num]
-
-                correlated_df.at[i, f"{novel_num}_motif"] = novel_num_vals_dict["sequence"]
-                correlated_df.at[i, f"{novel_num}_motif_start"] = novel_num_vals_dict["start"]
-
-                topo_info = novel_num_vals_dict["topology"]
-                correlated_df.at[i, f"{novel_num}_motif_topology_type"] = topo_info["type"]
-                correlated_df.at[i, f"{novel_num}_motif_topology_description"] = topo_info["description"]
-                correlated_df.at[i, f"{novel_num}_motif_cytoplasmic_accessible"] = topo_info["cytoplasmic_accessible"]
-
-                correlated_df.at[i, f"{novel_num}_motif_classification_score"] = novel_num_vals_dict["classification_score"]
-                correlated_df.at[i, f"{novel_num}_motif_binding_score"] = novel_num_vals_dict["binding_score"]
-                correlated_df.at[i, f"{novel_num}_motif_final_call"] = novel_num_vals_dict["final_call"]
-                correlated_df.at[i, f"{novel_num}_motif_specificity_score"] = novel_num_vals_dict["specificity_score"]
-                if compare_classical_method:
-                    correlated_df.at[i, f"{novel_num}_motif"] = novel_num_vals_dict["classical_score"]
+                novel_motif_to_df(correlated_df, novel_num_vals_dict, novel_num, compare_classical_method, inplace=True)
 
                 # Process novel motif homologs
-                homologs = reference_gene_dict[ref_protein_id][novel_num]["homologs"]
-                for target_taxid, best_homolog_motifs in homologs.items():
-                    if best_homolog_motifs is not None:
-                        best_homolog_motif = best_homolog_motifs["best"]
-                        if best_homolog_motif is not None:
-                            novel_homolog_num = f"{target_taxid}_{novel_num}_homolog"
-
-                            correlated_df.at[i, f"{novel_homolog_num}_gene_id"] = best_homolog_motif["homolog_gene_id"]
-                            correlated_df.at[i, f"{novel_homolog_num}_gene_name"] = best_homolog_motif["homolog_gene_name"]
-                            correlated_df.at[i, f"{novel_homolog_num}_protein_id"] = best_homolog_motif["homolog_protein_id"]
-                            correlated_df.at[i, f"{novel_homolog_num}_motif"] = best_homolog_motif["sequence"]
-                            correlated_df.at[i, f"{novel_homolog_num}_motif_start"] = best_homolog_motif["start"]
-                            correlated_df.at[i, f"{novel_homolog_num}_motif_identity"] = best_homolog_motif["homology_identity"]
-
-                            homolog_topo_info = best_homolog_motif["topology"]
-                            correlated_df.at[i, f"{novel_homolog_num}_motif_topology_type"] = homolog_topo_info["type"]
-                            correlated_df.at[i, f"{novel_homolog_num}_motif_topology_description"] = topo_info["description"]
-                            correlated_df.at[i, f"{novel_homolog_num}_motif_cytoplasmic_accessible"] = topo_info["cytoplasmic_accessible"]
-
-                            correlated_df.at[i, f"{novel_homolog_num}_motif_classification_score"] = best_homolog_motif["classification_score"]
-                            correlated_df.at[i, f"{novel_homolog_num}_motif_binding_score"] = best_homolog_motif["binding_score"]
-                            correlated_df.at[i, f"{novel_homolog_num}_motif_final_call"] = best_homolog_motif["final_call"]
-                            correlated_df.at[i, f"{novel_homolog_num}_motif_specificity_score"] = best_homolog_motif["specificity_score"]
-                            if compare_classical_method:
-                                correlated_df.at[i, f"{novel_homolog_num}_motif"] = best_homolog_motif["classical_score"]
+                novel_homologs = reference_gene_dict[ref_protein_id][novel_num]["homologs"]
+                novel_homologs_to_df(correlated_df, novel_homologs, novel_num, inplace=True)
 
                 # Process classical motifs
                 if compare_classical_method:
                     ref_protein_id, classical_num, classical_score = classical_tuples[ranked_classical_indices[j]]
                     classical_num_vals_dict = reference_gene_dict[ref_protein_id]["classical"][classical_num]
-
-                    correlated_df.at[i, f"{classical_num}_motif"] = classical_num_vals_dict["sequence"]
-
-                    topo_info = classical_num_vals_dict["topology"]
-                    correlated_df.at[i, f"{classical_num}_motif_topology_type"] = topo_info["type"]
-                    correlated_df.at[i, f"{classical_num}_motif_topology_description"] = topo_info["description"]
-                    correlated_df.at[i, f"{classical_num}_motif_cytoplasmic_accessible"] = topo_info["cytoplasmic_accessible"]
-
-                    correlated_df.at[i, f"{classical_num}_motif"] = classical_num_vals_dict["classical_score"]
+                    classical_motif_to_df(correlated_df, classical_num_vals_dict, classical_num, inplace=True)
 
                     # Process classical motif homologs
                     classical_homologs = reference_gene_dict[ref_protein_id][classical_num]["homologs"]
