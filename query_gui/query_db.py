@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 from tifffile import imwrite
-import matplotlib.pyplot as plt
 import os
 import json
 import pickle
