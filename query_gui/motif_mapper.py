@@ -103,6 +103,7 @@ class MotifDomainMap:
         self.arr[h1:h2, :, :] = 0  # set horizontal midline to black
 
         self.legend_exists = False
+        self.rendered_ticks = False
         self.tick_placements = []
         self.protein_id = protein_id
         if protein_id:
@@ -289,74 +290,75 @@ class MotifDomainMap:
 
         top, bottom, left, right = self.tick_num_coords(tick_top_edge, tick_horizontal_midpoint, tick_num_label)
 
-        if tick_num > 1 and tick_num < len(sorted_tick_indices):
-            # Handle cases where non-edge ticks
-            if prev_right is None:
-                _, _, _, prev_right = self.get_adjacent_label(tick_num, sorted_tick_indices, side="left")
-            if next_left is None:
-                _, _, next_left, _ = self.get_adjacent_label(tick_num, sorted_tick_indices, side="right")
-            overlap_with_prev = prev_right - left  # positive when overlap exists
-            overlap_with_next = right - next_left  # positive when overlap exists
+        if len(sorted_tick_indices) > 1:
+            if tick_num > 1 and tick_num < len(sorted_tick_indices):
+                # Handle cases where non-edge ticks
+                if prev_right is None:
+                    _, _, _, prev_right = self.get_adjacent_label(tick_num, sorted_tick_indices, side="left")
+                if next_left is None:
+                    _, _, next_left, _ = self.get_adjacent_label(tick_num, sorted_tick_indices, side="right")
+                overlap_with_prev = prev_right - left  # positive when overlap exists
+                overlap_with_next = right - next_left  # positive when overlap exists
 
-            if overlap_with_prev > 0 and overlap_with_next < 0:
-                # Overlaps on the left, but not on the right
-                room_to_nudge = -overlap_with_next
-                if overlap_with_prev < room_to_nudge:
-                    # Sufficient room to fully resolve the overlap
-                    left += overlap_with_prev
-                    right += overlap_with_prev
-                elif room_to_nudge > 0:
-                    # Insufficient room, so some leftover overlap will persist
-                    left += room_to_nudge
-                    right += room_to_nudge
+                if overlap_with_prev > 0 and overlap_with_next < 0:
+                    # Overlaps on the left, but not on the right
+                    room_to_nudge = -overlap_with_next
+                    if overlap_with_prev < room_to_nudge:
+                        # Sufficient room to fully resolve the overlap
+                        left += overlap_with_prev
+                        right += overlap_with_prev
+                    elif room_to_nudge > 0:
+                        # Insufficient room, so some leftover overlap will persist
+                        left += room_to_nudge
+                        right += room_to_nudge
 
-            elif overlap_with_next > 0 and overlap_with_prev < 0:
-                # Overlaps on the right, but not on the left
-                room_to_nudge = -overlap_with_prev
-                if overlap_with_next < room_to_nudge:
-                    # Sufficient room to fully resolve the overlap
-                    left -= overlap_with_next
-                    right -= overlap_with_next
-                elif room_to_nudge > 0:
-                    # Insufficient room, so some leftover overlap will persist
-                    left -= room_to_nudge
-                    right -= room_to_nudge
+                elif overlap_with_next > 0 and overlap_with_prev < 0:
+                    # Overlaps on the right, but not on the left
+                    room_to_nudge = -overlap_with_prev
+                    if overlap_with_next < room_to_nudge:
+                        # Sufficient room to fully resolve the overlap
+                        left -= overlap_with_next
+                        right -= overlap_with_next
+                    elif room_to_nudge > 0:
+                        # Insufficient room, so some leftover overlap will persist
+                        left -= room_to_nudge
+                        right -= room_to_nudge
 
-        elif tick_num == 0:
-            # First tick; no previous tick to consider
-            if next_left is None:
-                _, _, next_left, _ = self.get_adjacent_label(tick_num, sorted_tick_indices, side="right")
-            overlap_with_next = right - next_left  # positive when overlap exists
+            elif tick_num == 0:
+                # First tick; no previous tick to consider
+                if next_left is None:
+                    _, _, next_left, _ = self.get_adjacent_label(tick_num, sorted_tick_indices, side="right")
+                overlap_with_next = right - next_left  # positive when overlap exists
 
-            if overlap_with_next > 0 and left > 0:
-                # Overlaps on the right, but still has some room on the left
-                room_to_nudge = left
-                if overlap_with_next < room_to_nudge:
-                    # Sufficient room to fully resolve the overlap
-                    left -= overlap_with_next
-                    right -= overlap_with_next
-                elif room_to_nudge > 0:
-                    # Insufficient room, so some leftover overlap will persist
-                    left -= room_to_nudge
-                    right -= room_to_nudge
+                if overlap_with_next > 0 and left > 0:
+                    # Overlaps on the right, but still has some room on the left
+                    room_to_nudge = left
+                    if overlap_with_next < room_to_nudge:
+                        # Sufficient room to fully resolve the overlap
+                        left -= overlap_with_next
+                        right -= overlap_with_next
+                    elif room_to_nudge > 0:
+                        # Insufficient room, so some leftover overlap will persist
+                        left -= room_to_nudge
+                        right -= room_to_nudge
 
-        elif tick_num == len(sorted_tick_indices):
-            # Last tick; no next tick to consider
-            if prev_right is None:
-                _, _, _, prev_right = self.get_adjacent_label(tick_num, sorted_tick_indices, side="left")
-            overlap_with_prev = prev_right - left  # positive when overlap exists
+            elif tick_num == len(sorted_tick_indices):
+                # Last tick; no next tick to consider
+                if prev_right is None:
+                    _, _, _, prev_right = self.get_adjacent_label(tick_num, sorted_tick_indices, side="left")
+                overlap_with_prev = prev_right - left  # positive when overlap exists
 
-            if overlap_with_prev > 0 and right < arr_right_edge:
-                # Overlaps on the left, but not on the right
-                room_to_nudge = arr_right_edge - right
-                if overlap_with_prev < room_to_nudge:
-                    # Sufficient room to fully resolve the overlap
-                    left += overlap_with_prev
-                    right += overlap_with_prev
-                elif room_to_nudge > 0:
-                    # Insufficient room, so some leftover overlap will persist
-                    left += room_to_nudge
-                    right += room_to_nudge
+                if overlap_with_prev > 0 and right < arr_right_edge:
+                    # Overlaps on the left, but not on the right
+                    room_to_nudge = arr_right_edge - right
+                    if overlap_with_prev < room_to_nudge:
+                        # Sufficient room to fully resolve the overlap
+                        left += overlap_with_prev
+                        right += overlap_with_prev
+                    elif room_to_nudge > 0:
+                        # Insufficient room, so some leftover overlap will persist
+                        left += room_to_nudge
+                        right += room_to_nudge
 
         label_coords = (top, bottom, left, right)
 
@@ -372,6 +374,7 @@ class MotifDomainMap:
         sorted_tick_indices = np.argsort(tick_horizontal_midpoints)
         legend_lines = []
 
+        self.arr_numbered_ticks = self.arr.copy()
         prev_right = None
         for tick_num, tick_idx in zip(np.arange(1, len(sorted_tick_indices)+1), sorted_tick_indices):
             placement = self.tick_placements[tick_idx]
@@ -394,7 +397,7 @@ class MotifDomainMap:
             expanded_foreground_mask = np.zeros(shape=(self.arr.shape[0], self.arr.shape[1]), dtype=bool)
             expanded_foreground_mask[top:bottom+1, left:right+1] = label_foreground_mask
 
-            self.arr[expanded_foreground_mask] = expanded_label[expanded_foreground_mask]
+            self.arr_numbered_ticks[expanded_foreground_mask] = expanded_label[expanded_foreground_mask]
 
             # Add a line to the legend for this numbered motif
             if specificity is None:
@@ -403,6 +406,8 @@ class MotifDomainMap:
                 combined_label = (f"Motif #{tick_num}: score = {score:.2f}, specificity = {specificity:.2f}, "
                                   f"range = {start}:{end}, motif = {motif_seq}")
             legend_lines.append(combined_label)
+
+        self.rendered_ticks = True
 
         self.legend_lines = legend_lines
 
@@ -517,7 +522,7 @@ class MotifDomainMap:
             legend_arr (np.ndarray): the legend as an image array
         '''
 
-        self.arr_with_legend = self.arr.copy()
+        self.arr_with_legend = self.arr_numbered_ticks.copy()
         self.get_legend_arr(self.legend_fontsize)
 
         rendered_legend = False
@@ -541,30 +546,18 @@ class MotifDomainMap:
         if not rendered_legend:
             # Make array with whitespace for legend at the bottom
             gap = round(self.scaling_factor * 10)
-            rendered_height = self.arr.shape[0] + gap + self.legend_arr.shape[0]
-            rendered_width = max(self.arr.shape[1], self.legend_arr.shape[1])
+            rendered_height = self.arr_numbered_ticks.shape[0] + gap + self.legend_arr.shape[0]
+            rendered_width = max(self.arr_numbered_ticks.shape[1], self.legend_arr.shape[1])
             self.arr_with_legend = np.ones(shape=(rendered_height, rendered_width, 3), dtype=float)
-            self.arr_with_legend[0:self.arr.shape[0], 0:self.arr.shape[1], :] = self.arr
+            self.arr_with_legend[0:self.arr_numbered_ticks.shape[0], 0:self.arr_numbered_ticks.shape[1], :] = self.arr_numbered_ticks
 
             # Apply the legend
-            top = self.arr.shape[0] + gap
+            top = self.arr_numbered_ticks.shape[0] + gap
             bottom = top + self.legend_arr.shape[0]
             left = 0
             right = left + self.legend_arr.shape[1]
             self.arr_with_legend[top:bottom, left:right, :] = self.legend_arr
             rendered_legend = True
-
-    def label_motifs(self, placement = "corner"):
-        '''
-        Adds numbered labels to the motif ticks and corresponding label lines to the list of legend lines.
-        '''
-
-        # Add tick numbers to main array and create legend lines for rendering later
-        self.add_tick_numbers()
-
-        # Render the legend as an image, then apply it to the main image
-        self.get_legend_arr()
-        self.generate_legend(placement)
 
     def add_motif(self, start, seq, score, specificity, motif_len, min_thickness_ratio=0.005, tick_outline=0,
                   bottom_color=None, mid_color=None, top_color=None, color_ranges=None, opacity_range=(0,1),
@@ -596,11 +589,17 @@ class MotifDomainMap:
             # Record the tick placement and motif info, then use for labelling and constructing a legend
             end = start + motif_len - 1
             self.tick_placements.append((tick_horizontal_midpoint, tick_top_edge, start, end, seq, score, specificity))
-            self.label_motifs(legend_placement)
+            self.add_tick_numbers()
+
+            # Render the legend as an image, then apply it to the main image
+            self.get_legend_arr()
+            self.generate_legend(legend_placement)
 
     def get_arr(self):
         if self.legend_exists:
             return self.arr_with_legend
+        elif self.rendered_ticks:
+            return self.arr_numbered_ticks
         else:
             return self.arr
 
