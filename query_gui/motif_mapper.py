@@ -3,6 +3,7 @@ from PIL import Image, ImageDraw, ImageFont
 from tifffile import imwrite, imshow
 import matplotlib.pyplot as plt
 import os
+import warnings
 from Motif_Predictor.load_predictor_config import load_config
 
 predictor_params = load_config(verbose=True)
@@ -16,13 +17,13 @@ def interpolate_color(color1, color2, t):
 
 regular_font_path = os.path.join(os.getcwd(), "fonts", "DejaVuSans.ttf")
 bold_font_path = os.path.join(os.getcwd(), "fonts", "DejaVuSans-Bold.ttf")
-def render_text(text, vertical_resolution, use_bold = False, trim_vertical = True):
+def render_text(text, vertical_resolution, use_bold=False, trim_vertical=True):
     """
-    Renders a line of text at a specified vertical resolution with antialiasing.
+    Renders a block of text at a specified vertical resolution with antialiasing.
 
     Args:
-        text (str):                    text to render
-        vertical_resolution (int):     vertical resolution
+        text (str):                    text to render (can be multi-line)
+        vertical_resolution (int):     vertical resolution of each line
         use_bold (bool):               whether to use bold font
         trim_vertical (bool):          whether to trim top and bottom whitespace;
                                        may result in vertical shape not matching vertical resolution
@@ -35,19 +36,33 @@ def render_text(text, vertical_resolution, use_bold = False, trim_vertical = Tru
     font_path = bold_font_path if use_bold else regular_font_path
     font = ImageFont.truetype(font_path, font_size)
 
+    # Split text into lines
+    lines = text.split("\n")
+
     # Create a dummy image to calculate text size and position
     dummy_img = Image.new("RGB", (1, 1), (0, 0, 0))
     draw = ImageDraw.Draw(dummy_img)
 
-    # Get the full text bounding box (considering any characters that extend above or below the typical bounds)
-    text_bbox = draw.textbbox((0, 0), text, font=font)
-    text_width, text_height = text_bbox[2] - text_bbox[0], text_bbox[3] - text_bbox[1]
+    # Get font metrics for proper spacing
+    ascent, descent = font.getmetrics()
+    line_spacing = font.getmask("Ag").getbbox()[3] + descent  # height of one line including descent
 
-    # Draw the text with antialiasing at a calculated position
-    img = Image.new("RGB", (text_width, vertical_resolution), (255, 255, 255))
+    # Get the maximum width and total height of the text block
+    max_width = 0
+    total_height = 0
+    for line in lines:
+        text_bbox = draw.textbbox((0, 0), line, font=font)
+        line_width = text_bbox[2] - text_bbox[0]
+        max_width = max(max_width, line_width)
+        total_height += line_spacing
+
+    # Draw the text with antialiasing at calculated positions
+    img = Image.new("RGB", (max_width, total_height), (255, 255, 255))
     draw = ImageDraw.Draw(img)
-    vertical_position = (vertical_resolution - text_height) // 2 - text_bbox[1]
-    draw.text((0, vertical_position), text, font=font, fill=(0, 0, 0))
+    current_y = 0
+    for line in lines:
+        draw.text((0, current_y), line, font=font, fill=(0, 0, 0))
+        current_y += line_spacing
 
     # Convert the image to a numpy array
     img = np.array(img).astype(float) / 255
@@ -230,6 +245,123 @@ class MotifDomainMap:
 
         return (tick_horizontal_midpoint, tick_top_edge)
 
+    def tick_num_coords(self, tick_top_edge, tick_horizontal_midpoint, tick_num_label):
+        # Helper function that retrieves coords to apply the tick num label
+
+        label_top = tick_top_edge - round(1.25 * tick_num_label.shape[0])
+        label_bottom = tick_top_edge - round(0.25 * tick_num_label.shape[0]) - 1
+        label_left = tick_horizontal_midpoint - round(tick_num_label.shape[1] / 2)
+        label_right = label_left + tick_num_label.shape[1] - 1
+
+        return (label_top, label_bottom, label_left, label_right)
+
+    def get_adjacent_label(self, current_tick_num, sorted_tick_indices, side = "left"):
+        # Helper function that retrieves adjacent label assignment coordinates
+
+        adjacent_tick_num = current_tick_num - 1 if side == "left" else current_tick_num + 1
+        adjacent_tick_idx = sorted_tick_indices[adjacent_tick_num - 1]
+        adjacent_placement = self.tick_placements[adjacent_tick_idx]
+        adjacent_horizontal_midpoint, adjacent_top_edge = adjacent_placement[:2]
+        adjacent_num_label = render_text(str(adjacent_tick_num), round(42 * self.scaling_factor), use_bold=True)
+        adjacent_coords = self.tick_num_coords(adjacent_top_edge, adjacent_horizontal_midpoint, adjacent_num_label)
+        adjacent_top, adjacent_bottom, adjacent_left, adjacent_right = adjacent_coords
+
+        return (adjacent_top, adjacent_bottom, adjacent_left, adjacent_right)
+
+    def get_label_coords(self, tick_num, tick_top_edge, tick_horizontal_midpoint, tick_num_label, sorted_tick_indices,
+                         arr_right_edge, prev_right = None, next_left = None):
+        '''
+        Dynamically gets coordinates for where to assign the tick number label
+
+        Args:
+            tick_num (int):                   Current tick number
+            tick_top_edge (int):              Current tick top edge
+            tick_horizontal_midpoint (int):   Current tick horizontal midpoint
+            tick_num_label (np.ndarray):      Current tick number as a rasterized label image array
+            sorted_tick_indices (np.ndarray): Sorted tick indices
+            arr_right_edge (int):             Right edge of the parent image
+            prev_right (int|None):            Previous tick right edge; can be optionally given in advance
+            next_left (int|None):             Next tick left edge; can be optionally given in advance
+
+        Returns:
+            label_coords (tuple):           Tuple of top, bottom, left, and right edge coordinates
+        '''
+
+        top, bottom, left, right = self.tick_num_coords(tick_top_edge, tick_horizontal_midpoint, tick_num_label)
+
+        if tick_num > 1 and tick_num < len(sorted_tick_indices):
+            # Handle cases where non-edge ticks
+            if prev_right is None:
+                _, _, _, prev_right = self.get_adjacent_label(tick_num, sorted_tick_indices, side="left")
+            if next_left is None:
+                _, _, next_left, _ = self.get_adjacent_label(tick_num, sorted_tick_indices, side="right")
+            overlap_with_prev = prev_right - left  # positive when overlap exists
+            overlap_with_next = right - next_left  # positive when overlap exists
+
+            if overlap_with_prev > 0 and overlap_with_next < 0:
+                # Overlaps on the left, but not on the right
+                room_to_nudge = -overlap_with_next
+                if overlap_with_prev < room_to_nudge:
+                    # Sufficient room to fully resolve the overlap
+                    left += overlap_with_prev
+                    right += overlap_with_prev
+                elif room_to_nudge > 0:
+                    # Insufficient room, so some leftover overlap will persist
+                    left += room_to_nudge
+                    right += room_to_nudge
+
+            elif overlap_with_next > 0 and overlap_with_prev < 0:
+                # Overlaps on the right, but not on the left
+                room_to_nudge = -overlap_with_prev
+                if overlap_with_next < room_to_nudge:
+                    # Sufficient room to fully resolve the overlap
+                    left -= overlap_with_next
+                    right -= overlap_with_next
+                elif room_to_nudge > 0:
+                    # Insufficient room, so some leftover overlap will persist
+                    left -= room_to_nudge
+                    right -= room_to_nudge
+
+        elif tick_num == 0:
+            # First tick; no previous tick to consider
+            if next_left is None:
+                _, _, next_left, _ = self.get_adjacent_label(tick_num, sorted_tick_indices, side="right")
+            overlap_with_next = right - next_left  # positive when overlap exists
+
+            if overlap_with_next > 0 and left > 0:
+                # Overlaps on the right, but still has some room on the left
+                room_to_nudge = left
+                if overlap_with_next < room_to_nudge:
+                    # Sufficient room to fully resolve the overlap
+                    left -= overlap_with_next
+                    right -= overlap_with_next
+                elif room_to_nudge > 0:
+                    # Insufficient room, so some leftover overlap will persist
+                    left -= room_to_nudge
+                    right -= room_to_nudge
+
+        elif tick_num == len(sorted_tick_indices):
+            # Last tick; no next tick to consider
+            if prev_right is None:
+                _, _, _, prev_right = self.get_adjacent_label(tick_num, sorted_tick_indices, side="left")
+            overlap_with_prev = prev_right - left  # positive when overlap exists
+
+            if overlap_with_prev > 0 and right < arr_right_edge:
+                # Overlaps on the left, but not on the right
+                room_to_nudge = arr_right_edge - right
+                if overlap_with_prev < room_to_nudge:
+                    # Sufficient room to fully resolve the overlap
+                    left += overlap_with_prev
+                    right += overlap_with_prev
+                elif room_to_nudge > 0:
+                    # Insufficient room, so some leftover overlap will persist
+                    left += room_to_nudge
+                    right += room_to_nudge
+
+        label_coords = (top, bottom, left, right)
+
+        return label_coords
+
     def add_tick_numbers(self):
         '''
         Adds numbered labels to the motif ticks and corresponding label lines to the list of legend lines.
@@ -240,17 +372,29 @@ class MotifDomainMap:
         sorted_tick_indices = np.argsort(tick_horizontal_midpoints)
         legend_lines = []
 
+        prev_right = None
         for tick_num, tick_idx in zip(np.arange(1, len(sorted_tick_indices)+1), sorted_tick_indices):
             placement = self.tick_placements[tick_idx]
             tick_horizontal_midpoint, tick_top_edge, start, end, motif_seq, score, specificity = placement
 
-            # Add a numbered label to the motif tick
+            # Create a numbered label for the motif tick
             tick_num_label = render_text(str(tick_num), round(42 * self.scaling_factor), use_bold=True)
-            label_top = tick_top_edge - round(1.25 * tick_num_label.shape[0])
-            label_bottom = tick_top_edge - round(0.25 * tick_num_label.shape[0]) - 1
-            label_left = tick_horizontal_midpoint - round(tick_num_label.shape[1] / 2)
-            label_right = label_left + tick_num_label.shape[1] - 1
-            self.arr[label_top:label_bottom+1, label_left:label_right+1, :] = tick_num_label
+
+            # Get coordinates for applying the label dynamically, avoiding overlaps
+            top, bottom, left, right = self.get_label_coords(tick_num, tick_top_edge, tick_horizontal_midpoint,
+                                                             tick_num_label, sorted_tick_indices,
+                                                             self.arr.shape[1], prev_right)
+            prev_right = right # reset for next round
+
+            # Rasterize the tick number label onto the main image
+            expanded_label = np.ones_like(self.arr, dtype=float)
+            expanded_label[top:bottom+1, left:right+1, :] = tick_num_label
+
+            label_foreground_mask = np.not_equal(tick_num_label.min(axis=2), 1)
+            expanded_foreground_mask = np.zeros(shape=(self.arr.shape[0], self.arr.shape[1]), dtype=bool)
+            expanded_foreground_mask[top:bottom+1, left:right+1] = label_foreground_mask
+
+            self.arr[expanded_foreground_mask] = expanded_label[expanded_foreground_mask]
 
             # Add a line to the legend for this numbered motif
             if specificity is None:
@@ -267,23 +411,67 @@ class MotifDomainMap:
         Converts legend_lines into a legend image array.
         '''
 
-        # Get the legend lines as image arrays
-        legend_line_arrs = []
+        scaled_fontsize = round(legend_fontsize * self.scaling_factor)
+
+        # Separate the legend lines into their constitutive elements for left-alignment
+        elements_lines = []
         for legend_line in self.legend_lines:
-            legend_line_arr = render_text(legend_line, round(legend_fontsize * self.scaling_factor), trim_vertical=False)
-            legend_line_arrs.append(legend_line_arr)
+            motif_num, scores_info = legend_line.split(": ")
+            elements_line = [f"{motif_num}: "]
+            elements_line.extend(scores_info.split(", "))
+            elements_lines.append(elements_line)
 
-        # Render the legend as one image
-        combined_height = sum([arr.shape[0] for arr in legend_line_arrs])
-        widest_line = max([arr.shape[1] for arr in legend_line_arrs])
-        legend_arr = np.ones(shape=(combined_height, widest_line, 3), dtype=float)
+        element_counts = [len(elements_line) for elements_line in elements_lines]
+        matching_counts = np.all([element_count == element_counts[0] for element_count in element_counts[1:]])
+        if matching_counts:
+            element_count = element_counts[0]
 
-        current_top_edge = 0
-        for legend_line_arr in legend_line_arrs:
-            bottom_edge = current_top_edge + legend_line_arr.shape[0]
-            right_edge = legend_line_arr.shape[1]
-            legend_arr[current_top_edge:bottom_edge, 0:right_edge, :] = legend_line_arr
-            current_top_edge = bottom_edge
+            # Use dummy character spacer to vertically align columns
+            dummy_spacer = render_text("\t", scaled_fontsize, trim_vertical=True)
+            dummy_spacer_height = dummy_spacer.shape[0]
+
+            # Get column image arrays
+            col_arrs = []
+            for element_idx in np.arange(element_count):
+                col_elements = [elements_line[element_idx] for elements_line in elements_lines]
+                col_elements_str = "\n".join(col_elements)
+                col_elements_str = f"\t\n{col_elements_str}"
+                col_elements_arr = render_text(col_elements_str, scaled_fontsize, trim_vertical=True)
+                col_elements_arr = col_elements_arr[dummy_spacer_height:]
+                col_arrs.append(col_elements_arr)
+
+            # Render columns into one image
+            col_spacing = round(scaled_fontsize / 2)
+            legend_height = max([col_arr.shape[0] for col_arr in col_arrs])
+            legend_width = sum([col_arr.shape[1] for col_arr in col_arrs])
+            legend_width += (len(col_arrs)-1) * col_spacing
+            legend_arr = np.ones(shape=(legend_height, legend_width, 3), dtype=float)
+
+            current_left_edge = 0
+            for col_arr in col_arrs:
+                legend_arr[:col_arr.shape[0], current_left_edge:current_left_edge+col_arr.shape[1], :] = col_arr
+                current_left_edge += col_arr.shape[1]
+                current_left_edge += col_spacing
+
+        else:
+            # Render legend lines without respect to element alignment
+            warnings.warn(f"Could not left-align legend element cols due to varying number of elements per line.")
+
+            for legend_line in self.legend_lines:
+                legend_line_arr = render_text(legend_line, round(legend_fontsize * self.scaling_factor), trim_vertical=False)
+                legend_line_arrs.append(legend_line_arr)
+
+            # Render the legend as one image
+            combined_height = sum([arr.shape[0] for arr in legend_line_arrs])
+            widest_line = max([arr.shape[1] for arr in legend_line_arrs])
+            legend_arr = np.ones(shape=(combined_height, widest_line, 3), dtype=float)
+
+            current_top_edge = 0
+            for legend_line_arr in legend_line_arrs:
+                bottom_edge = current_top_edge + legend_line_arr.shape[0]
+                right_edge = legend_line_arr.shape[1]
+                legend_arr[current_top_edge:bottom_edge, 0:right_edge, :] = legend_line_arr
+                current_top_edge = bottom_edge
 
         self.legend_arr = legend_arr
         self.legend_exists = True
