@@ -270,7 +270,7 @@ class MotifDomainMap:
         return (adjacent_top, adjacent_bottom, adjacent_left, adjacent_right)
 
     def get_label_coords(self, tick_num, tick_top_edge, tick_horizontal_midpoint, tick_num_label, sorted_tick_indices,
-                         arr_right_edge, prev_right = None, next_left = None):
+                         arr_right_edge, prev_right = None, next_left = None, leave_half_for_next = True):
         '''
         Dynamically gets coordinates for where to assign the tick number label
 
@@ -283,6 +283,8 @@ class MotifDomainMap:
             arr_right_edge (int):             Right edge of the parent image
             prev_right (int|None):            Previous tick right edge; can be optionally given in advance
             next_left (int|None):             Next tick left edge; can be optionally given in advance
+            leave_half_for_next (bool):       When nudging left, whether to only nudge halfway and leave the remainder
+                                              for nudging right in the following iteration
 
         Returns:
             label_coords (tuple):           Tuple of top, bottom, left, and right edge coordinates
@@ -315,6 +317,9 @@ class MotifDomainMap:
                 elif overlap_with_next > 0 and overlap_with_prev < 0:
                     # Overlaps on the right, but not on the left
                     room_to_nudge = -overlap_with_prev
+                    if leave_half_for_next:
+                        overlap_with_next = round(overlap_with_next / 2)
+
                     if overlap_with_next < room_to_nudge:
                         # Sufficient room to fully resolve the overlap
                         left -= overlap_with_next
@@ -333,6 +338,9 @@ class MotifDomainMap:
                 if overlap_with_next > 0 and left > 0:
                     # Overlaps on the right, but still has some room on the left
                     room_to_nudge = left
+                    if leave_half_for_next:
+                        overlap_with_next = round(overlap_with_next / 2)
+
                     if overlap_with_next < room_to_nudge:
                         # Sufficient room to fully resolve the overlap
                         left -= overlap_with_next
