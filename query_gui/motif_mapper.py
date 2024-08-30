@@ -270,7 +270,7 @@ class MotifDomainMap:
         return (adjacent_top, adjacent_bottom, adjacent_left, adjacent_right)
 
     def get_label_coords(self, tick_num, tick_top_edge, tick_horizontal_midpoint, tick_num_label, sorted_tick_indices,
-                         arr_right_edge, prev_right = None, next_left = None, leave_half_for_next = True):
+                         arr_right_edge, prev_right=None, next_left=None, enforced_gap=0, leave_half_for_next=True):
         '''
         Dynamically gets coordinates for where to assign the tick number label
 
@@ -283,6 +283,7 @@ class MotifDomainMap:
             arr_right_edge (int):             Right edge of the parent image
             prev_right (int|None):            Previous tick right edge; can be optionally given in advance
             next_left (int|None):             Next tick left edge; can be optionally given in advance
+            enforced_gap (int):               Minimum gap between tick labels
             leave_half_for_next (bool):       When nudging left, whether to only nudge halfway and leave the remainder
                                               for nudging right in the following iteration
 
@@ -299,8 +300,8 @@ class MotifDomainMap:
                     _, _, _, prev_right = self.get_adjacent_label(tick_num, sorted_tick_indices, side="left")
                 if next_left is None:
                     _, _, next_left, _ = self.get_adjacent_label(tick_num, sorted_tick_indices, side="right")
-                overlap_with_prev = prev_right - left  # positive when overlap exists
-                overlap_with_next = right - next_left  # positive when overlap exists
+                overlap_with_prev = prev_right - left + enforced_gap  # positive when overlap exists
+                overlap_with_next = right - next_left + enforced_gap  # positive when overlap exists
 
                 if overlap_with_prev > 0 and overlap_with_next < 0:
                     # Overlaps on the left, but not on the right
@@ -333,7 +334,7 @@ class MotifDomainMap:
                 # First tick; no previous tick to consider
                 if next_left is None:
                     _, _, next_left, _ = self.get_adjacent_label(tick_num, sorted_tick_indices, side="right")
-                overlap_with_next = right - next_left  # positive when overlap exists
+                overlap_with_next = right - next_left + enforced_gap  # positive when overlap exists
 
                 if overlap_with_next > 0 and left > 0:
                     # Overlaps on the right, but still has some room on the left
@@ -354,7 +355,7 @@ class MotifDomainMap:
                 # Last tick; no next tick to consider
                 if prev_right is None:
                     _, _, _, prev_right = self.get_adjacent_label(tick_num, sorted_tick_indices, side="left")
-                overlap_with_prev = prev_right - left  # positive when overlap exists
+                overlap_with_prev = prev_right - left + enforced_gap  # positive when overlap exists
 
                 if overlap_with_prev > 0 and right < arr_right_edge:
                     # Overlaps on the left, but not on the right
@@ -377,6 +378,8 @@ class MotifDomainMap:
         Adds numbered labels to the motif ticks and corresponding label lines to the list of legend lines.
         '''
 
+        tick_fontsize = round(42 * self.scaling_factor)
+
         # Sort the tick midpoints and iterate over them from left to right
         tick_horizontal_midpoints = [placement[0] for placement in self.tick_placements]
         sorted_tick_indices = np.argsort(tick_horizontal_midpoints)
@@ -389,12 +392,13 @@ class MotifDomainMap:
             tick_horizontal_midpoint, tick_top_edge, start, end, motif_seq, score, specificity = placement
 
             # Create a numbered label for the motif tick
-            tick_num_label = render_text(str(tick_num), round(42 * self.scaling_factor), use_bold=True)
+            tick_num_label = render_text(str(tick_num), tick_fontsize, use_bold=True)
 
             # Get coordinates for applying the label dynamically, avoiding overlaps
+            min_label_gap = round(tick_fontsize * 0.5)
             top, bottom, left, right = self.get_label_coords(tick_num, tick_top_edge, tick_horizontal_midpoint,
                                                              tick_num_label, sorted_tick_indices,
-                                                             self.arr.shape[1], prev_right)
+                                                             self.arr.shape[1], prev_right, enforced_gap=min_label_gap)
             prev_right = right # reset for next round
 
             # Rasterize the tick number label onto the main image
