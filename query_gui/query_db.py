@@ -14,12 +14,6 @@ predictor_params = load_config(verbose=True)
 default_db_path = predictor_params["db_params"]["db_path"]
 cwd = os.getcwd()
 
-# TODO Specificity score color-coding
-# TODO Consider tying the masked FFAT binding score to transparency
-# TODO Check why our model doesn't find the Levine FFATs in VPS13D that did not bind; also compare to inferred structure
-# TODO Check VPS13A/C
-# TODO NBEAL2
-
 def load_db(db_path = default_db_path):
     pkl_path = db_path.replace(".json", ".pkl")
     if os.path.exists(pkl_path):
