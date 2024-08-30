@@ -159,7 +159,7 @@ def merge_motif_maps(motif_domain_maps, gene_name, title_fontsize = 48, top_padd
     # Add the title
     title = f"{gene_name} Motifs by Protein Isoform"
     scaled_title_fontsize = round(title_fontsize * merged_scaling_factor)
-    title_arr = render_text(title, scaled_title_fontsize)
+    title_arr = render_text(title, scaled_title_fontsize, use_bold=True)
     title_top = 0
     title_bottom = title_top + title_arr.shape[0]
     title_left = round(merged_img.shape[1] / 2) - round(title_arr.shape[1] / 2)
