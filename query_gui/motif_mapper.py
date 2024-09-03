@@ -126,9 +126,9 @@ class MotifDomainMap:
         # Interpolate tick color based on score
 
         if specificity_score is not None:
-            bottom_color = np.array([0.0, 1.0, 0.0]) if bottom_color is None else bottom_color
-            mid_color = np.array([1.0, 1.0, 1.0]) if mid_color is None else mid_color
-            top_color = np.array([1.0, 0.35, 0.35]) if top_color is None else top_color
+            bottom_color = np.array([1.0, 0.35, 0.35]) if bottom_color is None else bottom_color # default is red for (-) vals
+            mid_color = np.array([1.0, 1.0, 1.0]) if mid_color is None else mid_color # default is white for midpoint
+            top_color = np.array([0.0, 1.0, 0.0]) if top_color is None else top_color # default is green for (+) vals
             color_ranges = (-2.0, 0.0, 2.0) if color_ranges is None else color_ranges
             color_score = specificity_score
         else:
