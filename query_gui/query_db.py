@@ -42,7 +42,7 @@ def load_db(db_path = default_db_path):
 
     return data_dict, correlated_dict
 
-def get_protein_lengths(predictor_params = predictor_params):
+def get_protein_lengths(predictor_params = predictor_params, save_pkl = True):
     # Get a dictionary of protein isoform lengths
 
     ref_protein_col = predictor_params["homology_params"]["ref_protein_col"]
@@ -58,6 +58,12 @@ def get_protein_lengths(predictor_params = predictor_params):
         for protein_id, seq in zip(protein_ids, protein_seqs):
             if isinstance(seq, str):
                 protein_lengths[protein_id] = len(seq)
+
+    if save_pkl:
+        # Save pickled version; this will be used for a standalone package that relies on this dictionary
+        protein_lengths_path = os.path.join(cwd, "protein_lengths_dict.pkl")
+        with open(protein_lengths_path, "wb") as file:
+            pickle.dump(protein_lengths, file)
 
     return protein_lengths, motif_length
 
