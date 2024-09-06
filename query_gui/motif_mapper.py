@@ -100,6 +100,7 @@ class MotifDomainMap:
         midline_thickness = round(10 * scaling_factor)
         h1 = round(130 * scaling_factor)
         h2 = h1 + midline_thickness
+        self.midline_bounds = (h1, h2)
         self.arr[h1:h2, :, :] = 0  # set horizontal midline to black
 
         self.legend_exists = False
@@ -607,13 +608,60 @@ class MotifDomainMap:
             self.get_legend_arr()
             self.generate_legend(legend_placement)
 
-    def get_arr(self):
+    def add_terminal_nums(self, current_arr):
+        '''
+        Function to extend the image to add N-terminal and C-terminal number labels expressing the protein length.
+
+        Args:
+            current_arr (np.ndarray): current image
+        '''
+
+        term_label_fontsize = round(36 * self.scaling_factor)
+        sep = round(0.25 * term_label_fontsize)
+
+        nterm_label = render_text("1", term_label_fontsize, use_bold=False, trim_vertical=True)
+        nterm_top = self.midline_bounds[1] - nterm_label.shape[0]
+        nterm_bottom = nterm_top + nterm_label.shape[0]
+
+        cterm_label = render_text(str(self.total_residues), term_label_fontsize, use_bold=False, trim_vertical=True)
+        cterm_top = self.midline_bounds[1] - cterm_label.shape[0]
+        cterm_bottom = cterm_top + cterm_label.shape[0]
+
+        height = current_arr.shape[0]
+        lower_overshoot = max(nterm_bottom, cterm_bottom) - height
+        if lower_overshoot > 0:
+            height += lower_overshoot
+
+        new_width = nterm_label.shape[1] + sep + current_arr.shape[1] + sep + cterm_label.shape[1]
+        left_offset = nterm_label.shape[1] + sep
+        new_arr = np.ones(shape=(height, new_width, 3), dtype=float)
+
+        new_arr[:current_arr.shape[0], left_offset:left_offset+current_arr.shape[1], :] = current_arr
+        new_arr[nterm_top:nterm_bottom, :nterm_label.shape[1], :] = nterm_label
+        new_arr[cterm_top:cterm_bottom, -cterm_label.shape[1]:, :] = cterm_label
+
+        return new_arr
+
+    def get_arr(self, return_with_termini = True):
+        # Retrieves the image array, optionally with N-term and C-term number labels.
+
         if self.legend_exists:
-            return self.arr_with_legend
+            if not return_with_termini:
+                arr = self.arr_with_legend
+            else:
+                arr = self.add_terminal_nums(self.arr_with_legend)
         elif self.rendered_ticks:
-            return self.arr_numbered_ticks
+            if not return_with_termini:
+                arr = self.arr_numbered_ticks
+            else:
+                arr = self.add_terminal_nums(self.arr_numbered_ticks)
         else:
-            return self.arr
+            if not return_with_termini:
+                arr = self.arr
+            else:
+                arr = self.add_terminal_nums(self.arr)
+
+        return arr
 
     def show(self):
         imshow(self.get_arr())
