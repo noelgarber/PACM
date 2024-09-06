@@ -1,0 +1,1417 @@
+Query Results
+
+Gene: VPS13B (ENSG00000132549)
+
+	Isoform ENSP00000430900
+
+		Novel model results:
+
+			Novel_1st_motif:
+				start: 804.0
+				sequence: TLLLQAIYQSWSHLG
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8243245255594881
+				binding_score: 0.5147834951024108
+				final_call: True
+				specificity_score: 0.5323031685995887
+				masked_binding_score: 0.5147834951024108
+				classical_score: 8.0
+
+			Novel_2nd_motif:
+				start: 926.0
+				sequence: FTIQVPQYIDYCHNS
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8252833280933434
+				binding_score: 0.4266666568863934
+				final_call: True
+				specificity_score: 1.6488867006869132
+				masked_binding_score: 0.4266666568863934
+				classical_score: 7.5
+
+			Novel_3rd_motif:
+				start: 216.0
+				sequence: ASGKIEFYQDPLLYK
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8134163224568249
+				binding_score: 0.4236589731534153
+				final_call: True
+				specificity_score: 3.333754368335851
+				masked_binding_score: 0.4236589731534153
+				classical_score: 7.0
+
+			Novel_4th_motif:
+				start: 1294.0
+				sequence: QAGEESPFSDSVTLE
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.7652779271197537
+				binding_score: 0.3544217440483641
+				final_call: True
+				specificity_score: 1.3462854573662846
+				masked_binding_score: 0.3544217440483641
+				classical_score: 4.0
+
+			Novel_5th_motif:
+				start: 284.0
+				sequence: YYGEIGNFKEGEIED
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.7407124851245953
+				binding_score: 0.6644041172578727
+				final_call: False
+				specificity_score: 3.1885981373508256
+				masked_binding_score: 0.0
+				classical_score: 5.5
+
+			Novel_6th_motif:
+				start: 434.0
+				sequence: ALMMGEPFFDCQIGF
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.6800901331243159
+				binding_score: 0.5632758953332141
+				final_call: False
+				specificity_score: 3.3914599367373337
+				masked_binding_score: 0.0
+				classical_score: 3.5
+
+			Novel_7th_motif:
+				start: 1218.0
+				sequence: SNPQVQLFYELTDIM
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.6906089303347244
+				binding_score: 0.4908002882639137
+				final_call: False
+				specificity_score: -0.2400265754583922
+				masked_binding_score: 0.0
+				classical_score: 4.5
+
+			Novel_8th_motif:
+				start: 49.0
+				sequence: ELKLPFTFLSGHIHE
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.5776408913482437
+				binding_score: 0.6189566902266831
+				final_call: False
+				specificity_score: 6.867847152399618
+				masked_binding_score: 0.0
+				classical_score: 5.5
+
+			Novel_9th_motif:
+				start: 550.0
+				sequence: GSTNQQDFSSGKSED
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.6262992694338851
+				binding_score: 0.565808327466322
+				final_call: False
+				specificity_score: 0.9671744588875352
+				masked_binding_score: 0.0
+				classical_score: 4.5
+
+			Novel_10th_motif:
+				start: 827.0
+				sequence: EALINEIFLSIGVKS
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.7199401359760862
+				binding_score: 0.4231152370065365
+				final_call: False
+				specificity_score: 1.2302710747663943
+				masked_binding_score: 0.0
+				classical_score: 6.5
+
+		Classical algorithm results:
+
+			Classical_1st_motif:
+				sequence: ALMMGEPFFDCQIGF
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 3.5
+			Classical_2nd_motif:
+				sequence: QAGEESPFSDSVTLE
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.0
+			Classical_3rd_motif:
+				sequence: RSETEACFFICGDNL
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.0
+			Classical_4th_motif:
+				sequence: FVPAIVSYDDGEEDF
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_5th_motif:
+				sequence: GSTNQQDFSSGKSED
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_6th_motif:
+				sequence: SNPQVQLFYELTDIM
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_7th_motif:
+				sequence: VLRKVINFSDCTVCL
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_8th_motif:
+				sequence: PVPVIPSFSTALYGK
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_9th_motif:
+				sequence: QSYQASEYASSPVKT
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 5.0
+			Classical_10th_motif:
+				sequence: FGAFYMDYLYTMENT
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 5.5
+
+	Isoform ENSP00000507369
+
+		Novel model results:
+
+			Novel_1st_motif:
+				start: 804.0
+				sequence: TLLLQAIYQSWSHLG
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8243245255594881
+				binding_score: 0.5147834951024108
+				final_call: True
+				specificity_score: 0.5323031685995887
+				masked_binding_score: 0.5147834951024108
+				classical_score: 8.0
+
+			Novel_2nd_motif:
+				start: 926.0
+				sequence: FTIQVPQYIDYCHNS
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8252833280933434
+				binding_score: 0.4266666568863934
+				final_call: True
+				specificity_score: 1.6488867006869132
+				masked_binding_score: 0.4266666568863934
+				classical_score: 7.5
+
+			Novel_3rd_motif:
+				start: 216.0
+				sequence: ASGKIEFYQDPLLYK
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8134163224568249
+				binding_score: 0.4236589731534153
+				final_call: True
+				specificity_score: 3.333754368335851
+				masked_binding_score: 0.4236589731534153
+				classical_score: 7.0
+
+			Novel_4th_motif:
+				start: 1294.0
+				sequence: QAGEESPFSDSVTLE
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.7652779271197537
+				binding_score: 0.3544217440483641
+				final_call: True
+				specificity_score: 1.3462854573662846
+				masked_binding_score: 0.3544217440483641
+				classical_score: 4.0
+
+			Novel_5th_motif:
+				start: 284.0
+				sequence: YYGEIGNFKEGEIED
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.7407124851245953
+				binding_score: 0.6644041172578727
+				final_call: False
+				specificity_score: 3.1885981373508256
+				masked_binding_score: 0.0
+				classical_score: 5.5
+
+			Novel_6th_motif:
+				start: 434.0
+				sequence: ALMMGEPFFDCQIGF
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.6800901331243159
+				binding_score: 0.5632758953332141
+				final_call: False
+				specificity_score: 3.3914599367373337
+				masked_binding_score: 0.0
+				classical_score: 3.5
+
+			Novel_7th_motif:
+				start: 1218.0
+				sequence: SNPQVQLFYELTDIM
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.6906089303347244
+				binding_score: 0.4908002882639137
+				final_call: False
+				specificity_score: -0.2400265754583922
+				masked_binding_score: 0.0
+				classical_score: 4.5
+
+			Novel_8th_motif:
+				start: 49.0
+				sequence: ELKLPFTFLSGHIHE
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.5776408913482437
+				binding_score: 0.6189566902266831
+				final_call: False
+				specificity_score: 6.867847152399618
+				masked_binding_score: 0.0
+				classical_score: 5.5
+
+			Novel_9th_motif:
+				start: 550.0
+				sequence: GSTNQQDFSSGKSED
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.6262992694338851
+				binding_score: 0.565808327466322
+				final_call: False
+				specificity_score: 0.9671744588875352
+				masked_binding_score: 0.0
+				classical_score: 4.5
+
+			Novel_10th_motif:
+				start: 827.0
+				sequence: EALINEIFLSIGVKS
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.7199401359760862
+				binding_score: 0.4231152370065365
+				final_call: False
+				specificity_score: 1.2302710747663943
+				masked_binding_score: 0.0
+				classical_score: 6.5
+
+		Classical algorithm results:
+
+			Classical_1st_motif:
+				sequence: ALMMGEPFFDCQIGF
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 3.5
+			Classical_2nd_motif:
+				sequence: RSETEACFFICGDNL
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.0
+			Classical_3rd_motif:
+				sequence: QAGEESPFSDSVTLE
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.0
+			Classical_4th_motif:
+				sequence: FVPAIVSYDDGEEDF
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_5th_motif:
+				sequence: GSTNQQDFSSGKSED
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_6th_motif:
+				sequence: VLRKVINFSDCTVCL
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_7th_motif:
+				sequence: PVPVIPSFSTALYGK
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_8th_motif:
+				sequence: SNPQVQLFYELTDIM
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_9th_motif:
+				sequence: QSYQASEYASSPVKT
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 5.0
+			Classical_10th_motif:
+				sequence: FGAFYMDYLYTMENT
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 5.5
+
+	Isoform ENSP00000398472
+
+		Novel model results:
+
+			Novel_1st_motif:
+				start: 216.0
+				sequence: ASGKIEFYQDPLLYK
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8134163224568249
+				binding_score: 0.4236589731534153
+				final_call: True
+				specificity_score: 3.333754368335851
+				masked_binding_score: 0.4236589731534153
+				classical_score: 7.0
+
+			Novel_2nd_motif:
+				start: 284.0
+				sequence: YYGEIGNFKEGEIED
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.7407124851245953
+				binding_score: 0.6644041172578727
+				final_call: False
+				specificity_score: 3.1885981373508256
+				masked_binding_score: 0.0
+				classical_score: 5.5
+
+			Novel_3rd_motif:
+				start: 49.0
+				sequence: ELKLPFTFLSGHIHE
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.5776408913482437
+				binding_score: 0.6189566902266831
+				final_call: False
+				specificity_score: 6.867847152399618
+				masked_binding_score: 0.0
+				classical_score: 5.5
+
+			Novel_4th_motif:
+				start: 351.0
+				sequence: FVPAIVSYDDGEEDF
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.4885806735810912
+				binding_score: 0.5412298199583291
+				final_call: False
+				specificity_score: 1.801793617736822
+				masked_binding_score: 0.0
+				classical_score: 4.5
+
+			Novel_5th_motif:
+				start: -1.0
+				sequence: GGGMLESYVTPILMS
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.4967853395285447
+				binding_score: 0.3694338878636942
+				final_call: False
+				specificity_score: 5.382592395705618
+				masked_binding_score: 0.0
+				classical_score: 7.0
+
+			Novel_6th_motif:
+				start: 181.0
+				sequence: GELWDRAFMDISATD
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.4858787519327332
+				binding_score: 0.3725587104714742
+				final_call: False
+				specificity_score: 3.74626673386976
+				masked_binding_score: 0.0
+				classical_score: 6.5
+
+			Novel_7th_motif:
+				start: 385.0
+				sequence: PIVSIGFYCTKATVT
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.5576183334261132
+				binding_score: 0.1282055192897407
+				final_call: False
+				specificity_score: 10.441826654718009
+				masked_binding_score: 0.0
+				classical_score: 7.0
+
+			Novel_8th_motif:
+				start: 197.0
+				sequence: VLRKVINFSDCTVCL
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.4283292884060171
+				binding_score: 0.3470345449722438
+				final_call: False
+				specificity_score: 0.3184915835723116
+				masked_binding_score: 0.0
+				classical_score: 4.5
+
+			Novel_9th_motif:
+				start: 278.0
+				sequence: QLGIALYYGEIGNFK
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.4195933958269185
+				binding_score: 0.2682916923009044
+				final_call: False
+				specificity_score: 6.227579133447896
+				masked_binding_score: 0.0
+				classical_score: 7.0
+
+			Novel_10th_motif:
+				start: 226.0
+				sequence: PLLYKCSFRTRLHFT
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.3339069361986144
+				binding_score: 0.3195483243384376
+				final_call: False
+				specificity_score: 4.854121110949135
+				masked_binding_score: 0.0
+				classical_score: 8.0
+
+		Classical algorithm results:
+
+			Classical_1st_motif:
+				sequence: FVPAIVSYDDGEEDF
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_2nd_motif:
+				sequence: VLRKVINFSDCTVCL
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_3rd_motif:
+				sequence: YYGEIGNFKEGEIED
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 5.5
+			Classical_4th_motif:
+				sequence: ELKLPFTFLSGHIHE
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 5.5
+			Classical_5th_motif:
+				sequence: YDDGEEDFVGNDPAS
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 6.0
+			Classical_6th_motif:
+				sequence: WVSWAWSFVPAIVSY
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 6.0
+			Classical_7th_motif:
+				sequence: DPIVSIGFYCTKATV
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 6.0
+			Classical_8th_motif:
+				sequence: VTFKVGLFSCCLYLY
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 6.5
+			Classical_9th_motif:
+				sequence: GELWDRAFMDISATD
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 6.5
+			Classical_10th_motif:
+				sequence: DPDLPPGYVQSLIRR
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 7.0
+
+	Isoform ENSP00000349685
+
+		Novel model results:
+
+			Novel_1st_motif:
+				start: 1807.0
+				sequence: NFIPFDIFITASRIS
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8757523926860853
+				binding_score: 0.585006954209776
+				final_call: True
+				specificity_score: 0.490427562553424
+				masked_binding_score: 0.585006954209776
+				classical_score: 5.5
+
+			Novel_2nd_motif:
+				start: 3309.0
+				sequence: SQGTQVVFLTGFGYV
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8521136513047035
+				binding_score: 0.6110177776913788
+				final_call: True
+				specificity_score: 1.2934868647835174
+				masked_binding_score: 0.6110177776913788
+				classical_score: 6.0
+
+			Novel_3rd_motif:
+				start: 3328.0
+				sequence: VHQCGTVFITVAPEG
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8284672937259181
+				binding_score: 0.614971335060223
+				final_call: True
+				specificity_score: 5.7560788281545054
+				masked_binding_score: 0.614971335060223
+				classical_score: 7.0
+
+			Novel_4th_motif:
+				start: 3366.0
+				sequence: TQLSLAVFDDLTHHK
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8532757245797934
+				binding_score: 0.5078893610844754
+				final_call: True
+				specificity_score: 6.437169576588508
+				masked_binding_score: 0.5078893610844754
+				classical_score: 7.0
+
+			Novel_5th_motif:
+				start: 804.0
+				sequence: TLLLQAIYQSWSHLG
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8243245255594881
+				binding_score: 0.5147834951024108
+				final_call: True
+				specificity_score: 0.5323031685995887
+				masked_binding_score: 0.5147834951024108
+				classical_score: 8.0
+
+			Novel_6th_motif:
+				start: 926.0
+				sequence: FTIQVPQYIDYCHNS
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8252833280933434
+				binding_score: 0.4266666568863934
+				final_call: True
+				specificity_score: 1.6488867006869132
+				masked_binding_score: 0.4266666568863934
+				classical_score: 7.5
+
+			Novel_7th_motif:
+				start: 216.0
+				sequence: ASGKIEFYQDPLLYK
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8134163224568249
+				binding_score: 0.4236589731534153
+				final_call: True
+				specificity_score: 3.333754368335851
+				masked_binding_score: 0.4236589731534153
+				classical_score: 7.0
+
+			Novel_8th_motif:
+				start: 2324.0
+				sequence: VRITPVPFNTTEDPD
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8349823183800131
+				binding_score: 0.3398208671384518
+				final_call: True
+				specificity_score: 1.3669624268998424
+				masked_binding_score: 0.3398208671384518
+				classical_score: 4.5
+
+			Novel_9th_motif:
+				start: 1973.0
+				sequence: TLPEALDYCTVWLQT
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.7599277360999159
+				binding_score: 0.4325292829178371
+				final_call: True
+				specificity_score: 4.002899778945594
+				masked_binding_score: 0.4325292829178371
+				classical_score: 6.5
+
+			Novel_10th_motif:
+				start: 1294.0
+				sequence: QAGEESPFSDSVTLE
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.7652779271197537
+				binding_score: 0.3544217440483641
+				final_call: True
+				specificity_score: 1.3462854573662846
+				masked_binding_score: 0.3544217440483641
+				classical_score: 4.0
+
+		Classical algorithm results:
+
+			Classical_1st_motif:
+				sequence: ALMMGEPFFDCQIGF
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 3.5
+			Classical_2nd_motif:
+				sequence: LDEVTTEWSDAIDIN
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 3.5
+			Classical_3rd_motif:
+				sequence: RSETEACFFICGDNL
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.0
+			Classical_4th_motif:
+				sequence: VTLDEEAFVDTEIRL
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.0
+			Classical_5th_motif:
+				sequence: LYHQISSYPDCKTKD
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.0
+			Classical_6th_motif:
+				sequence: QAGEESPFSDSVTLE
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.0
+			Classical_7th_motif:
+				sequence: FVPAIVSYDDGEEDF
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_8th_motif:
+				sequence: SNPQVQLFYELTDIM
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_9th_motif:
+				sequence: VRITPVPFNTTEDPD
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_10th_motif:
+				sequence: GSTNQQDFSSGKSED
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+
+	Isoform ENSP00000351346
+
+		Novel model results:
+
+			Novel_1st_motif:
+				start: 1832.0
+				sequence: NFIPFDIFITASRIS
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8757523926860853
+				binding_score: 0.585006954209776
+				final_call: True
+				specificity_score: 0.490427562553424
+				masked_binding_score: 0.585006954209776
+				classical_score: 5.5
+
+			Novel_2nd_motif:
+				start: 3334.0
+				sequence: SQGTQVVFLTGFGYV
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8521136513047035
+				binding_score: 0.6110177776913788
+				final_call: True
+				specificity_score: 1.2934868647835174
+				masked_binding_score: 0.6110177776913788
+				classical_score: 6.0
+
+			Novel_3rd_motif:
+				start: 3353.0
+				sequence: VHQCGTVFITVAPEG
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8284672937259181
+				binding_score: 0.614971335060223
+				final_call: True
+				specificity_score: 5.7560788281545054
+				masked_binding_score: 0.614971335060223
+				classical_score: 7.0
+
+			Novel_4th_motif:
+				start: 3391.0
+				sequence: TQLSLAVFDDLTHHK
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8532757245797934
+				binding_score: 0.5078893610844754
+				final_call: True
+				specificity_score: 6.437169576588508
+				masked_binding_score: 0.5078893610844754
+				classical_score: 7.0
+
+			Novel_5th_motif:
+				start: 804.0
+				sequence: TLLLQAIYQSWSHLG
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8243245255594881
+				binding_score: 0.5147834951024108
+				final_call: True
+				specificity_score: 0.5323031685995887
+				masked_binding_score: 0.5147834951024108
+				classical_score: 8.0
+
+			Novel_6th_motif:
+				start: 926.0
+				sequence: FTIQVPQYIDYCHNS
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8252833280933434
+				binding_score: 0.4266666568863934
+				final_call: True
+				specificity_score: 1.6488867006869132
+				masked_binding_score: 0.4266666568863934
+				classical_score: 7.5
+
+			Novel_7th_motif:
+				start: 216.0
+				sequence: ASGKIEFYQDPLLYK
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8134163224568249
+				binding_score: 0.4236589731534153
+				final_call: True
+				specificity_score: 3.333754368335851
+				masked_binding_score: 0.4236589731534153
+				classical_score: 7.0
+
+			Novel_8th_motif:
+				start: 2349.0
+				sequence: VRITPVPFNTTEDPD
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8349823183800131
+				binding_score: 0.3398208671384518
+				final_call: True
+				specificity_score: 1.3669624268998424
+				masked_binding_score: 0.3398208671384518
+				classical_score: 4.5
+
+			Novel_9th_motif:
+				start: 1998.0
+				sequence: TLPEALDYCTVWLQT
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.7599277360999159
+				binding_score: 0.4325292829178371
+				final_call: True
+				specificity_score: 4.002899778945594
+				masked_binding_score: 0.4325292829178371
+				classical_score: 6.5
+
+			Novel_10th_motif:
+				start: 1294.0
+				sequence: QAGEESPFSDSVTLE
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.7652779271197537
+				binding_score: 0.3544217440483641
+				final_call: True
+				specificity_score: 1.3462854573662846
+				masked_binding_score: 0.3544217440483641
+				classical_score: 4.0
+
+		Classical algorithm results:
+
+			Classical_1st_motif:
+				sequence: ALMMGEPFFDCQIGF
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 3.5
+			Classical_2nd_motif:
+				sequence: LDEVTTEWSDAIDIN
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 3.5
+			Classical_3rd_motif:
+				sequence: LGQCGGVFLSCTDKL
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.0
+			Classical_4th_motif:
+				sequence: VTLDEEAFVDTEIRL
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.0
+			Classical_5th_motif:
+				sequence: LYHQISSYPDCKTKD
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.0
+			Classical_6th_motif:
+				sequence: RSETEACFFICGDNL
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.0
+			Classical_7th_motif:
+				sequence: QAGEESPFSDSVTLE
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.0
+			Classical_8th_motif:
+				sequence: GVYEVLFYNETEDCP
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_9th_motif:
+				sequence: GSTNQQDFSSGKSED
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_10th_motif:
+				sequence: SNPQVQLFYELTDIM
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+
+	Isoform ENSP00000507923
+
+		Novel model results:
+
+			Novel_1st_motif:
+				start: 1832.0
+				sequence: NFIPFDIFITASRIS
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8757523926860853
+				binding_score: 0.585006954209776
+				final_call: True
+				specificity_score: 0.490427562553424
+				masked_binding_score: 0.585006954209776
+				classical_score: 5.5
+
+			Novel_2nd_motif:
+				start: 3334.0
+				sequence: SQGTQVVFLTGFGYV
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8521136513047035
+				binding_score: 0.6110177776913788
+				final_call: True
+				specificity_score: 1.2934868647835174
+				masked_binding_score: 0.6110177776913788
+				classical_score: 6.0
+
+			Novel_3rd_motif:
+				start: 3353.0
+				sequence: VHQCGTVFITVAPEG
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8284672937259181
+				binding_score: 0.614971335060223
+				final_call: True
+				specificity_score: 5.7560788281545054
+				masked_binding_score: 0.614971335060223
+				classical_score: 7.0
+
+			Novel_4th_motif:
+				start: 3391.0
+				sequence: TQLSLAVFDDLTHHK
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8532757245797934
+				binding_score: 0.5078893610844754
+				final_call: True
+				specificity_score: 6.437169576588508
+				masked_binding_score: 0.5078893610844754
+				classical_score: 7.0
+
+			Novel_5th_motif:
+				start: 804.0
+				sequence: TLLLQAIYQSWSHLG
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8243245255594881
+				binding_score: 0.5147834951024108
+				final_call: True
+				specificity_score: 0.5323031685995887
+				masked_binding_score: 0.5147834951024108
+				classical_score: 8.0
+
+			Novel_6th_motif:
+				start: 926.0
+				sequence: FTIQVPQYIDYCHNS
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8252833280933434
+				binding_score: 0.4266666568863934
+				final_call: True
+				specificity_score: 1.6488867006869132
+				masked_binding_score: 0.4266666568863934
+				classical_score: 7.5
+
+			Novel_7th_motif:
+				start: 216.0
+				sequence: ASGKIEFYQDPLLYK
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8134163224568249
+				binding_score: 0.4236589731534153
+				final_call: True
+				specificity_score: 3.333754368335851
+				masked_binding_score: 0.4236589731534153
+				classical_score: 7.0
+
+			Novel_8th_motif:
+				start: 2349.0
+				sequence: VRITPVPFNTTEDPD
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8349823183800131
+				binding_score: 0.3398208671384518
+				final_call: True
+				specificity_score: 1.3669624268998424
+				masked_binding_score: 0.3398208671384518
+				classical_score: 4.5
+
+			Novel_9th_motif:
+				start: 1998.0
+				sequence: TLPEALDYCTVWLQT
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.7599277360999159
+				binding_score: 0.4325292829178371
+				final_call: True
+				specificity_score: 4.002899778945594
+				masked_binding_score: 0.4325292829178371
+				classical_score: 6.5
+
+			Novel_10th_motif:
+				start: 1294.0
+				sequence: QAGEESPFSDSVTLE
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.7652779271197537
+				binding_score: 0.3544217440483641
+				final_call: True
+				specificity_score: 1.3462854573662846
+				masked_binding_score: 0.3544217440483641
+				classical_score: 4.0
+
+		Classical algorithm results:
+
+			Classical_1st_motif:
+				sequence: ALMMGEPFFDCQIGF
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 3.5
+			Classical_2nd_motif:
+				sequence: LDEVTTEWSDAIDIN
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 3.5
+			Classical_3rd_motif:
+				sequence: QAGEESPFSDSVTLE
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.0
+			Classical_4th_motif:
+				sequence: VTLDEEAFVDTEIRL
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.0
+			Classical_5th_motif:
+				sequence: RSETEACFFICGDNL
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.0
+			Classical_6th_motif:
+				sequence: LGQCGGVFLSCTDKL
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.0
+			Classical_7th_motif:
+				sequence: LYHQISSYPDCKTKD
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.0
+			Classical_8th_motif:
+				sequence: GVYEVLFYNETEDCP
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_9th_motif:
+				sequence: PVPVIPSFSTALYGK
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_10th_motif:
+				sequence: VLRKVINFSDCTVCL
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+
+	Isoform ENSP00000508225
+
+		Novel model results:
+
+			Novel_1st_motif:
+				start: 926.0
+				sequence: FTIQVPQYIDYCHNS
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8252833280933434
+				binding_score: 0.4266666568863934
+				final_call: True
+				specificity_score: 1.6488867006869132
+				masked_binding_score: 0.4266666568863934
+				classical_score: 7.5
+
+			Novel_2nd_motif:
+				start: 216.0
+				sequence: ASGKIEFYQDPLLYK
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8134163224568249
+				binding_score: 0.4236589731534153
+				final_call: True
+				specificity_score: 3.333754368335851
+				masked_binding_score: 0.4236589731534153
+				classical_score: 7.0
+
+			Novel_3rd_motif:
+				start: 284.0
+				sequence: YYGEIGNFKEGEIED
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.7407124851245953
+				binding_score: 0.6644041172578727
+				final_call: False
+				specificity_score: 3.1885981373508256
+				masked_binding_score: 0.0
+				classical_score: 5.5
+
+			Novel_4th_motif:
+				start: 550.0
+				sequence: GSTNQQDFSSGKSED
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.6262992694338851
+				binding_score: 0.565808327466322
+				final_call: False
+				specificity_score: 0.9671744588875352
+				masked_binding_score: 0.0
+				classical_score: 4.5
+
+			Novel_5th_motif:
+				start: 827.0
+				sequence: EALINEIFLSIGVKS
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.7199401359760862
+				binding_score: 0.4231152370065365
+				final_call: False
+				specificity_score: 1.2302710747663943
+				masked_binding_score: 0.0
+				classical_score: 6.5
+
+			Novel_6th_motif:
+				start: 674.0
+				sequence: NFMNTTNFQSLRPLP
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.6932230630170824
+				binding_score: 0.4273017812783272
+				final_call: False
+				specificity_score: 1.075078965989985
+				masked_binding_score: 0.0
+				classical_score: 7.0
+
+			Novel_7th_motif:
+				start: 1008.0
+				sequence: QSYQASEYASSPVKT
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.7349904939644251
+				binding_score: 0.3194516640303653
+				final_call: False
+				specificity_score: 4.480439469333965
+				masked_binding_score: 0.0
+				classical_score: 5.0
+
+			Novel_8th_motif:
+				start: 1122.0
+				sequence: IISAGHKYMEPLQEI
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.5875283352222402
+				binding_score: 0.4701945019650388
+				final_call: False
+				specificity_score: 2.8323191610989085
+				masked_binding_score: 0.0
+				classical_score: 7.5
+
+			Novel_9th_motif:
+				start: 351.0
+				sequence: FVPAIVSYDDGEEDF
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.4885806735810912
+				binding_score: 0.5412298199583291
+				final_call: False
+				specificity_score: 1.801793617736822
+				masked_binding_score: 0.0
+				classical_score: 4.5
+
+			Novel_10th_motif:
+				start: 181.0
+				sequence: GELWDRAFMDISATD
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.4858787519327332
+				binding_score: 0.3725587104714742
+				final_call: False
+				specificity_score: 3.74626673386976
+				masked_binding_score: 0.0
+				classical_score: 6.5
+
+		Classical algorithm results:
+
+			Classical_1st_motif:
+				sequence: ALMMGEPFFDCQIGF
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 3.5
+			Classical_2nd_motif:
+				sequence: RSETEACFFICGDNL
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.0
+			Classical_3rd_motif:
+				sequence: VLRKVINFSDCTVCL
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_4th_motif:
+				sequence: PVPVIPSFSTALYGK
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_5th_motif:
+				sequence: FVPAIVSYDDGEEDF
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_6th_motif:
+				sequence: GSTNQQDFSSGKSED
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_7th_motif:
+				sequence: QSYQASEYASSPVKT
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 5.0
+			Classical_8th_motif:
+				sequence: GIMGVKDFEENMNRS
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 5.5
+			Classical_9th_motif:
+				sequence: YYGEIGNFKEGEIED
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 5.5
+			Classical_10th_motif:
+				sequence: ELKLPFTFLSGHIHE
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 5.5
+
+	Isoform ENSP00000347281
+
+		Novel model results:
+
+			Novel_1st_motif:
+				start: 804.0
+				sequence: TLLLQAIYQSWSHLG
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8243245255594881
+				binding_score: 0.5147834951024108
+				final_call: True
+				specificity_score: 0.5323031685995887
+				masked_binding_score: 0.5147834951024108
+				classical_score: 8.0
+
+			Novel_2nd_motif:
+				start: 926.0
+				sequence: FTIQVPQYIDYCHNS
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8252833280933434
+				binding_score: 0.4266666568863934
+				final_call: True
+				specificity_score: 1.6488867006869132
+				masked_binding_score: 0.4266666568863934
+				classical_score: 7.5
+
+			Novel_3rd_motif:
+				start: 216.0
+				sequence: ASGKIEFYQDPLLYK
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.8134163224568249
+				binding_score: 0.4236589731534153
+				final_call: True
+				specificity_score: 3.333754368335851
+				masked_binding_score: 0.4236589731534153
+				classical_score: 7.0
+
+			Novel_4th_motif:
+				start: 1293.0
+				sequence: QAGEESPFSDSVTLE
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.7652779271197537
+				binding_score: 0.3544217440483641
+				final_call: True
+				specificity_score: 1.3462854573662846
+				masked_binding_score: 0.3544217440483641
+				classical_score: 4.0
+
+			Novel_5th_motif:
+				start: 284.0
+				sequence: YYGEIGNFKEGEIED
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.7407124851245953
+				binding_score: 0.6644041172578727
+				final_call: False
+				specificity_score: 3.1885981373508256
+				masked_binding_score: 0.0
+				classical_score: 5.5
+
+			Novel_6th_motif:
+				start: 434.0
+				sequence: ALMMGEPFFDCQIGF
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.6800901331243159
+				binding_score: 0.5632758953332141
+				final_call: False
+				specificity_score: 3.3914599367373337
+				masked_binding_score: 0.0
+				classical_score: 3.5
+
+			Novel_7th_motif:
+				start: 1217.0
+				sequence: SNPQVQLFYELTDIM
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.6906089303347244
+				binding_score: 0.4908002882639137
+				final_call: False
+				specificity_score: -0.2400265754583922
+				masked_binding_score: 0.0
+				classical_score: 4.5
+
+			Novel_8th_motif:
+				start: 49.0
+				sequence: ELKLPFTFLSGHIHE
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.5776408913482437
+				binding_score: 0.6189566902266831
+				final_call: False
+				specificity_score: 6.867847152399618
+				masked_binding_score: 0.0
+				classical_score: 5.5
+
+			Novel_9th_motif:
+				start: 550.0
+				sequence: GSTNQQDFSSGKSED
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.6262992694338851
+				binding_score: 0.565808327466322
+				final_call: False
+				specificity_score: 0.9671744588875352
+				masked_binding_score: 0.0
+				classical_score: 4.5
+
+			Novel_10th_motif:
+				start: 827.0
+				sequence: EALINEIFLSIGVKS
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.7199401359760862
+				binding_score: 0.4231152370065365
+				final_call: False
+				specificity_score: 1.2302710747663943
+				masked_binding_score: 0.0
+				classical_score: 6.5
+
+		Classical algorithm results:
+
+			Classical_1st_motif:
+				sequence: ALMMGEPFFDCQIGF
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 3.5
+			Classical_2nd_motif:
+				sequence: RSETEACFFICGDNL
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.0
+			Classical_3rd_motif:
+				sequence: QAGEESPFSDSVTLE
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.0
+			Classical_4th_motif:
+				sequence: FVPAIVSYDDGEEDF
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_5th_motif:
+				sequence: GSTNQQDFSSGKSED
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_6th_motif:
+				sequence: PVPVIPSFSTALYGK
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_7th_motif:
+				sequence: VLRKVINFSDCTVCL
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_8th_motif:
+				sequence: SNPQVQLFYELTDIM
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 4.5
+			Classical_9th_motif:
+				sequence: QSYQASEYASSPVKT
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 5.0
+			Classical_10th_motif:
+				sequence: YYGEIGNFKEGEIED
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 5.5
+
+	Isoform ENSP00000428809
+
+		Novel model results:
+
+			Novel_1st_motif:
+				start: 92.0
+				sequence: ITTNLDFFLSVAQVQ
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classification_score: 0.6948175091833074
+				binding_score: 0.6911214201668407
+				final_call: False
+				specificity_score: 13.780463314700796
+				masked_binding_score: 0.0
+				classical_score: 6.5
+
+			Novel_2nd_motif:
+				start: 0.0
+				sequence: nan
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': False}
+				classification_score: nan
+				binding_score: nan
+				final_call: False
+				specificity_score: nan
+				masked_binding_score: 0.0
+				classical_score: nan
+
+			Novel_3rd_motif:
+				start: 0.0
+				sequence: nan
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': False}
+				classification_score: nan
+				binding_score: nan
+				final_call: False
+				specificity_score: nan
+				masked_binding_score: 0.0
+				classical_score: nan
+
+			Novel_4th_motif:
+				start: 0.0
+				sequence: nan
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': False}
+				classification_score: nan
+				binding_score: nan
+				final_call: False
+				specificity_score: nan
+				masked_binding_score: 0.0
+				classical_score: nan
+
+			Novel_5th_motif:
+				start: 0.0
+				sequence: nan
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': False}
+				classification_score: nan
+				binding_score: nan
+				final_call: False
+				specificity_score: nan
+				masked_binding_score: 0.0
+				classical_score: nan
+
+			Novel_6th_motif:
+				start: 0.0
+				sequence: nan
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': False}
+				classification_score: nan
+				binding_score: nan
+				final_call: False
+				specificity_score: nan
+				masked_binding_score: 0.0
+				classical_score: nan
+
+			Novel_7th_motif:
+				start: 0.0
+				sequence: nan
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': False}
+				classification_score: nan
+				binding_score: nan
+				final_call: False
+				specificity_score: nan
+				masked_binding_score: 0.0
+				classical_score: nan
+
+			Novel_8th_motif:
+				start: 0.0
+				sequence: nan
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': False}
+				classification_score: nan
+				binding_score: nan
+				final_call: False
+				specificity_score: nan
+				masked_binding_score: 0.0
+				classical_score: nan
+
+			Novel_9th_motif:
+				start: 0.0
+				sequence: nan
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': False}
+				classification_score: nan
+				binding_score: nan
+				final_call: False
+				specificity_score: nan
+				masked_binding_score: 0.0
+				classical_score: nan
+
+			Novel_10th_motif:
+				start: 0.0
+				sequence: nan
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': False}
+				classification_score: nan
+				binding_score: nan
+				final_call: False
+				specificity_score: nan
+				masked_binding_score: 0.0
+				classical_score: nan
+
+		Classical algorithm results:
+
+			Classical_1st_motif:
+				sequence: NITTNLDFFLSVAQV
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 5.0
+			Classical_2nd_motif:
+				sequence: ITTNLDFFLSVAQVQ
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 6.5
+			Classical_3rd_motif:
+				sequence: QEQKKVDIFDGGMAE
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 7.5
+			Classical_4th_motif:
+				sequence: EQKKVDIFDGGMAET
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 7.5
+			Classical_5th_motif:
+				sequence: GMAETSSRYSGAQGG
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 8.0
+			Classical_6th_motif:
+				sequence: VDIFDGGMAETSSRY
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 8.0
+			Classical_7th_motif:
+				sequence: LTPVLTDFSVRITGA
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 8.0
+			Classical_8th_motif:
+				sequence: TGAPAVIFTKVVSPE
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 8.0
+			Classical_9th_motif:
+				sequence: TKVVSPENLHTEEIL
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 9.0
+			Classical_10th_motif:
+				sequence: GGXNQAAKEDTVVLK
+				topology: {'type': nan, 'description': nan, 'cytoplasmic_accessible': True}
+				classical_score: 9.0
+

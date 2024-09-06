@@ -309,6 +309,7 @@ def parse_user_input(protein_id, gene_id, gene_name, query_dict, protein_gene_di
         if gene_ids is None:
             if warn_no_results:
                 print(f"No results found.")
+            return {}, gene_name, False
         elif len(gene_ids) > 1:
             if warn_multiple:
                 print(f"Caution: \"{gene_name}\" matches multiple Ensembl gene IDs; showing results for each of them.")
