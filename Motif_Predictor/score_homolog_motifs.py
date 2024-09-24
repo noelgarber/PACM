@@ -12,7 +12,7 @@ import warnings
 from tqdm import trange
 from functools import partial
 from Matrix_Generator.ConditionalMatrix import ConditionalMatrices
-from Motif_Predictor.load_predictor_config import load_config
+from Motif_Predictor.load_predictor_config import load_config, validate_cols
 from Motif_Predictor.map_homologies import map_homologies
 
 predictor_params = load_config()
@@ -494,10 +494,25 @@ def score_similar_homologs(data_df, homolog_motif_col_groups, total_dict, bindin
 
     return data_df, final_homolog_motif_cols, final_call_cols
 
-def organize_targets_chunk(pair, ref_gene_col, motif_cols, binding_cols, classification_cols, call_cols,
-                           classical_motif_cols = None, classical_score_cols = None):
+def organize_targets_chunk(pair, ref_gene_col, alt_ref_gene_cols, motif_cols, binding_cols, classification_cols,
+                           call_cols, classical_motif_cols = None, classical_score_cols = None):
     # Helper function for organizing a single target dataframe into a dictionary of gene names
     target_taxid, target_df = pair
+
+    # Validate that the ref_gene_col is selected correctly
+    ref_gene_col = validate_cols(ref_gene_col, alt_ref_gene_cols, reference_df) if alt_ref_gene_cols else ref_gene_col
+
+    if not ref_gene_col in target_df.columns:
+        success = False
+        for alt_ref_gene_col in alt_ref_gene_cols:
+            if alt_ref_gene_col in target_df.columns:
+                ref_gene_col = alt_ref_gene_col
+                success = True
+                break
+        if not success:
+            gene_cols_str = ", ".join(alt_ref_gene_cols)
+            gene_cols_str = ref_gene_col + ", " + gene_cols_str
+            raise Exception(f"target_df does not contain any of the given reference gene columns: {gene_cols_str}")
 
     # Generate dictionaries for novel model scores
     target_taxid_novel_scores = {}
@@ -542,8 +557,8 @@ def organize_targets_chunk(pair, ref_gene_col, motif_cols, binding_cols, classif
 
     return output
 
-def organize_targets(target_taxids, target_dfs, ref_gene_col, motif_cols, binding_cols, classification_cols, call_cols,
-                     classical_motif_cols = None, classical_score_cols = None):
+def organize_targets(target_taxids, target_dfs, ref_gene_col, alt_ref_gene_cols, motif_cols, binding_cols,
+                     classification_cols, call_cols, classical_motif_cols = None, classical_score_cols = None):
     # Helper function that organizes target dataframes into dictionaries of gene names
 
     target_novel_scores = {}
@@ -551,9 +566,10 @@ def organize_targets(target_taxids, target_dfs, ref_gene_col, motif_cols, bindin
     target_classical_scores = {}
     target_classical_genes = {}
 
-    func = partial(organize_targets_chunk, ref_gene_col = ref_gene_col, motif_cols = motif_cols,
-                   binding_cols = binding_cols, classification_cols = classification_cols, call_cols = call_cols,
-                   classical_motif_cols = classical_motif_cols, classical_score_cols = classical_score_cols)
+    func = partial(organize_targets_chunk, ref_gene_col = ref_gene_col, alt_ref_gene_cols = alt_ref_gene_cols,
+                   motif_cols = motif_cols, binding_cols = binding_cols, classification_cols = classification_cols,
+                   call_cols = call_cols, classical_motif_cols = classical_motif_cols,
+                   classical_score_cols = classical_score_cols)
 
     taxid_df_pairs = [(target_taxid, target_df) for target_taxid, target_df in zip(target_taxids, target_dfs)]
 
@@ -576,8 +592,10 @@ def organize_targets(target_taxids, target_dfs, ref_gene_col, motif_cols, bindin
     else:
         return (target_novel_scores, target_novel_genes)
 
-def get_best_homologs(reference_df, ref_gene_col, target_dicts, target_score_dict, invert = False):
+def get_best_homologs(reference_df, ref_gene_col, alt_ref_gene_cols, target_dicts, target_score_dict, invert = False):
     # Helper function to make a dict of best homologs by taxid for each reference gene, based on masked binding score
+
+    ref_gene_col = validate_cols(ref_gene_col, alt_ref_gene_cols, reference_df) if alt_ref_gene_cols else ref_gene_col
 
     best_homolog_dict = {}
     for taxid, reference_target_homologs in target_dicts.items():
@@ -850,10 +868,13 @@ def hash_args(*args, hash_len = None):
 
     return hash
 
-def generate_merged_df(best_homolog_dict, target_gene_dict, motif_cols, reference_df, target_taxids, ref_gene_col,
-                       best_classical_homolog_dict = None, target_classical_gene_dict = None, classical_inverted = True,
+def generate_merged_df(best_homolog_dict, target_gene_dict, motif_cols, reference_df, target_taxids,
+                       ref_gene_col, alt_ref_gene_cols = [], best_classical_homolog_dict = None,
+                       target_classical_gene_dict = None, classical_inverted = True,
                        identity_thres = 0.3, motif_length = 15):
     # Generate a merged dataframe extracting best motifs from target species as homologs to reference species
+
+    ref_gene_col = validate_cols(ref_gene_col, alt_ref_gene_cols, reference_df) if alt_ref_gene_cols else ref_gene_col
 
     merged_df = reference_df.copy()
     final_homolog_motif_cols = []
@@ -886,11 +907,11 @@ def generate_merged_df(best_homolog_dict, target_gene_dict, motif_cols, referenc
 
 cwd = os.getcwd()
 def score_best_homologs(reference_taxid, reference_df, target_taxids, target_dfs, ref_gene_col = "ensembl_gene_id",
-                        identity_thres = 0.3, motif_length = 15, classical_inverted = True, mapping_verbose = False,
-                        target_homology_dicts = None):
+                        alt_ref_gene_cols = [], identity_thres = 0.3, motif_length = 15, classical_inverted = True,
+                        mapping_verbose = False, target_homology_dicts = None):
 
     args_hash = hash_args(reference_taxid, reference_df, target_taxids, target_dfs, ref_gene_col,
-                          identity_thres, motif_length, hash_len=8)
+                          alt_ref_gene_cols, identity_thres, motif_length, hash_len=8)
     pickling_path = os.path.join(cwd, f"merged_df_{args_hash}.pkl")
     if os.path.exists(pickling_path):
         with open(pickling_path, "rb") as file:
@@ -919,9 +940,9 @@ def score_best_homologs(reference_taxid, reference_df, target_taxids, target_dfs
 
         # Organize target dataframes into dictionaries of gene names
         print(f"Organizing dataframes into score and gene dictionaries...")
-        organized_outputs = organize_targets(target_taxids, target_dfs, ref_gene_col, novel_motif_cols,
-                                             novel_binding_cols, novel_classification_cols, novel_call_cols,
-                                             classical_motif_cols, classical_score_cols)
+        organized_outputs = organize_targets(target_taxids, target_dfs, ref_gene_col, alt_ref_gene_cols,
+                                             novel_motif_cols, novel_binding_cols, novel_classification_cols,
+                                             novel_call_cols, classical_motif_cols, classical_score_cols)
 
         target_score_dict, target_gene_dict = organized_outputs[:2]
         if len(organized_outputs) == 2:
@@ -933,17 +954,18 @@ def score_best_homologs(reference_taxid, reference_df, target_taxids, target_dfs
 
         # Make a dictionary of best homologs by taxid for each reference gene, based on masked binding score
         print("Generating dictionary of best homologs by taxid for each reference gene...")
-        best_novel_homolog_dict = get_best_homologs(reference_df, ref_gene_col, target_homology_dicts, target_score_dict)
+        best_novel_homolog_dict = get_best_homologs(reference_df, ref_gene_col, alt_ref_gene_cols,
+                                                    target_homology_dicts, target_score_dict)
         if target_classical_score_dict:
-            best_classical_homolog_dict = get_best_homologs(reference_df, ref_gene_col, target_homology_dicts,
-                                                            target_classical_score_dict)
+            best_classical_homolog_dict = get_best_homologs(reference_df, ref_gene_col, alt_ref_gene_cols,
+                                                            target_homology_dicts, target_classical_score_dict)
         else:
             best_classical_homolog_dict = None
 
         # Generate a merged dataframe extracting best motifs from target species as homologs to reference species
         print("Generating merged dataframe with homolog motif sequences...")
         merged_tuple = generate_merged_df(best_novel_homolog_dict, target_gene_dict, novel_motif_cols, reference_df,
-                                          target_taxids, ref_gene_col, best_classical_homolog_dict,
+                                          target_taxids, ref_gene_col, alt_ref_gene_cols, best_classical_homolog_dict,
                                           target_classical_gene_dict, classical_inverted, identity_thres, motif_length)
         merged_df, final_homolog_motif_cols, final_homolog_call_cols, final_homolog_classical_motif_cols = merged_tuple
 
@@ -1005,13 +1027,14 @@ def score_homolog_motifs(data, homolog_motif_cols = None, homolog_motif_col_grou
 
     if selection_mode == "best":
         # Search existing predictions for homologous proteins
-        ref_gene_col = predictor_params["homology_params"]["ref_gene_col"]
+        ref_gene_col = predictor_params["ref_gene_col"]
+        alt_ref_gene_cols = predictor_params["alt_ref_gene_cols"]
         identity_thres = predictor_params["homology_params"]["identity_thres"]
         motif_length = predictor_params["motif_length"]
         reference_df = data_dfs[0]
         target_dfs = data_dfs[1:]
         output = score_best_homologs(reference_taxid, reference_df, target_taxids, target_dfs, ref_gene_col,
-                                     identity_thres, motif_length)
+                                     alt_ref_gene_cols, identity_thres, motif_length)
         data_df, final_homolog_motif_cols, final_homolog_call_cols, final_homolog_classical_motif_cols = output
     else:
         # Score unique motif sequences
