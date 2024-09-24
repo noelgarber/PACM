@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import pickle
 import time
+import warnings
 import multiprocessing
 from tqdm import trange
 from functools import partial
@@ -456,9 +457,11 @@ def score_proteins(protein_seqs_df, predictor_params = predictor_params, ensembl
         use_alphafold = False
         forbidden_dssp_codes, alphafold_plddt_thres, alphafold_tar_dir = None, None, None
 
-    if use_alphafold:
+    if use_alphafold and alphafold_tar_dir is not None:
         alphadssp_results = generate_dssp(alphafold_tar_dir, None, dssp_executable,
                                           forbidden_dssp_codes, alphafold_plddt_thres, use_cached=True)
+    elif use_alphafold:
+        warnings.warn(f"Could not use AlphaFold screening for taxid {current_taxid}; no tar directory was given.")
     else:
         alphadssp_results = None
 
