@@ -5,7 +5,7 @@ import os
 import json
 import pickle
 import tkinter as tk
-from Motif_Predictor.load_predictor_config import load_config
+from Motif_Predictor.load_predictor_config import load_config, validate_cols
 from query_gui.gene_query_popup import GeneQueryPopup
 from query_gui.motif_mapper import render_text, MotifDomainMap
 
@@ -13,39 +13,49 @@ predictor_params = load_config(verbose=True)
 default_db_path = predictor_params["db_params"]["db_path"]
 cwd = os.getcwd()
 
-def load_db(db_path = default_db_path):
+def load_db(db_path = default_db_path, query_taxid = 9606, load_both = False):
     pkl_path = db_path.replace(".json", ".pkl")
+    correlated_db_path = db_path.split(".json")[0] + f"_{query_taxid}_with_homologs.json"
+    correlated_pkl_path = db_path.split(".json")[0] + f"_{query_taxid}_with_homologs.pkl"
+    correlated_db_exists = os.path.exists(correlated_db_path) or os.path.exists(correlated_pkl_path)
+
+    data_dict = None
     if os.path.exists(pkl_path):
         print(f"Loading pickled database, please wait...")
         with open(pkl_path, "rb") as file:
             data_dict = pickle.load(file)
+        print(f"\tLoaded.")
     else:
         print(f"Loading JSON database, please wait...")
         with open(db_path, "r") as json_file:
             data_dict = json.load(json_file)
-    print(f"\tLoaded.")
+        print(f"\tLoaded.")
 
-    correlated_db_path = db_path.split(".json")[0] + "_with_homologs.json"
-    correlated_pkl_path = correlated_db_path.replace(".json", ".pkl")
+    protein_gene_dict, gene_name_id_dict, gene_id_name_dict = extract_protein_gene_dict(data_dict)
+    if correlated_db_exists and not load_both:
+        data_dict = None
+
     if os.path.exists(correlated_pkl_path):
-        print(f"Loading pickled correlated homolog database, please wait...")
+        print(f"Found pickled correlated homolog database; reloading...")
         with open(correlated_pkl_path, "rb") as file:
             correlated_dict = pickle.load(file)
         print(f"\tLoaded.")
     elif os.path.exists(correlated_db_path):
-        print(f"Loading correlated homolog JSON database, please wait...")
+        print(correlated_pkl_path)
+        print(f"Found correlated homolog JSON database; reloading...")
         with open(correlated_db_path, "r") as json_file:
             correlated_dict = json.load(json_file)
         print(f"\tLoaded.")
     else:
         correlated_dict = None
 
-    return data_dict, correlated_dict
+    return data_dict, correlated_dict, protein_gene_dict, gene_name_id_dict, gene_id_name_dict
 
 def get_protein_lengths(predictor_params = predictor_params, save_pkl = True):
     # Get a dictionary of protein isoform lengths
 
-    ref_protein_col = predictor_params["homology_params"]["ref_protein_col"]
+    ref_protein_col = predictor_params["ref_protein_col"]
+    alt_ref_protein_cols = predictor_params["alt_ref_protein_cols"]
     ref_seq_col = predictor_params["seq_col"]
     protein_seqs_paths = predictor_params["protein_seqs_paths"]
     motif_length = predictor_params["motif_length"]
@@ -53,7 +63,11 @@ def get_protein_lengths(predictor_params = predictor_params, save_pkl = True):
     protein_lengths = {}
     for taxid, path in protein_seqs_paths.items():
         df = pd.read_csv(path)
-        protein_ids = df[ref_protein_col].to_list()
+        if alt_ref_protein_cols:
+            taxid_protein_col = validate_cols(ref_protein_col, alt_ref_protein_cols, df)
+        else:
+            taxid_protein_col = ref_protein_col
+        protein_ids = df[taxid_protein_col].to_list()
         protein_seqs = df[ref_seq_col].to_list()
         for protein_id, seq in zip(protein_ids, protein_seqs):
             if isinstance(seq, str):
@@ -167,28 +181,79 @@ def merge_motif_maps(motif_domain_maps, gene_name, title_fontsize = 48, top_padd
 
     return merged_img
 
-def print_entry(gene_id, protein_id, query_dict):
+def print_motifs(results, target_taxids = None):
+    for ref_num_key, motif_val_dict in results.items():
+        print(f"\t\t{ref_num_key}:")
+
+        for var_key, var_val in motif_val_dict.items():
+            if var_key != "homologs":
+                print(f"\t\t\t{var_key}: {var_val}")
+
+            else:
+                print(f"\t\t\tHomologs:")
+                homologs = var_val
+                if target_taxids is None:
+                    target_taxids = list(homologs.keys())
+
+                for target_taxid in target_taxids:
+                    target_homologs = homologs.get(target_taxid)
+
+                    if target_homologs is not None:
+                        best_homolog = target_homologs.get("best_homolog")
+                        if best_homolog is not None:
+                            print(f"\t\t\t\tTarget taxid {target_taxid} homolog:")
+                            for homolog_var_key, homolog_var_val in best_homolog.items():
+                                print(f"\t\t\t\t\t{homolog_var_key}: {homolog_var_val}")
+
+def print_entry(gene_id, protein_id, query_dict, target_taxids = None):
+    # Function that prints a gene entry to the terminal
+
+    # Schema: query_dict[ref_gene_id][ref_protein_id][folder][ref_num_key]["homologs"][target_taxid]
     gene_results = query_dict.get(gene_id)
+
     if gene_results is not None:
         gene_name = gene_results.get("gene_name")
         print(f"----- Results for {gene_name} ({gene_id}) -----")
         protein_results = gene_results.get(protein_id)
+
         if protein_results is not None:
             print(f"\tNovel model results for isoform {protein_id}: ")
             novel_results = protein_results.get("novel")
-            for key, value in novel_results.items():
-                print(f"\t\t{key}:")
-                for var_key, var_val in value.items():
-                    print(f"\t\t\t{var_key}: {var_val}")
+            print_motifs(novel_results, target_taxids)
+
             classical_results = protein_results.get("classical")
             if classical_results is not None:
                 print(f"\tClassical model results for isoform {protein_id}: ")
-                for key, value in classical_results.items():
-                    print(f"\t\t{key}:")
-                    for var_key, var_val in value.items():
-                        print(f"\t\t\t{var_key}: {var_val}")
+                print_motifs(classical_results, target_taxids)
 
-def entry_to_file(path, gene_protein_ids, query_dict):
+def append_lines_motifs(lines, results, target_taxids=None):
+    for ref_num_key, motif_val_dict in results.items():
+        lines.append(f"\t\t\t{ref_num_key}:\n")
+
+        for var_key, var_val in motif_val_dict.items():
+            if var_key != "homologs":
+                lines.append(f"\t\t\t\t{var_key}: {var_val}\n")
+
+            else:
+                lines.append(f"\t\t\t\tHomologs:\n")
+                homologs = var_val
+                if target_taxids is None:
+                    target_taxids = list(homologs.keys())
+
+                for target_taxid in target_taxids:
+                    target_homologs = homologs.get(target_taxid)
+
+                    if target_homologs is not None:
+                        best_homolog = target_homologs.get("best_homolog")
+                        if best_homolog is not None:
+                            lines.append(f"\t\t\t\t\tTarget taxid {target_taxid} homolog:\n")
+                            for homolog_var_key, homolog_var_val in best_homolog.items():
+                                lines.append(f"\t\t\t\t\t\t{homolog_var_key}: {homolog_var_val}\n")
+
+def entry_to_file(path, gene_protein_ids, query_dict, homology_taxids = None):
+    # Function that saves a gene entry to a text file
+
+    # Schema: query_dict[ref_gene_id][ref_protein_id][folder][ref_num_key]["homologs"][target_taxid]
     lines = ["Query Results\n",
              "\n"]
 
@@ -211,24 +276,14 @@ def entry_to_file(path, gene_protein_ids, query_dict):
                     if len(novel_results) > 0:
                         lines.append(f"\t\tNovel model results:\n")
                         lines.append("\n")
-
-                    for key, value in novel_results.items():
-                        lines.append(f"\t\t\t{key}:\n")
-                        for var_key, var_val in value.items():
-                            lines.append(f"\t\t\t\t{var_key}: {var_val}\n")
-                        lines.append("\n")
+                        append_lines_motifs(lines, novel_results, homology_taxids)
 
                     classical_results = protein_results.get("classical")
                     classical_results_count = len(classical_results) if classical_results is not None else 0
                     if classical_results_count > 0:
                         lines.append(f"\t\tClassical algorithm results:\n")
                         lines.append("\n")
-
-                        for key, value in classical_results.items():
-                            lines.append(f"\t\t\t{key}:\n")
-                            for var_key, var_val in value.items():
-                                lines.append(f"\t\t\t\t{var_key}: {var_val}\n")
-                        lines.append("\n")
+                        append_lines_motifs(lines, classical_results, homology_taxids)
 
             if multiple_genes:
                 lines.append("-" * 80)
@@ -375,17 +430,17 @@ def prompt_for_results(user_inputs, query_dict, motif_len, search_homologs, prot
     gene_protein_ids, gene_name, valid_input_given = parse_user_input(protein_id, gene_id, gene_name, query_dict,
                                                                       protein_gene_dict, names_to_ids, ids_to_names)
 
-    # Search the database
+    # Search the database for the reference taxid
     motif_domain_maps = {}
     if valid_input_given:
         text_results_path = os.path.join(cwd, f"{gene_name}_motif_results.txt")
-        entry_to_file(text_results_path, gene_protein_ids, query_dict)
+        entry_to_file(text_results_path, gene_protein_ids, query_dict, homology_taxids)
 
         for gene_id, protein_ids in gene_protein_ids.items():
             print(f"Current gene ID: {gene_id}")
             for protein_id in protein_ids:
                 if print_to_terminal:
-                    print_entry(gene_id, protein_id, query_dict)
+                    print_entry(gene_id, protein_id, query_dict, homology_taxids)
                 if protein_lengths_dict is not None:
                     protein_len = protein_lengths_dict.get(protein_id)
                     motif_domain_map = generate_novel_motif_map(gene_id, protein_id, protein_len, motif_len, query_dict)
@@ -398,16 +453,20 @@ def prompt_for_results(user_inputs, query_dict, motif_len, search_homologs, prot
     return motif_domain_maps, valid_input_given
 
 if __name__ == "__main__":
-    # Load the database
-    data_dict, correlated_dict = load_db()
-    protein_gene_dict, gene_name_id_dict, gene_id_name_dict = extract_protein_gene_dict(data_dict)
-    protein_lengths, motif_len = get_protein_lengths()
-
+    data_dict, correlated_dict = None, None
+    protein_gene_dict, gene_name_id_dict, gene_id_name_dict = None, None, None
     while True:
         user_inputs, valid_input_given = user_prompt()
+
         if valid_input_given:
             query_taxid = user_inputs[3]
+
+            # Load the database
+            if data_dict is None and correlated_dict is None:
+                data_dict, correlated_dict, protein_gene_dict, gene_name_id_dict, gene_id_name_dict = load_db(query_taxid = query_taxid)
             query_dict, search_homologs = select_db(data_dict, correlated_dict, query_taxid)
+
+            protein_lengths, motif_len = get_protein_lengths()
             motif_domain_maps, valid_input_given = prompt_for_results(user_inputs, query_dict, motif_len,
                                                                       search_homologs, protein_lengths,
                                                                       gene_name_id_dict, gene_id_name_dict)
