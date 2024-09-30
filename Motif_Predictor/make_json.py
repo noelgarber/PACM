@@ -8,6 +8,7 @@ from functools import partial
 import numpy as np
 import pandas as pd
 import ujson
+import json
 import pickle
 import psutil
 import gc
@@ -29,6 +30,19 @@ def hash_args(*args, hash_len = None):
     hash = full_hash[:hash_len] if hash_len is not None else full_hash
 
     return hash
+
+def dump_large_json(correlated_dict, file_path, indent=4):
+    with open(file_path, "w") as f:
+        # Start the JSON object
+        f.write("{\n")
+        # Write each top-level key-value pair individually
+        for i, (key, value) in enumerate(correlated_dict.items()):
+            # Add a comma before new entries if not the first
+            if i > 0:
+                f.write(",\n")
+            json.dump({key: value}, f, indent=indent)
+        # End the JSON object
+        f.write("\n}\n")
 
 # ------------------------------------------ Parse DataFrame into Database ---------------------------------------------
 def get_taxids(predictor_params = predictor_params):
@@ -477,7 +491,7 @@ def get_result(ref_gene_id, ref_protein_id, ref_novel_num, target_taxid, ref_mot
     return result
 
 def correlate_homologs_gene(ref_gene_id, correlated_dict, target_taxid, homology_target_dict, target_taxid_dict,
-                            compare_classical_method = False, favor_cytoplasmic = True):
+                            compare_classical_method = False, favor_cytoplasmic = True, assign_in_place = False):
     '''
     Helper function that finds homologs for motifs belonging to a single reference gene
 
@@ -488,6 +502,7 @@ def correlate_homologs_gene(ref_gene_id, correlated_dict, target_taxid, homology
         target_taxid_dict (dict):        Dictionary belonging to target_taxid
         compare_classical_method (bool): Whether to compare results from a classical model assessed in parallel
         favor_cytoplasmic (bool):        Whether to favor cytoplasmic motifs with topological information
+        assign_in_place (bool):          Whether to call assign_homolog_motifs() to apply results to correlated_dict
 
     Returns:
         novel_results (list):            List of novel motif homologs with keys for assigning back to the main dict
@@ -495,6 +510,8 @@ def correlate_homologs_gene(ref_gene_id, correlated_dict, target_taxid, homology
     '''
 
     reference_gene_dict = correlated_dict[ref_gene_id]
+    novel_results = []
+    classical_results = []
 
     # Get the list of Ensembl Gene IDs in the homologous target species
     homolog_gene_ids = homology_target_dict.get(ref_gene_id)
@@ -511,7 +528,10 @@ def correlate_homologs_gene(ref_gene_id, correlated_dict, target_taxid, homology
             if isinstance(ref_motif_seq, str):
                 novel_result = get_result(ref_gene_id, ref_protein_id, ref_novel_num, target_taxid, ref_motif_seq,
                                           homolog_gene_ids, target_taxid_dict, "novel", favor_cytoplasmic)
-                assign_homolog_motifs(novel_result, correlated_dict, folder="novel")
+                if assign_in_place:
+                    assign_homolog_motifs(novel_result, correlated_dict, folder="novel")
+                else:
+                    novel_results.append(novel_result)
 
         if compare_classical_method:
             reference_classical_dict = reference_protein_dict["classical"]
@@ -521,7 +541,13 @@ def correlate_homologs_gene(ref_gene_id, correlated_dict, target_taxid, homology
                     classical_result = get_result(ref_gene_id, ref_protein_id, ref_classical_num, target_taxid,
                                                   ref_motif_seq, homolog_gene_ids, target_taxid_dict, "classical",
                                                   favor_cytoplasmic)
-                    assign_homolog_motifs(classical_result, correlated_dict, folder="classical")
+                    if assign_in_place:
+                        assign_homolog_motifs(classical_result, correlated_dict, folder="classical")
+                    else:
+                        classical_results.append(classical_result)
+
+    if not assign_in_place:
+        return novel_results, classical_results
 
 def make_nested_homologs(correlated_dict, target_taxid):
     # Ensure nested homolog dictionaries exist
@@ -541,8 +567,10 @@ def make_nested_homologs(correlated_dict, target_taxid):
                     if target_taxid not in ref_motif_dict["homologs"].keys():
                         ref_motif_dict["homologs"][target_taxid] = {}
 
+cwd = os.getcwd()
 def correlate_homologs(correlated_dict, target_taxid_paths, homology_target_paths, compare_classical_method = False,
-                       favor_cytoplasmic = True, show_memory_info = False, minimum_free_memory = 1):
+                       favor_cytoplasmic = True, show_memory_info = False, minimum_free_memory = 1,
+                       genes_per_chunk = 5000):
     '''
     Function for correlating results from other taxids with the reference taxid to find homologous motifs
 
@@ -577,28 +605,39 @@ def correlate_homologs(correlated_dict, target_taxid_paths, homology_target_path
             homology_target_dict = pickle.load(file)
         os.remove(homology_target_path)
 
-        homology_target_keys = list(homology_target_dict.keys())
-        ref_gene_ids = list(correlated_dict.keys())
-        genes_with_homologs = [ref_gene_id for ref_gene_id in ref_gene_ids if ref_gene_id in homology_target_keys]
+        if isinstance(homology_target_dict, dict) and isinstance(target_taxid_dict, dict):
+            homology_target_keys = list(homology_target_dict.keys())
+            ref_gene_ids = list(correlated_dict.keys())
+            genes_with_homologs = [ref_gene_id for ref_gene_id in ref_gene_ids if ref_gene_id in homology_target_keys]
 
-        # Ensure nested homolog dictionaries exist
-        print(f"\tCreating sub-dicts to hold homologs..")
-        make_nested_homologs(correlated_dict, target_taxid)
+            if len(genes_with_homologs) > 0:
+                # Ensure nested homolog dictionaries exist
+                print(f"\tCreating sub-dicts to hold homologs..")
+                make_nested_homologs(correlated_dict, target_taxid)
 
-        correlate_gene_partial = partial(correlate_homologs_gene,
-                                         correlated_dict=correlated_dict,
-                                         target_taxid=target_taxid,
-                                         homology_target_dict=homology_target_dict,
-                                         target_taxid_dict=target_taxid_dict,
-                                         compare_classical_method=compare_classical_method,
-                                         favor_cytoplasmic=favor_cytoplasmic)
+                correlate_gene_partial = partial(correlate_homologs_gene,
+                                                 correlated_dict=correlated_dict,
+                                                 target_taxid=target_taxid,
+                                                 homology_target_dict=homology_target_dict,
+                                                 target_taxid_dict=target_taxid_dict,
+                                                 compare_classical_method=compare_classical_method,
+                                                 favor_cytoplasmic=favor_cytoplasmic,
+                                                 assign_in_place=True)
 
-        with trange(len(genes_with_homologs), desc="\tCorrelating...") as pbar:
-            for gene_id in genes_with_homologs:
-                correlate_gene_partial(gene_id)
-                available_mem = check_available_mem(minimum_free_memory, False, show_memory_info, unit="GB",
-                                                    message="\tAvailable memory at end of chunk:")
-                pbar.update()
+                with trange(len(genes_with_homologs), desc="\tCorrelating...") as pbar:
+                    for gene_id in genes_with_homologs:
+                        correlate_gene_partial(gene_id)
+
+                        available_mem = check_available_mem(minimum_free_memory, False, show_memory_info, unit="GB",
+                                                            message="\tAvailable memory at end of chunk:")
+                        pbar.update()
+
+            else:
+                print(f"\t\tNo genes (out of {len(ref_gene_ids)} in taxid {target_taxid}) had known homologs in the "
+                      f"reference species. ")
+
+        else:
+            print(f"No homologs found for {target_taxid}; skipping...")
 
     return correlated_dict
 
@@ -673,30 +712,30 @@ def get_score_tuples(protein_isoform_ids, reference_gene_dict, compare_classical
 
     return (novel_masked_tuples, novel_masked_scores, classical_tuples, classical_scores)
 
-def novel_motif_to_df(df, novel_num_vals_dict, novel_num, compare_classical_method, inplace=True):
+def novel_motif_to_df(df, row_idx, novel_num_vals_dict, novel_num, compare_classical_method, inplace=True):
     # Helper function that assigns novel motifs for a given gene to the correlated dataframe
     
     correlated_df = df if inplace else df.copy()
 
-    correlated_df.at[i, f"{novel_num}_motif"] = novel_num_vals_dict["sequence"]
-    correlated_df.at[i, f"{novel_num}_motif_start"] = novel_num_vals_dict["start"]
+    correlated_df.at[row_idx, f"{novel_num}_motif"] = novel_num_vals_dict["sequence"]
+    correlated_df.at[row_idx, f"{novel_num}_motif_start"] = novel_num_vals_dict["start"]
 
     topo_info = novel_num_vals_dict["topology"]
-    correlated_df.at[i, f"{novel_num}_motif_topology_type"] = topo_info["type"]
-    correlated_df.at[i, f"{novel_num}_motif_topology_description"] = topo_info["description"]
-    correlated_df.at[i, f"{novel_num}_motif_cytoplasmic_accessible"] = topo_info["cytoplasmic_accessible"]
+    correlated_df.at[row_idx, f"{novel_num}_motif_topology_type"] = topo_info["type"]
+    correlated_df.at[row_idx, f"{novel_num}_motif_topology_description"] = topo_info["description"]
+    correlated_df.at[row_idx, f"{novel_num}_motif_cytoplasmic_accessible"] = topo_info["cytoplasmic_accessible"]
 
-    correlated_df.at[i, f"{novel_num}_motif_classification_score"] = novel_num_vals_dict["classification_score"]
-    correlated_df.at[i, f"{novel_num}_motif_binding_score"] = novel_num_vals_dict["binding_score"]
-    correlated_df.at[i, f"{novel_num}_motif_final_call"] = novel_num_vals_dict["final_call"]
-    correlated_df.at[i, f"{novel_num}_motif_specificity_score"] = novel_num_vals_dict["specificity_score"]
+    correlated_df.at[row_idx, f"{novel_num}_motif_classification_score"] = novel_num_vals_dict["classification_score"]
+    correlated_df.at[row_idx, f"{novel_num}_motif_binding_score"] = novel_num_vals_dict["binding_score"]
+    correlated_df.at[row_idx, f"{novel_num}_motif_final_call"] = novel_num_vals_dict["final_call"]
+    correlated_df.at[row_idx, f"{novel_num}_motif_specificity_score"] = novel_num_vals_dict["specificity_score"]
     if compare_classical_method:
-        correlated_df.at[i, f"{novel_num}_motif"] = novel_num_vals_dict["classical_score"]
+        correlated_df.at[row_idx, f"{novel_num}_motif"] = novel_num_vals_dict["classical_score"]
 
     if not inplace:
         return correlated_df
 
-def novel_homologs_to_df(df, novel_homologs, novel_num, inplace=True):
+def novel_homologs_to_df(df, row_idx, novel_homologs, novel_num, inplace=True, compare_classical_method=False):
     # Helper function that assigns best novel motif homolog for a given protein
 
     correlated_df = df if inplace else df.copy()
@@ -706,67 +745,66 @@ def novel_homologs_to_df(df, novel_homologs, novel_num, inplace=True):
         if best_homolog_motif is not None:
             novel_homolog_num = f"{target_taxid}_{novel_num}_homolog"
 
-            correlated_df.at[i, f"{novel_homolog_num}_gene_id"] = best_homolog_motif["homolog_gene_id"]
-            correlated_df.at[i, f"{novel_homolog_num}_gene_name"] = best_homolog_motif["homolog_gene_name"]
-            correlated_df.at[i, f"{novel_homolog_num}_protein_id"] = best_homolog_motif["homolog_protein_id"]
-            correlated_df.at[i, f"{novel_homolog_num}_motif"] = best_homolog_motif["sequence"]
-            correlated_df.at[i, f"{novel_homolog_num}_motif_start"] = best_homolog_motif["start"]
-            correlated_df.at[i, f"{novel_homolog_num}_motif_identity"] = best_homolog_motif["homology_identity"]
+            correlated_df.at[row_idx, f"{novel_homolog_num}_gene_id"] = best_homolog_motif["homolog_gene_id"]
+            correlated_df.at[row_idx, f"{novel_homolog_num}_gene_name"] = best_homolog_motif["homolog_gene_name"]
+            correlated_df.at[row_idx, f"{novel_homolog_num}_protein_id"] = best_homolog_motif["homolog_protein_id"]
+            correlated_df.at[row_idx, f"{novel_homolog_num}_motif"] = best_homolog_motif["sequence"]
+            correlated_df.at[row_idx, f"{novel_homolog_num}_motif_start"] = best_homolog_motif["start"]
+            correlated_df.at[row_idx, f"{novel_homolog_num}_motif_identity"] = best_homolog_motif["homology_identity"]
 
             homolog_topo_info = best_homolog_motif["topology"]
-            correlated_df.at[i, f"{novel_homolog_num}_motif_topology_type"] = homolog_topo_info["type"]
-            correlated_df.at[i, f"{novel_homolog_num}_motif_topology_description"] = homolog_topo_info["description"]
-            correlated_df.at[i, f"{novel_homolog_num}_motif_cytoplasmic_accessible"] = homolog_topo_info["cytoplasmic_accessible"]
+            correlated_df.at[row_idx, f"{novel_homolog_num}_motif_topology_type"] = homolog_topo_info["type"]
+            correlated_df.at[row_idx, f"{novel_homolog_num}_motif_topology_description"] = homolog_topo_info["description"]
+            correlated_df.at[row_idx, f"{novel_homolog_num}_motif_cytoplasmic_accessible"] = homolog_topo_info["cytoplasmic_accessible"]
 
-            correlated_df.at[i, f"{novel_homolog_num}_motif_classification_score"] = best_homolog_motif["classification_score"]
-            correlated_df.at[i, f"{novel_homolog_num}_motif_binding_score"] = best_homolog_motif["binding_score"]
-            correlated_df.at[i, f"{novel_homolog_num}_motif_final_call"] = best_homolog_motif["final_call"]
-            correlated_df.at[i, f"{novel_homolog_num}_motif_specificity_score"] = best_homolog_motif["specificity_score"]
+            correlated_df.at[row_idx, f"{novel_homolog_num}_motif_classification_score"] = best_homolog_motif["classification_score"]
+            correlated_df.at[row_idx, f"{novel_homolog_num}_motif_binding_score"] = best_homolog_motif["binding_score"]
+            correlated_df.at[row_idx, f"{novel_homolog_num}_motif_final_call"] = best_homolog_motif["final_call"]
+            correlated_df.at[row_idx, f"{novel_homolog_num}_motif_specificity_score"] = best_homolog_motif["specificity_score"]
             if compare_classical_method:
-                correlated_df.at[i, f"{novel_homolog_num}_motif"] = best_homolog_motif["classical_score"]
+                correlated_df.at[row_idx, f"{novel_homolog_num}_motif"] = best_homolog_motif["classical_score"]
 
     if not inplace:
         return correlated_df
 
-def classical_motif_to_df(df, classical_num_vals_dict, classical_num, inplace=True):
+def classical_motif_to_df(df, row_idx, classical_num_vals_dict, classical_num, inplace=True):
     # Helper function that assigns classical motifs for a given gene to the correlated dataframe
 
     correlated_df = df if inplace else df.copy()
 
-    correlated_df.at[i, f"{classical_num}_motif"] = classical_num_vals_dict["sequence"]
+    correlated_df.at[row_idx, f"{classical_num}_motif"] = classical_num_vals_dict["sequence"]
 
     topo_info = classical_num_vals_dict["topology"]
-    correlated_df.at[i, f"{classical_num}_motif_topology_type"] = topo_info["type"]
-    correlated_df.at[i, f"{classical_num}_motif_topology_description"] = topo_info["description"]
-    correlated_df.at[i, f"{classical_num}_motif_cytoplasmic_accessible"] = topo_info["cytoplasmic_accessible"]
+    correlated_df.at[row_idx, f"{classical_num}_motif_topology_type"] = topo_info["type"]
+    correlated_df.at[row_idx, f"{classical_num}_motif_topology_description"] = topo_info["description"]
+    correlated_df.at[row_idx, f"{classical_num}_motif_cytoplasmic_accessible"] = topo_info["cytoplasmic_accessible"]
 
-    correlated_df.at[i, f"{classical_num}_motif"] = classical_num_vals_dict["classical_score"]
+    correlated_df.at[row_idx, f"{classical_num}_motif"] = classical_num_vals_dict["classical_score"]
 
     if not inplace:
         return correlated_df
 
-def classical_homologs_to_df(classical_homologs):
-
+def classical_homologs_to_df(classical_homologs, row_idx):
+    # Helper function that assigns best classical motif homolog for a given protein
 
     for target_taxid, best_homolog_motifs in classical_homologs.items():
         if best_homolog_motifs is not None:
-            best_homolog_motif = best_homolog_motifs["best"]
+            best_homolog_motif = best_homolog_motifs.get("best")
             if best_homolog_motif is not None:
                 classical_homolog_num = f"{target_taxid}_{classical_num}_homolog"
 
-                correlated_df.at[i, f"{classical_homolog_num}_gene_id"] = best_homolog_motif["homolog_gene_id"]
-                correlated_df.at[i, f"{classical_homolog_num}_gene_name"] = best_homolog_motif["homolog_gene_name"]
-                correlated_df.at[i, f"{classical_homolog_num}_protein_id"] = best_homolog_motif["homolog_protein_id"]
-                correlated_df.at[i, f"{classical_homolog_num}_motif"] = best_homolog_motif["sequence"]
-                correlated_df.at[i, f"{classical_homolog_num}_motif_identity"] = best_homolog_motif["homology_identity"]
+                correlated_df.at[row_idx, f"{classical_homolog_num}_gene_id"] = best_homolog_motif["homolog_gene_id"]
+                correlated_df.at[row_idx, f"{classical_homolog_num}_gene_name"] = best_homolog_motif["homolog_gene_name"]
+                correlated_df.at[row_idx, f"{classical_homolog_num}_protein_id"] = best_homolog_motif["homolog_protein_id"]
+                correlated_df.at[row_idx, f"{classical_homolog_num}_motif"] = best_homolog_motif["sequence"]
+                correlated_df.at[row_idx, f"{classical_homolog_num}_motif_identity"] = best_homolog_motif["homology_identity"]
 
                 homolog_topo_info = best_homolog_motif["topology"]
-                correlated_df.at[i, f"{classical_homolog_num}_motif_topology_type"] = homolog_topo_info["type"]
-                correlated_df.at[i, f"{classical_homolog_num}_motif_topology_description"] = topo_info["description"]
-                correlated_df.at[i, f"{classical_homolog_num}_motif_cytoplasmic_accessible"] = topo_info[
-                    "cytoplasmic_accessible"]
+                correlated_df.at[row_idx, f"{classical_homolog_num}_motif_topology_type"] = homolog_topo_info["type"]
+                correlated_df.at[row_idx, f"{classical_homolog_num}_motif_topology_description"] = topo_info["description"]
+                correlated_df.at[row_idx, f"{classical_homolog_num}_motif_cytoplasmic_accessible"] = topo_info["cytoplasmic_accessible"]
 
-                correlated_df.at[i, f"{classical_homolog_num}_motif"] = best_homolog_motif["classical_score"]
+                correlated_df.at[row_idx, f"{classical_homolog_num}_motif"] = best_homolog_motif["classical_score"]
 
 def generate_correlated_df(correlated_dict, target_taxids, return_count, compare_classical_method = False,
                            classical_lower_better = True):
@@ -796,45 +834,29 @@ def generate_correlated_df(correlated_dict, target_taxids, return_count, compare
                 # Process novel motifs
                 ref_protein_id, novel_num, masked_binding_score = novel_masked_tuples[ranked_novel_indices[j]]
                 novel_num_vals_dict = reference_gene_dict[ref_protein_id]["novel"][novel_num]
-                novel_motif_to_df(correlated_df, novel_num_vals_dict, novel_num, compare_classical_method, inplace=True)
+                novel_motif_to_df(correlated_df, i, novel_num_vals_dict, novel_num, compare_classical_method, inplace=True)
 
                 # Process novel motif homologs
-                novel_homologs = reference_gene_dict[ref_protein_id][novel_num]["homologs"]
-                novel_homologs_to_df(correlated_df, novel_homologs, novel_num, inplace=True)
+                novel_homologs = reference_gene_dict[ref_protein_id]["novel"][novel_num]["homologs"]
+                novel_homologs_to_df(correlated_df, i, novel_homologs, novel_num, True, compare_classical_method)
 
                 # Process classical motifs
                 if compare_classical_method:
                     ref_protein_id, classical_num, classical_score = classical_tuples[ranked_classical_indices[j]]
                     classical_num_vals_dict = reference_gene_dict[ref_protein_id]["classical"][classical_num]
-                    classical_motif_to_df(correlated_df, classical_num_vals_dict, classical_num, inplace=True)
+                    classical_motif_to_df(correlated_df, i, classical_num_vals_dict, classical_num, inplace=True)
 
                     # Process classical motif homologs
-                    classical_homologs = reference_gene_dict[ref_protein_id][classical_num]["homologs"]
-                    for target_taxid, best_homolog_motifs in classical_homologs.items():
-                        if best_homolog_motifs is not None:
-                            best_homolog_motif = best_homolog_motifs["best"]
-                            if best_homolog_motif is not None:
-                                classical_homolog_num = f"{target_taxid}_{classical_num}_homolog"
-
-                                correlated_df.at[i, f"{classical_homolog_num}_gene_id"] = best_homolog_motif["homolog_gene_id"]
-                                correlated_df.at[i, f"{classical_homolog_num}_gene_name"] = best_homolog_motif["homolog_gene_name"]
-                                correlated_df.at[i, f"{classical_homolog_num}_protein_id"] = best_homolog_motif["homolog_protein_id"]
-                                correlated_df.at[i, f"{classical_homolog_num}_motif"] = best_homolog_motif["sequence"]
-                                correlated_df.at[i, f"{classical_homolog_num}_motif_identity"] = best_homolog_motif["homology_identity"]
-
-                                homolog_topo_info = best_homolog_motif["topology"]
-                                correlated_df.at[i, f"{classical_homolog_num}_motif_topology_type"] = homolog_topo_info["type"]
-                                correlated_df.at[i, f"{classical_homolog_num}_motif_topology_description"] = topo_info["description"]
-                                correlated_df.at[i, f"{classical_homolog_num}_motif_cytoplasmic_accessible"] = topo_info["cytoplasmic_accessible"]
-
-                                correlated_df.at[i, f"{classical_homolog_num}_motif"] = best_homolog_motif["classical_score"]
+                    classical_homologs = reference_gene_dict[ref_protein_id]["classical"][classical_num]["homologs"]
+                    classical_homologs_to_df(classical_homologs, i)
 
             pbar.update()
 
     return correlated_df
 
-def convert_to_json(taxid_dfs, predictor_params=predictor_params, db_path=None, correlate_homology=True,
-                    cache_data=True, memory_debugging=False, correlated_chunk_size=20):
+def convert_to_json(taxid_dfs, predictor_params = predictor_params, db_path = None, correlate_homology = True,
+                    cache_data = True, correlated_chunk_size = 20, return_data_dict = True,
+                    return_correlated_dict = True, return_correlated_df=True):
     # Main function for converting dataset to JSON database
 
     taxids = list(taxid_dfs.keys())
@@ -844,6 +866,11 @@ def convert_to_json(taxid_dfs, predictor_params=predictor_params, db_path=None, 
     return_count = predictor_params["return_count"]
     if not db_path:
         db_path = predictor_params["db_params"]["db_path"]
+    correlated_db_path = db_path.split(".json")[0] + f"_{reference_taxid}_with_homologs.json"
+    correlated_pkl_path = db_path.split(".json")[0] + f"_{reference_taxid}_with_homologs.pkl"
+
+    # Initialize main data containers
+    data_dict, correlated_dict, correlated_df = None, None, None
 
     # Get column names
     ref_gene_col = predictor_params["ref_gene_col"]
@@ -855,20 +882,24 @@ def convert_to_json(taxid_dfs, predictor_params=predictor_params, db_path=None, 
 
     # Get hash of args and check if there is a matching pre-made pickled version
     found_cached = False
-    data_dict = None
     args_hash = hash_args(reference_taxid, taxids, compare_classical_method, classical_lower_better, return_count,
                           db_path, ref_gene_col, alt_ref_gene_cols, ref_gene_name_col, alt_ref_gene_name_cols,
                           ref_protein_col, alt_ref_protein_cols, hash_len=12)
     hashed_pkl_path = db_path.split(".json")[0] + f"_{args_hash}.pkl"
     if cache_data:
         if os.path.exists(hashed_pkl_path):
-            print(f"Found cached data_dict matching given args; reloading...")
-            with open(hashed_pkl_path, "rb") as file:
-                data_dict = pickle.load(file)
-                found_cached = True
-                del taxid_dfs
-                print(f"\tDone!")
+            found_cached = True
+            data_required_for_correlation = correlate_homology and not os.path.exists(correlated_pkl_path)
+            if data_required_for_correlation or return_data_dict:
+                print(f"Found cached data_dict matching given args; reloading...")
+                with open(hashed_pkl_path, "rb") as file:
+                    data_dict = pickle.load(file)
+                    del taxid_dfs
+                    print(f"\tDone!")
+            else:
+                print(f"Cached data_dict matching given args exists.")
 
+    pkl_path = db_path.split(".json")[0] + ".pkl"
     if not found_cached:
         data_dict = parse_data(taxid_dfs, ref_gene_col, ref_gene_name_col, ref_protein_col, alt_ref_gene_cols,
                                alt_ref_gene_name_cols, alt_ref_protein_cols, return_count, compare_classical_method)
@@ -878,7 +909,6 @@ def convert_to_json(taxid_dfs, predictor_params=predictor_params, db_path=None, 
         with open(db_path, "w") as json_file:
             ujson.dump(data_dict, json_file, indent=4)
 
-        pkl_path = db_path.split(".json")[0] + ".pkl"
         print(f"Saving data_dict to {pkl_path} for added speed when reloading")
         with open(pkl_path, "wb") as file:
             pickle.dump(data_dict, file)
@@ -891,53 +921,64 @@ def convert_to_json(taxid_dfs, predictor_params=predictor_params, db_path=None, 
     if correlate_homology:
         target_taxids = list(taxids)
         target_taxids.remove(reference_taxid)
-        homology_target_dicts = map_homologies(reference_taxid, target_taxids)
 
-        # Obtain necessary data from data_dict and then delete it to save memory
-        mem1 = psutil.virtual_memory().available / (1024 ** 3) if memory_debugging else None
-        correlated_dict, chunks = get_correlated_chunks(data_dict, reference_taxid=9606, chunk_size=correlated_chunk_size)
-        target_taxid_paths = dump_target_taxid_dicts(data_dict, reference_taxid = 9606)
-        del data_dict
-        gc.collect()
-        if memory_debugging:
-            mem2 = psutil.virtual_memory().available / (1024 ** 3)
-            print(f"Memory after dumping data_dict: {mem2:.2f} GB (saved {mem2-mem1:.2f} GB)")
+        if os.path.exists(correlated_pkl_path):
+            if not return_data_dict and data_dict is not None:
+                print(f"Releasing data_dict from memory...")
+                data_dict = None
+                gc.collect()
+            print(f"Found cached correlated_dict; reloading...")
+            with open(correlated_pkl_path, "rb") as file:
+                correlated_dict = pickle.load(file)
+        else:
+            # Map homologs
+            homology_target_dicts = map_homologies(reference_taxid, target_taxids)
 
-        homology_target_paths = dump_homology_target_dicts(homology_target_dicts)
-        del homology_target_dicts
-        gc.collect()
-        if memory_debugging:
-            mem3 = psutil.virtual_memory().available / (1024 ** 3)
-            print(f"Memory after dumping homology_target_dicts: {mem3:.2f} GB (saved {mem3-mem2:.2f} GB)")
+            # Obtain necessary data from data_dict and then delete it to save memory
+            correlated_dict, chunks = get_correlated_chunks(data_dict, reference_taxid=9606, chunk_size=correlated_chunk_size)
+            target_taxid_paths = dump_target_taxid_dicts(data_dict, reference_taxid = 9606)
 
-        # Assign the homologous motifs to correlated_dict
-        correlated_dict = correlate_homologs(correlated_dict, target_taxid_paths, homology_target_paths,
-                                             reference_taxid, compare_classical_method)
+            print(f"Releasing data_dict from memory...")
+            data_dict = None
+            gc.collect()
 
-        # Save correlated_dict as JSON and Pickle files
-        correlated_db_path = db_path.split(".json")[0] + "_with_homologs.json"
-        print(f"Saving correlated_dict to {correlated_db_path}")
-        with open(correlated_db_path, "w") as correlated_json_file:
-            ujson.dump(correlated_dict, correlated_json_file, indent=4)
+            homology_target_paths = dump_homology_target_dicts(homology_target_dicts)
+            del homology_target_dicts
 
-        correlated_pkl_path = correlated_db_path.split(".json")[0] + ".pkl"
-        print(f"Saving correlated_dict to {correlated_pkl_path} for added speed when reloading")
-        with open(correlated_pkl_path, "wb") as file:
-            pickle.dump(correlated_dict, file)
-        print(f"Done!")
+            # Assign the homologous motifs to correlated_dict
+            correlated_dict = correlate_homologs(correlated_dict, target_taxid_paths, homology_target_paths,
+                                                 reference_taxid, compare_classical_method)
 
-        target_taxids = list(taxids)[1:]
+            # Save correlated_dict to JSON and Pickle files
+            print(f"Saving correlated_dict to {correlated_pkl_path} as a pickled object...")
+            with open(correlated_pkl_path, "wb") as file:
+                pickle.dump(correlated_dict, file)
+            print(f"\tDone!")
+
+            print(f"Saving correlated_dict to {correlated_db_path} as a readable JSON dump...")
+            dump_large_json(correlated_dict, correlated_db_path, indent=4)
+            print(f"\tDone!")
+
+        print(f"Generating correlated dataframe...")
         correlated_df = generate_correlated_df(correlated_dict, target_taxids, return_count, compare_classical_method,
                                                classical_lower_better)
+        if not return_correlated_dict:
+            print(f"Releasing correlated_dict from memory...")
+            correlated_dict = None
+            gc.collect()
+
         correlated_csv_path = correlated_db_path.split(".json")[0] + ".csv"
         correlated_df.to_csv(correlated_csv_path)
+        print(f"Saved correlated_df to {correlated_csv_path}")
+        if not return_correlated_df:
+            print(f"Releasing correlated_df from memory...")
+            correlated_df = None
+            gc.collect()
 
-        # Reload data_dict so that it can be returned
-        data_dict_path = db_path.split(".json")[0] + ".pkl"
-        with open(data_dict_path, "rb") as file:
-            data_dict = pickle.load(file)
-
-    else:
-        correlated_dict, correlated_df = None, None
+        # Reload data_dict so that it can be returned, if necessary
+        if return_data_dict and data_dict is None:
+            print(f"Reloading data_dict...")
+            with open(pkl_path, "rb") as file:
+                data_dict = pickle.load(file)
 
     return data_dict, correlated_dict, correlated_df

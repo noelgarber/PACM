@@ -266,10 +266,11 @@ def process_existing(protein_seqs_paths, keys, df_chunk_counts, topological_doma
         with open(pickling_path, "rb") as f:
             data_dfs, taxid_dfs, output_paths = pickle.load(f)
 
-    data_dict, correlated_homolog_dict, correlated_homolog_df = convert_to_json(taxid_dfs, predictor_params,
-                                                                                correlate_homology=True)
+    data_dict, correlated_dict, correlated_df = convert_to_json(taxid_dfs, predictor_params, correlate_homology=True,
+                                                                return_data_dict=False, return_correlated_dict=False,
+                                                                return_correlated_df=False)
 
-    return output_paths, correlated_homolog_df
+    return output_paths, correlated_df
 
 cwd = os.getcwd()
 def main(predictor_params = predictor_params):
